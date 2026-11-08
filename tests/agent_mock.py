@@ -1,0 +1,375 @@
+"""In-memory stand-in for the FM Tactics Lab agent API used by tests."""
+from __future__ import annotations
+
+import json
+import secrets
+import threading
+import time
+from datetime import datetime
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import parse_qs, urlparse
+
+
+def make_scenario(first="主队", second="客队"):
+    positions = ["GK", "LB", "CB", "CB", "RB", "DM", "CM", "CM", "LW", "ST", "RW"]
+    positions_oop = ["GK", "LB", "CB", "CB", "RB", "DM", "CM", "CM", "LM", "ST", "RM"]
+
+    def team(name, positions_value):
+        players = [{
+            "name": f"{name}球员{i + 1}",
+            "native_id": i + 1,
+            "attributes": [12] * 69,
+            "native_profile": {},
+        } for i in range(26)]
+        plans = []
+        for phase, names in (("in_possession", positions), ("out_of_possession", positions_oop)):
+            assignments = [{
+                "position": names[index],
+                "role": f"role_{phase}_{index}",
+                "duty": "0",
+                "instructions": {},
+                "target_player": 255,
+                "target_position": 0,
+            } for index in range(11)]
+            plans.append({"phase": phase, "team_instructions": {}, "assignments": assignments})
+        return {
+            "name": name,
+            "tactic_name": "测试战术",
+            "mentality": 3,
+            "phase_plans": plans,
+            "lineup": list(range(11)),
+            "players": players,
+            "roster_size": 11,
+            "captains": [],
+            "takers": {},
+        }
+
+    return {
+        "schema": 4,
+        "rules": "game",
+        "fixture": "bundled_match_pkm",
+        "teams": [team(first, positions), team(second, positions)],
+    }
+
+
+def make_run(variant, seed, sequence):
+    return {
+        "variant": variant,
+        "seed": seed,
+        "sequence": sequence,
+        "result": {"score": [1, 0], "full_match_completed": True, "event": "natural_match_finished"},
+        "statistics": {"teams": [{"xg": 1.2, "shots": 8, "possession": 55}, {"xg": 0.7, "shots": 5, "possession": 45}]},
+        "events": {"collected": True, "goals": [], "cards": []},
+        "verified": True,
+        "attempts": 1,
+        "elapsed_seconds": 1.5,
+        "native_elapsed_seconds": 1.2,
+        "log": f"{sequence:04d}_{variant}_seed_{seed}.jsonl",
+    }
+
+
+class _Handler(BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.0"
+
+    def log_message(self, *args):
+        pass
+
+    @property
+    def state(self):
+        return self.server.state
+
+    def _send(self, status, payload, headers=None):
+        body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        headers = headers or {}
+        for key, value in headers.items():
+            self.send_header(key, value)
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _send_raw(self, status, body, kind="application/x-ndjson; charset=utf-8"):
+        if isinstance(body, str):
+            body = body.encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", kind)
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _error(self, status, code, message):
+        self._send(status, {"error": {"code": code, "message": message,
+                                      "details": {}, "retriable": False}})
+
+    def _read_body(self):
+        length = int(self.headers.get("Content-Length") or 0)
+        if not length:
+            return {}
+        raw = self.rfile.read(length)
+        try:
+            return json.loads(raw.decode("utf-8"))
+        except (ValueError, UnicodeDecodeError):
+            return {}
+
+    def _auth(self):
+        token = self.state.token
+        header = self.headers.get("Authorization") or ""
+        if not token or header == "Bearer " + token:
+            return True
+        self._error(401, "unauthorized", "缺少或错误 token")
+        return False
+
+    def do_GET(self):
+        if not self._auth():
+            return
+        parsed = urlparse(self.path)
+        path = parsed.path
+        query = {key: values[0] for key, values in parse_qs(parsed.query).items()}
+        self.state.record("GET", path, query, None, dict(self.headers))
+        if path == "/api/agent/v1/health":
+            return self._send(200, {"ok": True, "pid": 1, "server_version": "test"})
+        if path == "/api/agent/v1/manifest":
+            return self._send(200, {
+                "api": "fm27lab/v1", "server_version": "test", "adapter_version": "test",
+                "scenario_schema": 3, "scenario_view_schema": 4, "batch_schema": 1,
+                "capabilities": ["free_run", "career_save", "comparison", "fmf",
+                                 "repair", "resume", "cancel", "idempotency"],
+                "limits": {"max_seeds": 10000, "max_workers": 4, "max_opponents": 40,
+                           "max_career_count": 10000, "max_body_bytes": 1500000,
+                           "max_import_bytes": 6000000, "max_draft_bytes": 5242880},
+                "schemas": "/api/agent/v1/schemas",
+            })
+        if path == "/api/agent/v1/status":
+            return self._send(200, {
+                "engine_compatibility": {"compatible": True, "can_simulate": True,
+                                         "message": "ok"},
+                "active_job": None, "save_active": None,
+                "server": {"pid": 1, "port": self.state.port, "api": "fm27lab/v1"},
+            })
+        if path == "/api/agent/v1/catalog":
+            return self._send(200, {"catalog": {"roles": [], "positions": []}})
+        if path == "/api/agent/v1/defaults":
+            return self._send(200, {"scenario": make_scenario()})
+        if path == "/api/agent/v1/schemas":
+            return self._send(200, {"tools": {"lab_status": {}}})
+        if path == "/api/agent/v1/jobs":
+            return self._send(200, self.state.jobs_page(query))
+        parts = path.strip("/").split("/")
+        if len(parts) >= 5 and parts[:4] == ["api", "agent", "v1", "jobs"]:
+            job_id = parts[4]
+            job = self.state.jobs.get(job_id)
+            if job is None:
+                return self._error(404, "not_found", "任务不存在")
+            if len(parts) == 5:
+                return self._send(200, self.state.job_detail(job, query))
+            if len(parts) == 6 and parts[5] == "export":
+                return self._send(200, self.state.job_export(job))
+            if len(parts) == 7 and parts[5] == "logs":
+                return self._send_raw(200, json.dumps({"event": "native_timings",
+                                                       "log": parts[6]}) + "\n")
+        if parts[:4] == ["api", "agent", "v1", "career"] and parts[4:] == ["status"]:
+            return self._send(200, {"status": "complete", "id": query.get("id") or "a" * 16,
+                                    "date": "2026-01-01", "build": "test",
+                                    "managed": [], "clubs": []})
+        return self._error(404, "unknown_endpoint", "路径不存在")
+
+    def do_POST(self):
+        if not self._auth():
+            return
+        parsed = urlparse(self.path)
+        path = parsed.path
+        body = self._read_body()
+        self.state.record("POST", path, {}, body, dict(self.headers))
+        parts = path.strip("/").split("/")
+        if path == "/api/agent/v1/runs":
+            status, payload = self.state.create_job(body, "single")
+            return self._send(status, payload)
+        if path == "/api/agent/v1/validate":
+            return self._send(200, {"scenario": body.get("scenario"), "records": 30})
+        if path == "/api/agent/v1/repair":
+            return self._send(200, {"scenario": body.get("scenario"), "changes": []})
+        if path == "/api/agent/v1/phase-plan":
+            return self._send(200, {"scenario": body.get("scenario")})
+        if path == "/api/agent/v1/engine/select":
+            return self._send(200, {"compatible": True, "can_simulate": True,
+                                    "message": "ok", "selected_game_root": body.get("game_root")})
+        if path == "/api/agent/v1/career/import":
+            return self._send(202, {"id": "a" * 16, "reused": False})
+        if path == "/api/agent/v1/career/status":
+            return self._send(200, {"status": "complete", "id": "a" * 16,
+                                    "date": "2026-01-01", "build": "test",
+                                    "managed": [], "clubs": []})
+        if path == "/api/agent/v1/career/team":
+            return self._send(200, {
+                "players": [{"uid": 1, "name": "球员一", "positions": [1], "ca": 120}],
+                "tactics": [{"index": 0, "name": "战术一", "team_id": 1, "available": True}],
+                "selections": [], "source_date": "2026-01-01",
+            })
+        if path == "/api/agent/v1/career/load":
+            return self._send(200, {"scenario": make_scenario(), "source": {
+                "save_id": body.get("save_id"), "club_uid": body.get("club_uid"),
+                "tactic_index": body.get("tactic_index"), "tactic_name": "战术一"}})
+        if path == "/api/agent/v1/career/selection":
+            return self._send(200, {"scenario": body.get("scenario")})
+        if path == "/api/agent/v1/career/opponents":
+            return self._send(200, {"status": "complete", "opponents": [{
+                "key": "coach:1", "name": "对手", "side": 1, "available": True,
+                "source_kind": "coach_preference_preset"}]})
+        if path in ("/api/agent/v1/career/opponents/cancel",
+                    "/api/agent/v1/career/import/cancel"):
+            return self._send(200, {"accepted": True})
+        if path == "/api/agent/v1/career/preview":
+            return self._send(200, {"team": make_scenario()["teams"][1],
+                                    "source": {"key": body.get("key")}})
+        if path == "/api/agent/v1/career/run":
+            status, payload = self.state.create_job(body, "career")
+            return self._send(status, payload)
+        if path == "/api/agent/v1/fmf/import":
+            return self._send(200, {"scenario": body.get("scenario"),
+                                    "report": {"native_roundtrip_verified": True}})
+        if path == "/api/agent/v1/fmf/export":
+            return self._send(200, {"filename": "tactic.fmf", "path": "/tmp/tactic.fmf",
+                                    "sha256": "0" * 64, "report": {"native_roundtrip_verified": True}})
+        if path == "/api/agent/v1/setpiece/export":
+            return self._send(200, {"filename": "setpiece.fmf", "path": "/tmp/setpiece.fmf",
+                                    "sha256": "0" * 64, "report": {"native_roundtrip_verified": True}})
+        if path == "/api/agent/v1/shutdown":
+            return self._send(202, {"accepted": True})
+        if len(parts) >= 6 and parts[:4] == ["api", "agent", "v1", "jobs"]:
+            job_id = parts[4]
+            action = parts[5]
+            if job_id not in self.state.jobs:
+                return self._error(404, "not_found", "任务不存在")
+            if action == "cancel":
+                return self._send(200, {"accepted": True})
+            if action == "resume":
+                return self._send(202, {"id": job_id})
+            if action == "rename":
+                return self._send(200, {"id": job_id, "name": body.get("name")})
+            if action == "delete":
+                self.state.jobs.pop(job_id, None)
+                return self._send(200, {"id": job_id})
+        return self._error(404, "unknown_endpoint", "路径不存在")
+
+
+class MockAgentServer:
+    def __init__(self, token=None, busy=False, slow_jobs=False):
+        self.token = token if token is not None else secrets.token_hex(16)
+        self.busy = busy
+        self.slow_jobs = slow_jobs
+        self.jobs = {}
+        self.calls = []
+        self.lock = threading.Lock()
+        self.next_job = 1
+        self.httpd = ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
+        self.httpd.state = self
+        self.port = self.httpd.server_address[1]
+        self.url = f"http://127.0.0.1:{self.port}"
+        self.thread = threading.Thread(target=self.httpd.serve_forever, daemon=True)
+
+    def start(self):
+        self.thread.start()
+        return self
+
+    def stop(self):
+        self.httpd.shutdown()
+        self.httpd.server_close()
+        self.thread.join(timeout=5)
+
+    def record(self, method, path, query, body, headers):
+        with self.lock:
+            self.calls.append({"method": method, "path": path, "query": query,
+                               "body": body, "headers": headers})
+
+    def create_job(self, body, mode):
+        if self.busy:
+            return self._error_response(409, "engine_busy", "已有比赛运行中")
+        job_id = f"job{self.next_job:08d}"
+        self.next_job += 1
+        if mode == "career":
+            total = len(body.get("opponents") or []) * int(body.get("count") or 0)
+        else:
+            total = len(body.get("seeds") or []) * (2 if body.get("reference") else 1)
+        scenarios = [("B", 1)]
+        if body.get("reference"):
+            scenarios.insert(0, ("A", 1))
+        runs = []
+        sequence = 0
+        for seed in body.get("seeds") or []:
+            for variant, _ in scenarios:
+                sequence += 1
+                runs.append(make_run(variant, seed, sequence))
+        job = {
+            "id": job_id,
+            "name": body.get("name") or "测试实验",
+            "status": "complete",
+            "completed": len(runs),
+            "total": total or len(runs),
+            "runs": runs,
+            "failures": [],
+            "mode": "comparison" if body.get("reference") or mode == "career" else "single",
+            "created": time.time(),
+            "workers": body.get("workers") or 1,
+            "event_details": body.get("event_details", True),
+            "variant_names": {variant: "方案" + variant for variant, _ in scenarios},
+            "team_names": {},
+            "metrics": {},
+            "paired": {"n": 0, "goal_difference_delta": None},
+            "eta_seconds": 0,
+            "matches_per_minute": 0,
+        }
+        self.jobs[job_id] = job
+        if self.slow_jobs:
+            job.update(status="running", completed=0)
+            def finish():
+                time.sleep(0.25)
+                job.update(status="complete", completed=job["total"])
+            threading.Thread(target=finish, daemon=True).start()
+        return self._send_response(202, {"id": job_id, "total": job["total"],
+                                         "workers": body.get("workers") or 1})
+
+    def _send_response(self, status, payload):
+        return status, payload
+
+    def _error_response(self, status, code, message):
+        return status, {"error": {"code": code, "message": message,
+                                  "details": {}, "retriable": False}}
+
+    def jobs_page(self, query):
+        limit = int(query.get("limit") or 50)
+        offset = int(query.get("offset") or 0)
+        status = query.get("status")
+        values = [job for job in self.jobs.values() if not status or job["status"] == status]
+        values.sort(key=lambda job: job.get("created", 0))
+        page = values[offset:offset + limit]
+        return {"jobs": page, "total": len(values), "limit": limit, "offset": offset,
+                "next_offset": offset + limit if offset + limit < len(values) else None}
+
+    def job_detail(self, job, query):
+        runs = list(job.get("runs") or [])
+        runs.sort(key=lambda run: run.get("sequence") or 0)
+        variant = query.get("variant")
+        if variant:
+            runs = [run for run in runs if run.get("variant") == variant]
+        total = len(runs)
+        offset = int(query.get("runs_offset") or 0)
+        limit = int(query.get("runs_limit") or total or 50)
+        page = runs[offset:offset + limit]
+        value = dict(job)
+        value["runs"] = page
+        value["runs_total"] = total
+        value["runs_truncated"] = offset + len(page) < total
+        return value
+
+    def job_export(self, job):
+        return {"summary": {key: value for key, value in job.items() if key != "runs"},
+                "scenarios": {"A": make_scenario("对照主队", "对照客队"),
+                              "B": make_scenario()},
+                "provenance": {"seeds": [1], "fixture_sha256": "0" * 64}}
+
+
+def start_server(**kwargs):
+    return MockAgentServer(**kwargs).start()
