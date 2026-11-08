@@ -50,7 +50,8 @@ internal static class Program {
         }
         File.WriteAllText(ready,hash);return root;
     }
-    static string ReadUrl(string address){var request=(HttpWebRequest)WebRequest.Create(address);request.Timeout=1200;request.Proxy=null;using(var response=request.GetResponse())using(var reader=new StreamReader(response.GetResponseStream(),Encoding.UTF8))return reader.ReadToEnd();}
+    static string EndpointToken(){try{string path=Path.Combine(dataRoot,"agent","endpoint.json");if(!File.Exists(path))return null;var match=System.Text.RegularExpressions.Regex.Match(File.ReadAllText(path),"\"token\"\\s*:\\s*\"([0-9a-f]+)\"");return match.Success?match.Groups[1].Value:null;}catch(IOException){return null;}catch(UnauthorizedAccessException){return null;}}
+    static string ReadUrl(string address){var request=(HttpWebRequest)WebRequest.Create(address);request.Timeout=1200;request.Proxy=null;string token=EndpointToken();if(!String.IsNullOrEmpty(token))request.Headers["Authorization"]="Bearer "+token;using(var response=request.GetResponse())using(var reader=new StreamReader(response.GetResponseStream(),Encoding.UTF8))return reader.ReadToEnd();}
     static int ChoosePort(int requested){try{var listener=new TcpListener(IPAddress.Loopback,requested);listener.Start();int port=((IPEndPoint)listener.LocalEndpoint).Port;listener.Stop();return port;}catch(SocketException){var listener=new TcpListener(IPAddress.Loopback,0);listener.Start();int port=((IPEndPoint)listener.LocalEndpoint).Port;listener.Stop();return port;}}
     static void StartServer(string release,string engine,int port){
         Directory.CreateDirectory(Path.Combine(dataRoot,"logs"));string stamp=DateTime.Now.ToString("yyyyMMdd_HHmmss_fff");output=new StreamWriter(Path.Combine(dataRoot,"logs",stamp+".stdout.log"),false,Encoding.UTF8);error=new StreamWriter(Path.Combine(dataRoot,"logs",stamp+".stderr.log"),false,Encoding.UTF8);output.AutoFlush=error.AutoFlush=true;
