@@ -85,7 +85,29 @@ Mock 服务端位于 tests/agent_mock.py，只实现协议形状，不实现业�
 - 引擎不兼容：按现有引擎设置选择游戏根目录，或按 TROUBLESHOOTING.md 检查构建匹配。
 - MCP 无响应：确认 sidecar 的 stderr 日志；stdout 只承载协议消息。
 
-## 7. 已知限制
+## 7. 本机实测记录
+
+记录时间：2026-11-08，WSL2 开发环境 + Windows FM27 实机。
+
+| 项目 | 结果 |
+| --- | --- |
+| 引擎 | 安装目录 game_plugin.dll SHA256 与适配器参考值 252ff8fb... 一致，状态为 verified、can_simulate |
+| 运行时 | Windows Python 3.12.12；使用官方 v1108.5 发布 payload 的引擎工作区与本地临时数据目录 |
+| 自由推演 | 2 场完成，0 失败；单场吞吐约 23.8 场/分钟 |
+| 对比推演 | 2 种子 × A/B 共 4 场完成；A 与 B 指标独立；paired 差值为 0.5 |
+| FMF | 导出 1728 字节，native_roundtrip_verified 为真；导入消耗 1376 字节，records 369 |
+| 定位球 | 导出 451 字节，native_roundtrip_verified 为真 |
+| MCP | initialize 协商 2025-06-18，serverInfo 为 fm27lab-mcp，26 个工具，lab_status 无错误，manifest 资源可读，3 个 prompt |
+| 鉴权 | 无 token 401，错误 Host 403，正确 token 200；Cookie 访问旧 /api/catalog 200，无凭证 401 |
+| UI | GET / 与 /app.js 均 200，Set-Cookie 正常返回 |
+| 取消 | 8 场批次取消后状态 cancelled，已完成 0 |
+| 关闭 | shutdown 返回 202，进程退出，endpoint.json 删除 |
+| Launcher | 修改后的 Launcher.cs 通过 Windows csc x64 编译 |
+| 未覆盖 | 无 FM27 存档，career 导入未做实机验证；headless 启动只做编译验证；浏览器完整 UI 流程未跑 |
+
+说明：源码运行在 WSL 文件系统时，原生宿主若经 UNC 路径读取 match.pkm 会退出 104；本次验收将引擎工作区与数据目录放在 Windows 本地路径下完成。打包版使用 Windows 本地路径，不受影响。
+
+## 8. 已知限制
 
 - 当前开发环境为 Linux，无法执行原生比赛；A4、A5、A8、A15 必须在 Windows 目标机完成。
 - 没有单场耗时基准，首次验收应从小批量开始。
