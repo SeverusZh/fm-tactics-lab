@@ -2,6 +2,7 @@
 
 状态：设计草案 v1，待评审
 适用范围：本机 Windows 部署；MCP 为主、CLI 为辅；首期核心能力
+快速启动：[AGENT_QUICKSTART.md](AGENT_QUICKSTART.md)
 依据：v1108.5 源码静态分析；控制面与推演内核的逐行证据保存在本机 .team 目录，不随仓库分发
 
 ## 决策基线
