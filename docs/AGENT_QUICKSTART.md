@@ -1,159 +1,206 @@
 # FM Tactics Lab Agent 快速启动
 
-状态：本机已安装并注册到 DSH
-适用范围：Windows + WSL 的 DSH 环境
+本文面向“在本机运行 FM Tactics Lab，并让 AI Agent 通过 CLI 或 MCP 调用”的通用部署。适用于 Windows x64，FM27 已安装，且本机已准备好工具运行时或源码构建环境。
 
-## 1. 已安装内容
+## 1. 能做什么
 
-运行时目录：
+- 查询引擎兼容状态与批次限制。
+- 从默认场景、FM27 存档、FMF 战术文件或已有实验创建草案。
+- 语义化修改双阶段战术、角色、职责、定位球之外的战术层设置。
+- 提交自由推演或存档对战批次，按种子运行并对比。
+- 等待、取消、续跑、分页读取结果与导出 CSV。
+- 通过 MCP 暴露同一套能力给任意支持 stdio 的 Agent 客户端。
 
-```text
-%LOCALAPPDATA%\FM27TacticsDesktop\agent-runtime
-```
+## 2. 前置条件
 
-| 路径 | 内容 |
-| --- | --- |
-| engine | v1108.5 原生引擎工作区，含 FM27Simulator.exe 与 match.pkm |
-| source | Agent 服务端、fm27lab 包、CLI、MCP sidecar 与 fmsave vendor |
-| data | 实验、存档库、导出与 agent/endpoint.json |
-| logs | 服务端 stdout 与 stderr 日志 |
-| runtime-env.cmd | 路径、端口、游戏根目录与 Python 环境 |
-| start-agent.cmd | 启动后台服务 |
-| stop-agent.ps1 | 优雅停止服务 |
-| fm27lab.cmd | CLI 入口 |
-| fm27lab-mcp.cmd | MCP sidecar 入口，带自动启动 |
+- Windows x64，Python 3.12；桌面版可使用自带运行时。
+- 本机已安装可正常启动的 FM27；Steam 已登录。
+- 已准备工具运行时：
+  - 源码版：按 docs/DEVELOPMENT.md 准备 private 资产并构建 FM27Simulator.exe。
+  - 打包版：使用包含 Agent 接入层的新构建；旧版发布包不包含该层。
+- 引擎工作区必须位于 Windows 本地磁盘；不要把引擎资产放在 WSL 的 UNC 路径，原生宿主读取 match.pkm 会失败。
 
-DSH 中已注册的 MCP 名称：fm27lab。注册命令为 Windows cmd.exe 调用 fm27lab-mcp.cmd。当前为 live，工具数 26。
+## 3. 启动应用
 
-## 2. 启动与停止
-
-通常不需要手动启动。DSH 首次调用 fm27lab 工具时，fm27lab-mcp.cmd 会：
-
-1. 检查 data/agent/endpoint.json 是否对应健康服务。
-2. 如未运行，用 Windows 本地引擎与 Python 在 18770 端口后台启动服务。
-3. 等待发现文件就绪，再启动 MCP sidecar。
-
-手动启动：
-
-```bat
-%LOCALAPPDATA%\FM27TacticsDesktop\agent-runtime\start-agent.cmd
-```
-
-查看状态：
-
-```bat
-%LOCALAPPDATA%\FM27TacticsDesktop\agent-runtime\fm27lab.cmd status --json
-```
-
-停止：
+### 3.1 源码版
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File "%LOCALAPPDATA%\FM27TacticsDesktop\agent-runtime\stop-agent.ps1"
+py -3.12 -m venv .venv
+.venv\Scripts\python.exe -m pip install -r requirements.txt
+.venv\Scripts\python.exe scripts/prepare_private.py --release-exe "<官方发布 EXE>"
+.venv\Scripts\python.exe scripts/build_native.py --reference-dll "<game-root>\fm_Data\Plugins\x86_64\game_plugin.dll"
+.venv\Scripts\python.exe scripts/run.py --game-root "<game-root>"
 ```
 
-服务只监听 127.0.0.1:18770；端口变化时只需修改 start-agent.cmd。
+源码版的数据目录默认为仓库下 data，引擎工作区默认为 private/engine。启动后服务监听 127.0.0.1 的可用端口。
 
-## 3. 在 DSH 中使用
+### 3.2 打包版
 
-直接描述任务即可，例如：
+启动桌面 EXE，按提示选择包含 fm_Data 与 shared 的游戏根目录。数据目录默认为 %LOCALAPPDATA%\FM27TacticsDesktop。
 
-- 先检查引擎状态，再创建默认草案，把客队心态调到 5，跑 10 场对比。
-- 从 F:\fm\fm27\games 下的存档导入球队，选一个对手跑主客场 2 场。
-- 把当前草案导出为 FMF。
+### 3.3 无头模式
 
-推荐调用顺序：
+打包版可加 --headless 参数，不显示托盘与浏览器，服务常驻直到收到 shutdown 或进程结束：
+
+```bat
+"<工具 EXE>" --headless --game-root "<game-root>" --data-dir "<dataDir>"
+```
+
+## 4. 发现文件与入口
+
+服务启动后生成：
+
+```text
+<dataDir>\agent\endpoint.json
+<dataDir>\agent\fm27lab.cmd
+<dataDir>\agent\mcp.json
+```
+
+endpoint.json 包含：
+
+- url：本机回环地址与端口
+- token：本次启动的访问令牌，重启后轮换
+- data_dir、engine_root、game_root
+- 版本、能力位与批次限制
+
+所有 Agent 接口只监听回环地址。除 health、status、desktop-presence 与静态页面外，其余接口需要 Bearer token 或同源 Cookie。
+
+## 5. CLI
+
+在 Windows 上运行生成的 fm27lab.cmd：
+
+```bat
+"%LOCALAPPDATA%\FM27TacticsDesktop\agent\fm27lab.cmd" status --json
+"%LOCALAPPDATA%\FM27TacticsDesktop\agent\fm27lab.cmd" draft create --from default --name baseline
+"%LOCALAPPDATA%\FM27TacticsDesktop\agent\fm27lab.cmd" draft edit <draft_id> --op mentality --team B --value 5
+"%LOCALAPPDATA%\FM27TacticsDesktop\agent\fm27lab.cmd" run --draft <draft_id> --seeds 1-10 --workers 2 --wait --json
+"%LOCALAPPDATA%\FM27TacticsDesktop\agent\fm27lab.cmd" results summary <job_id> --json
+```
+
+常用命令组：
+
+| 命令 | 用途 |
+| --- | --- |
+| status | 清单、引擎与活动任务 |
+| engine select | 设置游戏根并预检 |
+| draft create/list/show/edit/validate/delete | 草案工作区 |
+| run | 自由推演批次，可带 baseline 对照 |
+| job list/get/wait/action/logs/export | 任务管理 |
+| results summary/matches/match/csv | 结果读取 |
+| career import/status/team/opponents/preview/cancel/run | 存档对战 |
+| fmf import/export、setpiece export | 战术文件往返 |
+
+退出码：
+
+| 码 | 含义 |
+| --- | --- |
+| 0 | 成功 |
+| 2 | 用法错误 |
+| 3 | 应用未运行或发现文件缺失 |
+| 4 | 鉴权失败 |
+| 5 | 引擎不可用或不兼容 |
+| 6 | 校验失败 |
+| 7 | 引擎忙或状态冲突 |
+| 8 | 资源不存在 |
+| 9 | 任务失败、取消或中断 |
+| 10 | 内部错误 |
+
+## 6. MCP 接入
+
+服务端生成 <dataDir>\agent\mcp.json。把其中配置复制到支持 stdio 的 MCP 客户端，或手动配置：
+
+```json
+{
+  "mcpServers": {
+    "fm27lab": {
+      "command": "<dataDir>\\agent\\fm27lab.cmd",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+说明：
+
+- 命令必须是 Windows 本机绝对路径；fm27lab.cmd 会使用应用所在运行时启动 sidecar。
+- 先启动应用，再启动 MCP 客户端；应用未运行时工具返回 app_unavailable。
+- 客户端与服务必须能访问同一个 127.0.0.1 回环实例。跨 WSL 或跨机器时，需要自行提供端口转发或 Windows 侧启动包装。
+- 也可直接使用 Python 入口：
+
+```json
+{
+  "mcpServers": {
+    "fm27lab": {
+      "command": "<python.exe>",
+      "args": ["-m", "fm27_agent", "mcp"],
+      "env": {"FM27LAB_DATA": "<dataDir>"}
+    }
+  }
+}
+```
+
+能力面：
+
+- 26 个工具：状态、引擎、草案、存档、运行、任务、结果与战术文件。
+- 3 个静态资源与 5 个资源模板：manifest、catalog、status、draft、job、save。
+- 3 个 prompt：单变量战术实验、基线对比、多对手扫描。
+- 支持进度通知、取消与结构化错误。
+
+## 7. 典型工作流
+
+自由模式对比：
 
 ```text
 lab_status
-draft_create / draft_edit / draft_validate
-experiment_run 或 career_run
+draft_create source=default name=baseline
+draft_create source=default name=changed
+draft_edit changed op=team_instruction ...
+draft_validate changed
+experiment_run draft_id=changed baseline_draft_id=baseline seeds={start:101,count:10} workers=2 event_details=false
 job_wait
-results_summary / results_matches / results_csv
+results_summary
 ```
 
-应用未启动时工具会返回 app_unavailable；再次调用会重试，或先运行 start-agent.cmd。
-
-资源：fm27://manifest、fm27://catalog、fm27://status，以及 draft、job、save 模板。
-Prompt：test_tactic_change、compare_baseline_vs_current、opponent_sweep。
-
-## 4. 命令行
-
-Windows 下直接运行：
-
-```bat
-%LOCALAPPDATA%\FM27TacticsDesktop\agent-runtime\fm27lab.cmd status --json
-%LOCALAPPDATA%\FM27TacticsDesktop\agent-runtime\fm27lab.cmd draft create --from default --name test
-%LOCALAPPDATA%\FM27TacticsDesktop\agent-runtime\fm27lab.cmd draft edit <draft_id> --op mentality --team B --value 5
-%LOCALAPPDATA%\FM27TacticsDesktop\agent-runtime\fm27lab.cmd run --draft <draft_id> --seeds 1-10 --workers 2 --wait --json
-%LOCALAPPDATA%\FM27TacticsDesktop\agent-runtime\fm27lab.cmd results summary <job_id> --json
-```
-
-WSL 下通过 cmd.exe 调用：
-
-```bash
-cmd.exe /c 'C:\<Windows 用户目录>\AppData\Local\FM27TacticsDesktop\agent-runtime\fm27lab.cmd status --json'
-```
-
-存档对战示例：
-
-```bat
-fm27lab.cmd career import --save "F:\fm\fm27\games\auto save (v03).fm" --wait
-fm27lab.cmd career status --save-id <save_id>
-fm27lab.cmd career team --save-id <save_id> --club <club_uid>
-fm27lab.cmd draft create --from save --save-id <save_id> --club <club_uid> --tactic 0
-fm27lab.cmd career opponents --save-id <save_id> --club <club_uid> --wait
-fm27lab.cmd career preview --save-id <save_id> --club <club_uid> --key coach:587 --draft <draft_id>
-fm27lab.cmd career run --save-id <save_id> --club <club_uid> --draft <draft_id> --opponents coach:587 --count 2 --first-seed 1 --workers 1 --wait
-```
-
-## 5. 数据与日志
-
-- 实验结果：data\runs
-- 存档缓存：data\save_library
-- 导出文件：data\agent\exports
-- 发现文件：data\agent\endpoint.json，token 每次启动轮换
-- 服务日志：logs\server.out.log 与 logs\server.err.log
-
-## 6. 引擎与游戏路径
-
-游戏根目录写在 runtime-env.cmd 中，当前为：
+存档对战：
 
 ```text
-D:\Program Files (x86)\Steam\steamapps\common\Football Manager 27
+career_import save_path="<存档路径>" wait=true
+career_status
+career_team save_id club_uid
+draft_create source=save save_id club_uid tactic_index
+draft_validate
+career_opponents save_id club_uid wait=true
+career_preview save_id club_uid key draft_id
+career_run save_id club_uid draft_id opponents=[key] count=2 first_seed=1 workers=1
+job_wait
+results_summary
 ```
 
-移动游戏或换机器时修改该行并重启服务。引擎工作区必须位于 Windows 本地磁盘；不要把 engine 放到 WSL 的 UNC 路径，否则原生宿主读取 match.pkm 会退出 104。
+## 8. 数据、日志与安全
 
-## 7. 更新与卸载
+- 实验：<dataDir>\runs
+- 存档缓存：<dataDir>\save_library
+- 导出：<dataDir>\agent\exports
+- 日志：应用日志目录与 <dataDir>\logs
+- endpoint.json 含 token，应保留在用户目录；服务重启后 token 轮换。
+- 服务只监听回环地址；不要将端口转发到公网。
+- 存档导入为只读；原始 .fm 不会被修改。
 
-更新 Agent 代码：
-
-1. 停止服务。
-2. 用仓库 src 覆盖 runtime\source，保留 source\vendor。
-3. 如引擎变化，覆盖 runtime\engine。
-4. 重新启动；DSH 注册无需变化。
-
-卸载：
-
-1. 在 DSH 的 MCP 设置中移除 fm27lab。
-2. 运行 stop-agent.ps1。
-3. 删除 agent-runtime 目录。
-
-## 8. 排查
+## 9. 排查
 
 | 现象 | 处理 |
 | --- | --- |
-| app_unavailable | 运行 start-agent.cmd；检查 endpoint.json 与 logs |
-| 401 unauthorized | 应用重启后 token 会轮换；重试或重启 MCP sidecar |
-| 403 forbidden_host | 调用方 Host 不是 127.0.0.1 或 localhost |
-| 409 engine_busy | 等待或取消当前任务后再提交 |
-| 端口 18770 被占用 | 停止旧服务，或修改 start-agent.cmd 中的端口 |
-| 原生会话退出 104 | 确认 engine 位于 Windows 本地路径，FM27 已安装且 Steam 已登录 |
-| 存档读取失败 | 确认存档为 FM27 构建 27.0.0+2493426 可读；查看 save_library 日志 |
+| app_unavailable | 确认应用已启动、endpoint.json 存在，且 FM27LAB_DATA 指向正确目录 |
+| 401 unauthorized | 重新读取 endpoint.json；应用重启后 token 已变化 |
+| 403 forbidden_host | 只能用 127.0.0.1 或 localhost 访问 |
+| 409 engine_busy | 等待或取消当前批次 |
+| 引擎不可用或不兼容 | 在引擎设置中选择包含 fm_Data 与 shared 的游戏根目录 |
+| 原生会话退出 104 | 确认引擎资产位于 Windows 本地路径，游戏资源完整 |
+| 存档读取失败 | 确认存档为受支持的 FM27 构建；查看 save_library 日志 |
 
-## 9. 已知限制
+## 10. 已知限制
 
 - 同一时刻只允许一个批次任务。
 - 首期不提供定位球片段实验、实验执行力与原生 AI 生成对手。
-- 仅本机 loopback，不支持远程访问。
-- headless EXE 打包未验证；当前运行时直接启动 Python 服务端。
+- 仅本机回环访问。
+- 不同 FM27 构建需要匹配的适配器；升级后重新执行兼容预检。
