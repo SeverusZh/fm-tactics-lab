@@ -363,7 +363,7 @@ draft_id 格式：dr_ 加 12 位十六进制。
 | role | side、phase、slot 0 到 10、role、duty 可选 | 设置位置角色与职责 |
 | player_instruction | side、phase、slot、group、option | 设置个人指令 |
 | lineup | side、starters 11 人、bench 0 到 12 人 | 设置首发与替补 |
-| formation | side、phase、positions 11 项 | 设置阶段阵型位置，必须含唯一 GK |
+| formation | side、phase、positions 11 个不重复的位置 | 设置阶段阵型位置；0 号为 GK 且全场仅 1 名 GK |
 | tactic_name | side、value | 设置战术名称 |
 
 约束：
@@ -599,7 +599,7 @@ setpiece_export：draft_id、side、type、variant 必填。返回 filename、pa
 {
   "mcpServers": {
     "fm27lab": {
-      "command": "C:\\Users\\<you>\\AppData\\Local\\FM27TacticsDesktop\\agent\\fm27lab.cmd",
+      "command": "%LOCALAPPDATA%\\FM27TacticsDesktop\\agent\\fm27lab.cmd",
       "args": ["mcp"]
     }
   }
@@ -734,7 +734,7 @@ fmf_export draft_id side=1
 - src/fm27_tactics_server.py：鉴权与 Host 校验、Agent 路由、manifest 与 schema、分页、幂等、endpoint.json、shutdown、save cancel 接口。
 - src/desktop_save_mode.py：读取进程句柄、取消与 cancelled 状态。
 - Launcher.cs：headless、token 感知的自检与关闭、入口脚本生成。
-- scripts/run.py 与 scripts/build_exe.py：打包 src/fm27_agent、生成源码版入口。
+- scripts/run.py 与 scripts/build_exe.py：现有 src 递归收集已覆盖 fm27_agent，无需新增文件清单。
 - tests：Agent 契约、CLI、MCP、安全用例。
 
 ## 15. 风险与待评审问题
