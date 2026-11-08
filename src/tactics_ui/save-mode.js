@@ -139,6 +139,7 @@ api=async function(url,data){
    if(data.reference)data.reference={...data.reference,experimental_execution:values};
   }
   if(saveMode==='save'){
+   delete data.scenario.away_tactic_pool;if(data.reference)delete data.reference.away_tactic_pool;
    if(!saveLoaded||saveLoaded.club_uid!==saveClub)throw Error('请先将所选球队载入战术板');
    if(!saveChosen.size)throw Error('请至少选择一个存档对手');
    url='/api/save/run';data={...data,save_id:saveInfo.id,club_uid:saveClub,count:Number($('#count').value),first_seed:Number($('#seed').value),opponents:saveOpponents.filter(o=>saveChosen.has(o.key)).map(o=>({key:o.key}))};

@@ -132,7 +132,7 @@ def main(source, folder):
     with fmsave.open(source) as save:
         info = save.info
         managed = [plain(v) for v in save.managed_clubs()]
-        clubs = [{**{k:getattr(v,k) for k in ['uid','unique_id','name','short_name']},'teams':plain(v.teams)} for v in save.clubs()]
+        clubs = [{**{k:getattr(v,k) for k in ['uid','unique_id','name','short_name','nation_id']},'teams':plain(v.teams)} for v in save.clubs()]
         progress('读取人类经理球队属性与球员身份索引')
         from desktop_save_players import selected_players
         from fmsave.table import Table
@@ -213,7 +213,7 @@ def main(source, folder):
         retained_keys={str(c) for c in retained_clubs}
         counts={k:v for k,v in counts.items()if k in retained_keys}
         first_counts={k:v for k,v in first_counts.items()if k in retained_keys}
-        result = {'schema':2, 'player_loading':'managed-first-selective-v2','opponent_loading':'same-league-coach-only-v2', 'reader_compatibility_profile':desktop_save_compat.PROFILE,
+        result = {'schema':4, 'player_loading':'managed-first-selective-v2','opponent_loading':'same-league-coach-only-v2', 'reader_compatibility_profile':desktop_save_compat.PROFILE,
                   'source':str(source), 'source_sha256':digest,
                   'date':str(info.game_date), 'build':info.build,
                   'managed':managed, 'clubs':clubs, 'player_counts':counts,'first_team_counts':first_counts,

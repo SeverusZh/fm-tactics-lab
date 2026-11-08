@@ -1,6 +1,7 @@
 """Save-backed team inputs. Stored plans never masquerade as current AI choices."""
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor,CancelledError
+import base64
 import copy
 import hashlib
 import json
@@ -24,6 +25,8 @@ import desktop_static_plans
 import desktop_observed_plans
 import desktop_coach_presets
 import desktop_source_plans
+import desktop_save_export
+import fm27_tactic_pool
 from desktop_storage import require_space
 from desktop_save_compat import PROFILE as READER_PROFILE
 
@@ -61,6 +64,26 @@ def choose_save_file():
     code=api.CommDlgExtendedError()
     if code: raise ValueError('无法打开存档选择器，错误码 '+hex(code))
     return None
+
+
+def choose_folder():
+    if sys.platform!='win32':raise ValueError('目录选择仅在 Windows 运行期可用')
+    import ctypes
+    from ctypes import wintypes as w
+    class BrowseInfo(ctypes.Structure):
+        _fields_=[('owner',w.HWND),('root',ctypes.c_void_p),('display',w.LPWSTR),('title',w.LPCWSTR),
+            ('flags',w.UINT),('callback',ctypes.c_void_p),('data',ctypes.c_void_p),('image',ctypes.c_int)]
+    user=ctypes.WinDLL('user32',use_last_error=True);shell=ctypes.WinDLL('shell32',use_last_error=True);ole=ctypes.WinDLL('ole32',use_last_error=True)
+    user.GetForegroundWindow.restype=w.HWND
+    shell.SHBrowseForFolderW.argtypes=[ctypes.POINTER(BrowseInfo)];shell.SHBrowseForFolderW.restype=ctypes.c_void_p
+    shell.SHGetPathFromIDListW.argtypes=[ctypes.c_void_p,w.LPWSTR];shell.SHGetPathFromIDListW.restype=w.BOOL
+    ole.CoTaskMemFree.argtypes=[ctypes.c_void_p]
+    buffer=ctypes.create_unicode_buffer(32768);value=BrowseInfo()
+    value.owner=user.GetForegroundWindow();value.title='选择导出战术的文件夹';value.flags=0x0001|0x0010|0x0040
+    pidl=shell.SHBrowseForFolderW(ctypes.byref(value))
+    if not pidl:return None
+    try:return buffer.value if shell.SHGetPathFromIDListW(pidl,buffer) else None
+    finally:ole.CoTaskMemFree(pidl)
 
 
 class SaveLibrary:
@@ -121,7 +144,7 @@ class SaveLibrary:
                 if not re.search(r'"source_sha256"\s*:\s*"'+digest+'"',prefix):continue
                 if not re.search(r'"reader_compatibility_profile"\s*:\s*"'+re.escape(READER_PROFILE)+'"',prefix):continue
                 data=dataset(folder/'dataset.json')
-                if data['source_sha256']!=digest or 'first_team_counts'not in data:continue
+                if data['source_sha256']!=digest or data.get('schema')!=4 or 'first_team_counts'not in data:continue
                 paths=[folder/'player_index.json',folder/'rosters']
                 paths.extend(folder/c['path']for c in data['caches'])
                 paths.extend(folder/t['raw_plan']for t in data['tactics']if t.get('raw_plan'))
@@ -172,6 +195,7 @@ class SaveLibrary:
         if value['status'] != 'complete':
             return value
         data = dataset(folder/'dataset.json')
+        if data.get('schema')!=4:raise ValueError('此存档缓存来自旧版本，请重新读取存档')
         if 'first_team_counts' not in data:raise ValueError('此缓存尚未区分一线队，请重新导入存档')
         counts = {int(k):v for k,v in data['first_team_counts'].items() if k!='None'}
         value.update(date=data['date'],build=data['build'],source=data['source'],source_sha256=data['source_sha256'],
@@ -222,6 +246,123 @@ class SaveLibrary:
                            for i,t in enumerate(data['tactics']) if t.get('club_uid')==club and t.get('team_slot')==0],
                 'selections':[s for s in data['selections'] if s.get('club_uid')==club and s.get('team_slot')==0],
                 'source_date':data['date']}
+
+    def _source(self, key, folder, data):
+        path=read(folder/'selected_source.json')['path']if(folder/'selected_source.json').exists()else data['source']
+        return {'save_id':key,'source':path,'source_sha256':data['source_sha256'],'date':data['date'],'build':data['build']}
+
+    @staticmethod
+    def _tactic_digest(tactic):
+        core={key:tactic.get(key)for key in ('mentality','instructions','native_extra_team_bits','phases')}
+        return hashlib.sha256(json.dumps(core,sort_keys=True,ensure_ascii=False).encode('utf8')).hexdigest()
+
+    def _league_scope(self, report):
+        league=report.get('league')if isinstance(report.get('league'),dict)else None
+        uids=league.get('club_uids')if league and isinstance(league.get('club_uids'),list)else None
+        if uids is not None:count=len(uids)
+        elif type(report.get('same_league_clubs'))is int and report['same_league_clubs']>0:count=report['same_league_clubs']+1
+        else:count=len(report.get('opponents')or[])+1
+        return {'league_id':league.get('competition_id')if league else None,'club_count':count}
+
+    def _opponent_teams(self, report):
+        teams=[]
+        for row in report.get('opponents')or[]:
+            coach=row.get('coach')if isinstance(row.get('coach'),dict)else {}
+            teams.append({'club_uid':row.get('club_uid'),'name':row.get('name'),'key':row.get('key'),
+                'tactic_name':coach.get('preset_name')or row.get('tactic_name')or'教练偏好预设',
+                'source':row.get('source'),'available':bool(row.get('available')),'member':row.get('member')})
+        return teams
+
+    def _opponent_failures(self, report):
+        failures=[{'club_uid':item.get('club_uid'),'name':item.get('name'),'error':item.get('error','教练偏好预设尚不可用')}
+                  for item in report.get('failures')or[]]
+        covered={item['club_uid']for item in failures}
+        failures.extend({'club_uid':item.get('club_uid'),'name':item.get('name'),'error':item.get('reason','教练偏好预设尚不可用')}
+                        for item in report.get('unrecovered_clubs')or[]if item.get('club_uid')not in covered)
+        return failures
+
+    def league_library(self, key, club):
+        folder=self.folder(key);data=dataset(folder/'dataset.json');club=int(club)
+        state=self.begin_opponents(key,club)
+        if state.get('status')=='reading':return {'status':'reading','stage':state.get('stage','正在读取同联赛教练偏好')}
+        if state.get('status')=='error':return {'status':'error','stage':state.get('stage')or'教练偏好读取失败'}
+        report=self.inspect_opponents(key,club)
+        own=next((c for c in data['clubs']if c['uid']==club),None)or {}
+        scope=self._league_scope(report);source=self._source(key,folder,data)
+        return {'status':'complete','save':{'id':key,'source':source['source'],'source_sha256':source['source_sha256'],
+                'date':source['date'],'build':source['build']},
+            'own':{'club_uid':club,'name':own.get('short_name')or own.get('name')or str(club),'nation_id':own.get('nation_id'),
+                'league_id':scope['league_id'],'club_count':scope['club_count']},
+            'teams':self._opponent_teams(report),'failures':self._opponent_failures(report)}
+
+    def export_league_tactics(self, key, club, directory):
+        folder=self.folder(key);data=dataset(folder/'dataset.json');club=int(club)
+        if isinstance(directory,Path):target=directory.expanduser()
+        elif isinstance(directory,str)and directory.strip():target=Path(directory).expanduser()
+        else:raise ValueError('请选择导出目录')
+        if not target.is_absolute()or not target.is_dir():raise ValueError('所选导出目录不存在，请重新选择')
+        report=self.inspect_opponents(key,club)
+        rows=[];failures=[{'club_uid':item['club_uid'],'club':item['name'],'tactic_name':None,'error':item['error']}
+                          for item in self._opponent_failures(report)]
+        for row in report.get('opponents')or[]:
+            coach=row.get('coach')if isinstance(row.get('coach'),dict)else {}
+            tactic_name=coach.get('preset_name')or row.get('tactic_name')or'教练偏好预设'
+            if not row.get('available'):
+                failures.append({'club_uid':row.get('club_uid'),'club':row.get('name'),'tactic_name':tactic_name,
+                    'error':'教练偏好预设尚不可用'});continue
+            try:
+                team=desktop_coach_presets.preset_tactic(self,key,row['key'])
+                scenario=copy.deepcopy(self.app.DEFAULT);scenario['teams'][1]=team
+                exported=self.app.export_fmf({'side':1,'scenario':self.app.validate_scenario(scenario),'name':team['tactic_name']})
+                rows.append({'club_uid':row.get('club_uid'),'club':row.get('name'),'target':row['key'],'tactic_name':tactic_name,
+                    'payload':base64.b64decode(exported['file_base64'],validate=True),'report':exported['report']})
+            except Exception as error:
+                failures.append({'club_uid':row.get('club_uid'),'club':row.get('name'),'tactic_name':tactic_name,'error':str(error)})
+        if not rows:raise ValueError('当前联赛没有可导出的教练偏好预设战术'+('：'+'；'.join(f['error']for f in failures[:3])if failures else''))
+        result=desktop_save_export.write(str(target),self._source(key,folder,data),rows)
+        result['failures']=failures
+        result['league']=self._league_scope(report)
+        return result
+
+    def import_league_tactics_pool(self, key, club, scenario):
+        folder=self.folder(key);club=int(club)
+        if not isinstance(scenario,dict):raise ValueError('方案格式无效')
+        scenario=copy.deepcopy(scenario)
+        state=self.begin_opponents(key,club)
+        if state.get('status')=='reading':return {'status':'reading','stage':state.get('stage','正在读取同联赛教练偏好')}
+        if state.get('status')=='error':return {'status':'error','stage':state.get('stage')or'教练偏好读取失败'}
+        report=self.inspect_opponents(key,club)
+        existing=scenario.get('away_tactic_pool')if isinstance(scenario.get('away_tactic_pool'),dict)else None
+        if existing is not None:existing=fm27_tactic_pool.normalize(existing)
+        pool=existing or fm27_tactic_pool.defaults()
+        entries=list(pool['entries'])if existing is not None else []
+        seen={self._tactic_digest(entry['tactic'])for entry in entries}
+        imported=[];duplicates=0;skipped={item.get('club_uid')for item in report.get('unrecovered_clubs')or[]}
+        for row in report.get('opponents')or[]:
+            coach=row.get('coach')if isinstance(row.get('coach'),dict)else {}
+            tactic_name=coach.get('preset_name')or row.get('tactic_name')or'教练偏好预设'
+            if not row.get('available'):skipped.add(row.get('club_uid'));continue
+            try:team=desktop_coach_presets.preset_tactic(self,key,row['key'])
+            except Exception:skipped.add(row.get('club_uid'));continue
+            name=''.join(c for c in(row.get('name')or'')if ord(c)>=32).strip()[:fm27_tactic_pool.MAX_NAME]or'对手战术'
+            try:entry=fm27_tactic_pool.entry_from_team(team,name=name)
+            except ValueError:skipped.add(row.get('club_uid'));continue
+            digest=self._tactic_digest(entry['tactic'])
+            if digest in seen:duplicates+=1;continue
+            if len(entries)>=fm27_tactic_pool.MAX_ENTRIES:raise ValueError(f'客队战术池最多保存 {fm27_tactic_pool.MAX_ENTRIES} 套战术')
+            seen.add(digest);entries.append(entry)
+            imported.append({'club_uid':row.get('club_uid'),'club':name,'tactic_name':tactic_name})
+        if entries or existing is not None:
+            scenario['away_tactic_pool']=fm27_tactic_pool.normalize({**pool,'entries':entries})
+        scenario=self.app.validate_scenario(scenario)
+        value=scenario.get('away_tactic_pool')if isinstance(scenario.get('away_tactic_pool'),dict)else None
+        if value and value.get('entries'):pool_summary=fm27_tactic_pool.summary(value)
+        else:
+            default=fm27_tactic_pool.defaults()
+            pool_summary={'profile':fm27_tactic_pool.PROFILE,'enabled':False,'uniform':default['uniform'],'entries':[]}
+        skipped-={item['club_uid']for item in imported}
+        return {'status':'complete','scenario':scenario,'imported':imported,'duplicates':duplicates,
+            'skipped_unavailable':len(skipped),'pool':pool_summary,'league':self._league_scope(report)}
 
     def native(self, args, folder, name, extra=None, discover_tactic_boundary=False):
         self.app.desktop_engine.require_available(self.app.ENGINE_COMPATIBILITY)

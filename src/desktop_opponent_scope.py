@@ -21,13 +21,20 @@ def identify(data,club):
         # every ordered pair occurs once in a complete double round robin.
         if len(pairs)!=len(members)*(len(members)-1) or set(pairs.values())!={1}:continue
         dates=[f['date'] for f in fixtures if f.get('date')]
-        if not dates or not min(dates)<=data['date']<=max(dates):continue
+        if not dates:continue
         candidates.append({'competition_id':competition,'stage_id':stage,'season_start_year':season,
             'club_uids':sorted(members),'fixture_count':len(fixtures),'first_date':min(dates),'last_date':max(dates)})
+    # Prefer the table whose dates contain the save clock. A save read in the
+    # off-season is still inside the season that has just finished or is about
+    # to start, so fall back to the latest season rather than losing the league.
+    current=[item for item in candidates if item['first_date']<=str(data['date'])<=item['last_date']]
+    if not current and candidates:
+        latest=max(item['season_start_year'] for item in candidates)
+        current=[item for item in candidates if item['season_start_year']==latest]
     # Ambiguous concurrent tables are explicitly unresolved, never guessed.
-    league=candidates[0] if len(candidates)==1 else None
+    league=current[0] if len(current)==1 else None
     members=set(league['club_uids'])-{club} if league else set()
-    return {'profile':PROFILE,'played':played,'same_league':members,'league':league,'ambiguous_leagues':candidates if len(candidates)>1 else []}
+    return {'profile':PROFILE,'played':played,'same_league':members,'league':league,'ambiguous_leagues':current if len(current)>1 else []}
 
 def annotate(report,data,club,scope):
     available={o['club_uid']:o for o in report['opponents']}
