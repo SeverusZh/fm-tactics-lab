@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Add a local AI agent interface: /api/agent/v1 endpoints, fm27lab CLI, stdio MCP sidecar, file-backed drafts, endpoint discovery with token authentication, headless launcher mode, and cancellable save import and opponent scans.
+
 ## v1108.5 — 2026-11-08
 
 - Import career saves, edit match squads and run home and away matches against selectable same-league opponents.
