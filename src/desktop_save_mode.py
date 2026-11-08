@@ -72,6 +72,11 @@ class SaveLibrary:
         self.lock = threading.RLock()
         self.roster_lock = threading.RLock()
         self.active = None
+        self.active_kind = None
+        self.reader_process = None
+        self.import_cancelled = False
+        self.opponent_cancelled = set()
+        self.opponent_cancel_lock = threading.Lock()
 
     def folder(self, key):
         if not isinstance(key, str) or not re.fullmatch('[0-9a-f]{16}', key):
@@ -106,6 +111,8 @@ class SaveLibrary:
             folder = self.root/key
             folder.mkdir()
             self.active = key
+            self.active_kind = 'import'
+            self.import_cancelled = False
             self.write(folder/'progress.json', {'status':'reading','stage':'等待解析','id':key})
             self.pool.submit(self.extract, source, folder, key)
         return {'id':key}
@@ -148,9 +155,20 @@ class SaveLibrary:
             env['PYTHONDONTWRITEBYTECODE'] = '1'
             env['PYTHONUTF8'] = '1'
             with (folder/'reader.stdout.log').open('wb') as stdout, (folder/'reader.stderr.log').open('wb') as stderr:
-                result = subprocess.run([python,str(Path(__file__).with_name('desktop_save_worker.py')),str(source),str(folder)],
-                    env=env,stdout=stdout,stderr=stderr,timeout=1800,creationflags=subprocess.CREATE_NO_WINDOW)
-            if result.returncode:
+                process = subprocess.Popen([python,str(Path(__file__).with_name('desktop_save_worker.py')),str(source),str(folder)],
+                    env=env,stdout=stdout,stderr=stderr,creationflags=subprocess.CREATE_NO_WINDOW)
+                self.reader_process = process
+                try:
+                    returncode = process.wait(timeout=1800)
+                except subprocess.TimeoutExpired:
+                    process.kill(); process.wait()
+                    raise ValueError('存档读取超时，请稍后重试')
+                finally:
+                    self.reader_process = None
+            if self.import_cancelled:
+                self.write(folder/'progress.json', {'status':'cancelled','stage':'已取消存档读取','id':key})
+                return
+            if returncode:
                 raise ValueError(read(folder/'progress.json').get('stage','存档读取失败'))
             # The index lists all retained cache candidates, not guessed club ownership.
             self.write(folder/'progress.json', {'status':'complete','stage':'读取完成，可选择球队与方案','id':key})
@@ -161,6 +179,7 @@ class SaveLibrary:
         finally:
             with self.lock:
                 self.active = None
+                self.active_kind = None
 
     def status(self, key=None):
         if not key:
@@ -477,7 +496,9 @@ class SaveLibrary:
         if retained is not None:return {'status':'complete',**retained}
         if progress.exists():
             state=read(progress)
-            if state.get('status')=='error'and state.get('profile')==self.OPPONENT_PROFILE:
+            if state.get('status')=='cancelled':
+                progress.unlink()
+            elif state.get('status')=='error'and state.get('profile')==self.OPPONENT_PROFILE:
                 return state
         with self.lock:
             if self.active:
@@ -487,17 +508,56 @@ class SaveLibrary:
                 except (ValueError,KeyError):current='正在读取同联赛教练偏好'
                 return {'status':'reading','stage':current}
             self.active=key
+            self.active_kind='opponents'
             self.write(progress,{'status':'reading','profile':self.OPPONENT_PROFILE,'stage':'正在读取同联赛教练偏好'})
             def scan():
                 try:
+                    if self.opponent_is_cancelled(key):raise CancelledError('已取消对手扫描')
                     self.inspect_opponents(key,club)
-                    self.write(progress,{'status':'complete','profile':self.OPPONENT_PROFILE})
+                    if self.opponent_is_cancelled(key):
+                        self.write(progress,{'status':'cancelled','profile':self.OPPONENT_PROFILE,'stage':'已取消对手扫描'})
+                    else:
+                        self.write(progress,{'status':'complete','profile':self.OPPONENT_PROFILE})
+                except CancelledError:
+                    self.write(progress,{'status':'cancelled','profile':self.OPPONENT_PROFILE,'stage':'已取消对手扫描'})
                 except Exception as error:
                     self.write(progress,{'status':'error','profile':self.OPPONENT_PROFILE,'stage':str(error)})
                 finally:
-                    with self.lock: self.active=None
+                    with self.lock:
+                        self.active=None
+                        self.active_kind=None
+                    with self.opponent_cancel_lock:self.opponent_cancelled.discard(key)
             self.pool.submit(scan)
         return {'status':'reading','stage':'正在读取教练偏好并匹配原装预设，不模拟比赛'}
+
+    def opponent_is_cancelled(self, key):
+        with self.opponent_cancel_lock:
+            return key in self.opponent_cancelled
+
+    def cancel_opponents(self, key, club):
+        club = int(club)
+        with self.lock:
+            if self.active_kind != 'opponents' or self.active != key:
+                raise ValueError('没有正在扫描的对手列表')
+        with self.opponent_cancel_lock:
+            self.opponent_cancelled.add(key)
+        return {'accepted': True, 'id': key, 'club_uid': club}
+
+    def cancel_import(self, key=None):
+        with self.lock:
+            if self.active_kind != 'import':
+                raise ValueError('没有正在解析的存档')
+            if key and key != self.active:
+                raise ValueError('存档标识不匹配')
+            self.import_cancelled = True
+            process = self.reader_process
+            active = self.active
+        if process is not None and process.poll() is None:
+            try:
+                process.kill()
+            except OSError:
+                pass
+        return {'accepted': True, 'id': active}
 
     def opponent_team(self, key, candidate, side, own_team):
         if str(candidate).startswith('coach:'):

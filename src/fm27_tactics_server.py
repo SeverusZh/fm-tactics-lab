@@ -32,6 +32,8 @@ import desktop_generation_protocol
 import desktop_generation_catalog
 import desktop_source_plans
 from desktop_storage import require_space
+import fm27_agent_contract as agent_contract
+import fm27_agent_server as agent_server
 
 ROOT = Path(os.environ["FM27_ENGINE_ROOT"])
 WEB = Path(__file__).resolve().parent / 'tactics_ui'
@@ -55,6 +57,11 @@ TEAM_KNOWN_MASK=sum(1<<bit for bit in {o['native_bit']for g in GROUPS.values()fo
 PIS = {g['id']:g for g in CATALOG['player_instructions']}
 TAKER_KEYS=['penalties']+[f'{kind}_{direction}_{"foot"if kind in ("corners","wide_free_kicks")else "side"}'for kind in ('corners','direct_free_kicks','wide_free_kicks','deep_free_kicks','throw_ins')for direction in ('left','right')]
 POLICY_VERSION='1a080000'
+APP_VERSION='1108.5'
+STATIC_FILES={'/team-bulk.js':'team-bulk.js','/desktop-workspace.js':'desktop-workspace.js','/match-events.js':'match-events.js','/desktop.js':'desktop.js','/desktop.css':'desktop.css','/':'index.html','/app.js':'app.js','/advanced.js':'advanced.js','/setpieces.js':'setpieces.js','/batch.js':'batch.js','/style.css':'style.css','/save-mode.js':'save-mode.js','/save-mode.css':'save-mode.css','/engine-settings.js':'engine-settings.js','/squad-editor.js':'squad-editor.js'}
+AGENT_TOKEN=None
+AGENT_ROUTER=None
+AGENT_SERVER=None
 def unpack_oi(value):
     return {'press':value&7,'mark':(value>>3)&7,'tackle':(value>>8)&7,'foot':(value>>11)&7,'personal':bool(value&0x80000)}
 def pack_oi(row):
@@ -663,13 +670,114 @@ class DesktopPresence:
             return {'pages':len(self.pages),'seen':self.seen,'close_ready':self.empty_since is not None and now-self.empty_since>=8}
 DESKTOP_PRESENCE=DesktopPresence()
 
+def agent_versions():
+    adapter=None
+    try:adapter=json.loads((NATIVE/'adapter_version.json').read_text(encoding='utf8')).get('version')
+    except (OSError,ValueError):pass
+    profile=ENGINE_COMPATIBILITY.get('profile') if isinstance(ENGINE_COMPATIBILITY,dict) else None
+    return {'server':APP_VERSION,'adapter':adapter,'engine_build':profile.get('version') if isinstance(profile,dict) else None,'scenario_schema':3,'batch_schema':1}
+
+def start_run(data):
+    if SAVE_LIBRARY.active:raise ValueError('请等待存档及历史输入解析完成后运行比赛')
+    event_details=data.get('event_details',True)
+    if type(event_details)is not bool:raise ValueError('事件明细开关必须为布尔值')
+    scenario=validate_scenario(data['scenario']);reference=validate_scenario(data['reference']) if data.get('reference')else None
+    seeds=data['seeds']
+    if not isinstance(seeds,list)or not 1<=len(seeds)<=10000 or len(set(seeds))!=len(seeds):raise ValueError('需要1–10000个不重复种子')
+    seeds=[integer(s,0,0xffffffff,'随机种子')for s in seeds]
+    workers=integer(data.get('workers',BATCH_LIMITS['recommended']),1,BATCH_LIMITS['maximum'],'并行数')
+    with LOCK:
+        desktop_engine.require_available(ENGINE_COMPATIBILITY)
+        if any(j['status']in('queued','running')for j in JOBS.values()):raise ValueError('已有比赛运行中，请等待或取消')
+        key=secrets.token_hex(6);directory=RUNS/f'{datetime.now():%Y%m%d_%H%M%S}_{key}';directory.mkdir(parents=True)
+        variants=[('A',reference),('B',scenario)]if reference else [('B',scenario)]
+        for label,s in variants:
+            (directory/f'{label}.json').write_text(json.dumps(s,ensure_ascii=False,indent=2),encoding='utf8');(directory/f'{label}.bin').write_bytes(encode_scenario(s));(directory/f'{label}.phases.json').write_text(json.dumps(phase_inputs.pack(s,CATALOG),ensure_ascii=False,indent=2),encoding='utf8')
+        provenance={'host_sha256':hashlib.sha256((NATIVE/'FM27Simulator.exe').read_bytes()).hexdigest(),'fixture_sha256':hashlib.sha256((NATIVE/'fixtures/match.pkm').read_bytes()).hexdigest(),'native_dll_sha256':ENGINE_DLL_SHA256,'engine_compatibility':copy.deepcopy(ENGINE_COMPATIBILITY),'engine_resource_fingerprint':ENGINE_COMPATIBILITY['resource_fingerprint'],'seeds':seeds,'fixture_me_version':'26.8.0.0','config_hashes':{label:hashlib.sha256((directory/f'{label}.bin').read_bytes()).hexdigest()for label,_ in variants}}
+        provenance['event_details']=event_details
+        (directory/'provenance.json').write_text(json.dumps(provenance,indent=2),encoding='utf8')
+        job={'batch_schema':1,'workers':workers,'failures':[],'active':[],'id':key,'status':'queued','completed':0,'total':len(seeds)*len(variants),'runs':[],'metrics':{},'created':time.time(),'output_dir':str(directory),'_dir':directory}
+        job['name']=experiment_name(data.get('name'),f"{scenario['teams'][0]['name']} · {scenario['teams'][0].get('tactic_name') or '战术实验'} · {len(seeds)}场")
+        job['event_details']=event_details
+        job['engine_compatibility']=copy.deepcopy(ENGINE_COMPATIBILITY)
+        job['runtime_mode']='reused_native_worker'
+        job['jobs_per_native_session']=64
+        job['initial_state_policy']={'id':'controlled-start-v3','player_values':copy.deepcopy(profiles.CONTROLLED_START),'morale_verified':True,'cohesion_verified':True}
+        job['mode']='comparison'if reference else'single';job['variant_names']={label:s['teams'][0].get('tactic_name','')for label,s in variants}
+        job['team_names']={label:[t['name']for t in s['teams']]for label,s in variants}
+        JOBS[key]=job;persist(job);POOL.submit(execute,job,variants,seeds)
+        return {'id':key}
+
+def select_engine(path):
+    global ENGINE_COMPATIBILITY,ENGINE_DLL_SHA256
+    if not isinstance(path,str)or not path.strip():raise ValueError('请填写游戏安装目录')
+    selected=str(Path(path.strip()).resolve())
+    with IMPORT_LOCK,LOCK:
+        if SAVE_LIBRARY.active:raise ValueError('存档／历史输入解析中不能更换引擎')
+        if any(j['status']in('queued','running')for j in JOBS.values()):raise ValueError('已有比赛运行中，不能更换游戏目录')
+        os.environ['FM27_GAME_ROOT']=selected
+        ENGINE_COMPATIBILITY=desktop_engine.initialize(ROOT)
+        ENGINE_DLL_SHA256=ENGINE_COMPATIBILITY['actual_dll_sha256']
+        (RUNS.parent/'game-root.txt').write_text(selected,encoding='utf-8-sig')
+        return ENGINE_COMPATIBILITY
+
+def request_shutdown():
+    with LOCK:
+        for job in JOBS.values():
+            if job.get('status')in('queued','running'):
+                job['_cancel']=True
+                runner=job.get('_runner')
+                if runner is not None:runner.cancel()
+    def stop():
+        time.sleep(.2)
+        if AGENT_SERVER is not None:AGENT_SERVER.shutdown()
+    threading.Thread(target=stop,daemon=True).start()
+
+def cancel_job(job):
+    runner=None
+    with LOCK:
+        if job['status']in('queued','running'):
+            job['_cancel']=True;runner=job.get('_runner')
+    if runner is not None:runner.cancel()
+    return {'accepted':True}
+
+def resume_job_api(job,data):
+    workers=integer(data.get('workers',BATCH_LIMITS['recommended']),1,BATCH_LIMITS['maximum'],'并行数')
+    with LOCK:
+        desktop_engine.require_available(ENGINE_COMPATIBILITY)
+        if any(j['status']in('queued','running')for j in JOBS.values()):raise ValueError('已有比赛运行中')
+        resume_job(job,workers)
+    return {'id':job['id']}
+
+def rename_job(job,name):
+    with LOCK:
+        job['name']=experiment_name(name,'未命名实验');persist(job)
+        return {'id':job['id'],'name':job['name']}
+
+def delete_job(job):
+    if job['status']in('queued','running')or'_runner'in job:raise ValueError('请等待实验结束或取消后再删除')
+    directory=job['_dir'];root=RUNS.resolve()
+    if (directory.parent.resolve()!=root or directory.resolve().parent!=root or directory.is_symlink() or directory.is_junction()):raise ValueError('实验目录无效')
+    try:
+        if directory.exists():shutil.rmtree(directory)
+    except OSError as error:
+        if directory.is_dir()and not(directory/'summary.json').exists():persist(job)
+        raise OSError(f'无法完整删除实验文件，请关闭占用文件后重试。{error}') from None
+    with LOCK:JOBS.pop(job['id'],None)
+    return {'id':job['id']}
+
 class Handler(BaseHTTPRequestHandler):
     server_version='FM27Lab/1.0'
-    def send(self,value,status=200,kind='application/json; charset=utf-8'):
+    def send(self,value,status=200,kind='application/json; charset=utf-8',headers=None):
         body=value if isinstance(value,bytes)else json.dumps(value,ensure_ascii=False).encode('utf8')
-        self.send_response(status);self.send_header('Content-Type',kind);self.send_header('Content-Length',str(len(body)));self.send_header('Cache-Control','no-store');self.send_header('X-Content-Type-Options','nosniff');self.end_headers();self.wfile.write(body)
+        self.send_response(status);self.send_header('Content-Type',kind);self.send_header('Content-Length',str(len(body)));self.send_header('Cache-Control','no-store');self.send_header('X-Content-Type-Options','nosniff')
+        for name,header_value in (headers or {}).items():self.send_header(name,header_value)
+        self.end_headers();self.wfile.write(body)
     def do_GET(self):
         path=urlparse(self.path).path
+        if not self.agent_guard(path):return
+        if path==agent_contract.PREFIX or path.startswith(agent_contract.PREFIX+'/'):
+            return self.agent_get(path)
         if path=='/api/desktop-presence':return self.send(DESKTOP_PRESENCE.status())
         if path=='/api/catalog':return self.send(CATALOG)
         if path=='/api/defaults':return self.send(DEFAULT)
@@ -703,20 +811,21 @@ class Handler(BaseHTTPRequestHandler):
                     name=parts[4]
                     if name not in [r['log']for r in job['runs']]:return self.send({'error':'日志不存在'},404)
                     return self.send((job['_dir']/name).read_bytes(),kind='application/x-ndjson; charset=utf-8')
-        known={'/team-bulk.js':'team-bulk.js','/desktop-workspace.js':'desktop-workspace.js','/match-events.js':'match-events.js','/desktop.js':'desktop.js','/desktop.css':'desktop.css','/':'index.html','/app.js':'app.js','/advanced.js':'advanced.js','/setpieces.js':'setpieces.js','/batch.js':'batch.js','/style.css':'style.css'}
-        known.update({'/save-mode.js':'save-mode.js','/save-mode.css':'save-mode.css','/engine-settings.js':'engine-settings.js'})
-        known['/squad-editor.js']='squad-editor.js'
-        if path in known:
-            name=known[path];kind={'html':'text/html','js':'text/javascript','css':'text/css'}[name.split('.')[-1]]
-            return self.send((WEB/name).read_bytes(),kind=kind+'; charset=utf-8')
+        if path in STATIC_FILES:
+            name=STATIC_FILES[path];kind={'html':'text/html','js':'text/javascript','css':'text/css'}[name.split('.')[-1]]
+            headers={'Set-Cookie':f'fm27_session={AGENT_TOKEN}; HttpOnly; SameSite=Strict; Path=/'}if path=='/'else None
+            return self.send((WEB/name).read_bytes(),kind=kind+'; charset=utf-8',headers=headers)
         self.send({'error':'不存在'},404)
     def do_POST(self):
         origin=self.headers.get('Origin')
         if origin and origin!=f'http://{self.headers.get("Host")}':return self.send({'error':'拒绝跨站调用'},403)
+        path=urlparse(self.path).path
+        if not self.agent_guard(path):return
         try:
             length=int(self.headers.get('Content-Length',0))
-            if not 0<length<=(6000000 if urlparse(self.path).path=='/api/import-fmf'else 1500000):raise ValueError('请求大小无效')
-            data=json.loads(self.rfile.read(length));path=urlparse(self.path).path
+            if not 0<length<=(6000000 if path in ('/api/import-fmf',agent_contract.PREFIX+'/fmf/import')else 1500000):raise ValueError('请求大小无效')
+            data=json.loads(self.rfile.read(length))
+            if path==agent_contract.PREFIX or path.startswith(agent_contract.PREFIX+'/'):return self.agent_post(path,data)
             if path=='/api/jobs/rename':
                 with LOCK:
                     job=JOBS.get(data.get('id'))
@@ -849,8 +958,32 @@ class Handler(BaseHTTPRequestHandler):
             return self.send({'error':'不存在'},404)
         except (KeyError,TypeError,ValueError,OverflowError) as e:return self.send({'error':str(e)},400)
         except Exception as e:return self.send({'error':str(e)},500)
+    def agent_guard(self,path):
+        if not agent_contract.host_allowed(self.headers.get('Host'),self.server.server_address[1]):
+            return self.agent_error(agent_server.AgentHttpError(403,'forbidden_host','Host 不在白名单'))
+        if agent_contract.is_exempt(path,STATIC_FILES):return True
+        if agent_contract.authorized(self.headers,AGENT_TOKEN):return True
+        return self.agent_error(agent_server.AgentHttpError(401,'unauthorized','缺少或错误 token'))
+    def agent_error(self,error):
+        headers={'Retry-After':str(error.retry_after_seconds)}if error.retry_after_seconds is not None else None
+        return self.send(error.payload(),error.status,headers=headers)
+    def agent_get(self,path):
+        query={key:values[0]for key,values in parse_qs(urlparse(self.path).query).items()}
+        try:status,payload,headers=AGENT_ROUTER.get(path,query)
+        except agent_server.AgentHttpError as error:return self.agent_error(error)
+        except Exception as error:return self.agent_error(agent_server.AgentHttpError(500,'internal_error',str(error)))
+        if isinstance(payload,(bytes,bytearray)):
+            content_type=(headers or {}).pop('Content-Type','application/octet-stream')
+            return self.send(bytes(payload),status,content_type,headers=headers)
+        return self.send(payload,status,headers=headers)
+    def agent_post(self,path,data):
+        try:status,payload,headers=AGENT_ROUTER.post(path,data,self.headers)
+        except agent_server.AgentHttpError as error:return self.agent_error(error)
+        except Exception as error:return self.agent_error(agent_server.AgentHttpError(500,'internal_error',str(error)))
+        return self.send(payload,status,headers=headers)
 
 def main():
+    global AGENT_TOKEN,AGENT_ROUTER,AGENT_SERVER
     process_owner=own_child_processes()
     p=argparse.ArgumentParser();p.add_argument('--port',type=int,default=8765);args=p.parse_args()
     for summary in sorted((RUNS).glob('*/summary.json'),reverse=True)[:40]:
@@ -863,7 +996,15 @@ def main():
             JOBS[job['id']]=job
         except (ValueError,OSError):continue
     server=ThreadingHTTPServer(('127.0.0.1',args.port),Handler)
-    print(f'FM27 tactics lab: http://127.0.0.1:{args.port}',flush=True)
+    AGENT_SERVER=server;AGENT_TOKEN=agent_contract.new_token();port=server.server_address[1]
+    AGENT_ROUTER=agent_server.Router(sys.modules[__name__],token=AGENT_TOKEN,port=port)
+    endpoint=agent_contract.build_endpoint(port=port,token=AGENT_TOKEN,data_dir=RUNS.parent,engine_root=ROOT,game_root=os.environ.get('FM27_GAME_ROOT',''),versions=agent_versions(),capabilities=AGENT_ROUTER.manifest()['capabilities'],limits=AGENT_ROUTER.limits())
+    try:
+        agent_contract.write_endpoint(RUNS.parent,endpoint)
+        agent_contract.write_agent_scripts(RUNS.parent,Path(__file__).resolve().parent,sys.executable)
+    except OSError as error:
+        print(f'Agent endpoint unavailable: {error}',file=sys.stderr,flush=True)
+    print(f'FM27 tactics lab: http://127.0.0.1:{port}',flush=True)
     try:server.serve_forever()
     except KeyboardInterrupt:pass
     finally:
@@ -873,4 +1014,5 @@ def main():
                     job['_cancel']=True
                     if job.get('_runner'):job['_runner'].cancel()
         server.server_close();POOL.shutdown(wait=False,cancel_futures=True)
+        agent_contract.remove_endpoint(RUNS.parent)
 if __name__=='__main__':main()

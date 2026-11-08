@@ -23,7 +23,7 @@ internal static class Program {
         string configured=Path.Combine(dataRoot,"engine-root.txt");
         string[] candidates={GetArg(args,"--engine-root"),Environment.GetEnvironmentVariable("FM27_ENGINE_ROOT"),Path.Combine(release,"engine"),File.Exists(configured)?File.ReadAllText(configured).Trim():null,Path.GetFullPath(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"..",".."))};
         foreach(string p in candidates)if(IsEngine(p))return Path.GetFullPath(p);
-        if(Has(args,"--self-test"))throw new Exception("找不到完整的本机引擎环境。");
+        if(Has(args,"--self-test")||Has(args,"--headless"))throw new Exception("找不到完整的本机引擎环境。");
         using(var dialog=new FolderBrowserDialog()){dialog.Description="请选择已有的 FmEngine 工具目录（包含 fm27_native 文件夹），不是游戏安装目录。";if(dialog.ShowDialog()!=DialogResult.OK||!IsEngine(dialog.SelectedPath))throw new Exception("未选择有效的引擎工具目录。");return dialog.SelectedPath;}
     }
     static string FindGame(string[] args){
@@ -35,7 +35,7 @@ internal static class Program {
         if(!String.IsNullOrEmpty(steam)){candidates.Add(Path.Combine(steam,@"steamapps\common\Football Manager 27"));string vdf=Path.Combine(steam,@"steamapps\libraryfolders.vdf");if(File.Exists(vdf))foreach(System.Text.RegularExpressions.Match match in System.Text.RegularExpressions.Regex.Matches(File.ReadAllText(vdf),"\"path\"\\s+\"([^\"]+)\""))candidates.Add(Path.Combine(match.Groups[1].Value.Replace("\\\\","\\"),@"steamapps\common\Football Manager 27"));}
         foreach(var drive in DriveInfo.GetDrives())if(drive.IsReady)candidates.Add(Path.Combine(drive.RootDirectory.FullName,@"SteamLibrary\steamapps\common\Football Manager 27"));
         foreach(string path in candidates)if(!String.IsNullOrEmpty(path)&&File.Exists(Path.Combine(path,@"fm_Data\Plugins\x86_64\game_plugin.dll"))){File.WriteAllText(saved,path,Encoding.UTF8);return path;}
-        if(Has(args,"--self-test")||Has(args,"--test-lifecycle"))return "";
+        if(Has(args,"--self-test")||Has(args,"--test-lifecycle")||Has(args,"--headless"))return "";
         using(var dialog=new FolderBrowserDialog()){dialog.Description="选择本地 FM27 游戏安装目录；也可取消，进入工具后再设置。";if(dialog.ShowDialog()==DialogResult.OK){File.WriteAllText(saved,dialog.SelectedPath,Encoding.UTF8);return dialog.SelectedPath;}}
         return "";
     }
@@ -70,11 +70,12 @@ internal static class Program {
     static void Stop(){if(server!=null){try{if(!server.HasExited){server.Kill();server.WaitForExit(5000);}server.WaitForExit();}catch(InvalidOperationException){}server.Dispose();}if(output!=null)output.Dispose();if(error!=null)error.Dispose();}
     [STAThread]static int Main(string[] args){
         dataRoot=Path.GetFullPath(GetArg(args,"--data-dir",Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"FM27TacticsDesktop")));Directory.CreateDirectory(dataRoot);
-        bool selfTest=Has(args,"--self-test"),lifecycleTest=Has(args,"--test-lifecycle");string testIdentity="";if(selfTest||lifecycleTest)using(var sha=SHA256.Create())testIdentity="_SelfTest_"+BitConverter.ToString(sha.ComputeHash(Encoding.UTF8.GetBytes(dataRoot.ToLowerInvariant()))).Replace("-","").Substring(0,16);bool acquired;using(var mutex=new Mutex(true,"Local\\FM27TacticsDesktop_Editor"+testIdentity,out acquired)){
+        bool selfTest=Has(args,"--self-test"),lifecycleTest=Has(args,"--test-lifecycle"),headless=Has(args,"--headless");string testIdentity="";if(selfTest||lifecycleTest)using(var sha=SHA256.Create())testIdentity="_SelfTest_"+BitConverter.ToString(sha.ComputeHash(Encoding.UTF8.GetBytes(dataRoot.ToLowerInvariant()))).Replace("-","").Substring(0,16);bool acquired;using(var mutex=new Mutex(true,"Local\\FM27TacticsDesktop_Editor"+testIdentity,out acquired)){
             if(!acquired){if(File.Exists(Path.Combine(dataRoot,"url.txt"))){url=File.ReadAllText(Path.Combine(dataRoot,"url.txt"));OpenApp();}return 0;}
             try{
                 string release=Unpack();string engine=EngineRoot(args,release);gameRoot=FindGame(args);File.WriteAllText(Path.Combine(dataRoot,"engine-root.txt"),engine,Encoding.UTF8);StartServer(release,engine,ChoosePort(Int32.Parse(GetArg(args,"--port","18765"))));
                 if(selfTest){foreach(string path in new[]{"/api/catalog","/api/defaults","/api/phase-defaults","/desktop.js","/desktop.css","/engine-settings.js","/save-mode.js","/squad-editor.js"})if(ReadUrl(url+path).Length<10)throw new Exception("Empty endpoint: "+path);File.WriteAllText(Path.Combine(dataRoot,"self-test.json"),"{\"ok\":true,\"bundled_python\":true,\"native_match_executed\":false,\"url\":\""+url+"\"}");Stop();return 0;}
+                if(headless){int code=0;try{server.WaitForExit();code=server.ExitCode;}finally{Stop();}return code;}
                 Application.EnableVisualStyles();Application.SetCompatibleTextRenderingDefault(false);
                 using(var appIcon=Icon.ExtractAssociatedIcon(Application.ExecutablePath))using(var context=new ApplicationContext())using(var tray=new NotifyIcon())using(var menu=new ContextMenuStrip())using(var timer=new System.Windows.Forms.Timer()){
                     tray.Text="FM 战术实验室 · v1108.5";tray.Icon=appIcon??SystemIcons.Application;tray.ContextMenuStrip=menu;tray.Visible=!lifecycleTest;
@@ -87,7 +88,7 @@ internal static class Program {
                     };
                     timer.Start();if(!Has(args,"--no-browser"))OpenApp();try{Application.Run(context);}finally{timer.Stop();tray.Visible=false;Stop();}return 0;
                 }
-            }catch(Exception ex){Stop();File.WriteAllText(Path.Combine(dataRoot,"startup-error.txt"),ex.ToString(),Encoding.UTF8);if(!selfTest)MessageBox.Show(ex.Message,"FM 战术实验室 · v1108.5",MessageBoxButtons.OK,MessageBoxIcon.Error);return 1;}
+            }catch(Exception ex){Stop();File.WriteAllText(Path.Combine(dataRoot,"startup-error.txt"),ex.ToString(),Encoding.UTF8);if(!selfTest&&!headless)MessageBox.Show(ex.Message,"FM 战术实验室 · v1108.5",MessageBoxButtons.OK,MessageBoxIcon.Error);return 1;}
         }
     }
 }
