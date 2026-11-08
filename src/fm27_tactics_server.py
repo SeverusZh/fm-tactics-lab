@@ -823,8 +823,11 @@ class Handler(BaseHTTPRequestHandler):
         if not self.agent_guard(path):return
         try:
             length=int(self.headers.get('Content-Length',0))
-            if not 0<length<=(6000000 if path in ('/api/import-fmf',agent_contract.PREFIX+'/fmf/import')else 1500000):raise ValueError('请求大小无效')
-            data=json.loads(self.rfile.read(length))
+            if length==0 and (path==agent_contract.PREFIX or path.startswith(agent_contract.PREFIX+'/')):
+                data={}
+            else:
+                if not 0<length<=(6000000 if path in ('/api/import-fmf',agent_contract.PREFIX+'/fmf/import')else 1500000):raise ValueError('请求大小无效')
+                data=json.loads(self.rfile.read(length))
             if path==agent_contract.PREFIX or path.startswith(agent_contract.PREFIX+'/'):return self.agent_post(path,data)
             if path=='/api/jobs/rename':
                 with LOCK:
