@@ -20,7 +20,7 @@ import threading
 import time
 from urllib.parse import urlparse,parse_qs
 from fm27_simulator import inspect_log
-from fm27_batch import BatchRunner, worker_limits, own_child_processes
+from fm27_batch import BatchRunner, BatchCancelled, worker_limits, own_child_processes
 from desktop_warm_batch import DesktopWarmRunner, inspect_saved_run
 BATCH_LIMITS=worker_limits()
 import fm27_setpieces as setpieces
@@ -224,7 +224,11 @@ def validate_scenario(data):
                 if c['position']not in POSITIONS or c['role']not in ROLES or ROLES[c['role']]['phase']!=phase:raise ValueError('未知位置或阶段角色')
                 ncell=n['phases'][phase][i];ncell['position']=c['position'];ncell['role']=c['role']
                 retained=desktop_source_plans.cell(source,phase,c)
-                if data['rules']=='game'and not retained and c['role']not in role_options(cells,phase,c['position']):raise ValueError('该位置或当前阵型不可使用所选原版角色')
+                if data['rules']=='game'and not retained and c['role']not in role_options(cells,phase,c['position']):
+                    options=role_options(cells,phase,c['position'])
+                    labels=[f"{ROLES.get(item,{}).get('label') or item}({item})"for item in options]
+                    stage='有球'if phase==0 else'无球'
+                    raise ValueError(f"位置 {c['position']} 在{stage}阶段不可使用角色 {c['role']}；可用角色：{'、'.join(labels)}")
                 original=base['phases'][phase][i]
                 duty=str(c.get('duty','0'if c['role']!=original['role']else original['duty']))
                 if duty not in ('0','2097152','4194304','8388608','33554432','67108864','17179869184'):raise ValueError('未知角色职责位')
@@ -618,6 +622,8 @@ def execute(job,scenarios,seeds):
         with LOCK:
             job['status']='error'if job['failures']else('cancelled'if runner.stop.is_set()else'complete')
             if job['failures']:job['error']=f"{len(job['failures'])}项原生比赛或数据校验失败；现场与原种子保留，未自动重跑整场比赛"
+    except (BatchCancelled, CancelledError):
+        with LOCK:job['status']='cancelled';job['error']=None
     except Exception as e:
         with LOCK:job['status']='error';job['error']=str(e)
     finally:
@@ -688,7 +694,6 @@ def start_run(data):
     workers=integer(data.get('workers',BATCH_LIMITS['recommended']),1,BATCH_LIMITS['maximum'],'并行数')
     with LOCK:
         desktop_engine.require_available(ENGINE_COMPATIBILITY)
-        if any(j['status']in('queued','running')for j in JOBS.values()):raise ValueError('已有比赛运行中，请等待或取消')
         key=secrets.token_hex(6);directory=RUNS/f'{datetime.now():%Y%m%d_%H%M%S}_{key}';directory.mkdir(parents=True)
         variants=[('A',reference),('B',scenario)]if reference else [('B',scenario)]
         for label,s in variants:
@@ -706,7 +711,11 @@ def start_run(data):
         job['mode']='comparison'if reference else'single';job['variant_names']={label:s['teams'][0].get('tactic_name','')for label,s in variants}
         job['team_names']={label:[t['name']for t in s['teams']]for label,s in variants}
         JOBS[key]=job;persist(job);POOL.submit(execute,job,variants,seeds)
-        return {'id':key}
+        active=sorted((item for item in JOBS.values()if item['status']in('queued','running')),key=lambda item:item['created'])
+        position=next((index for index,item in enumerate(active,1)if item['id']==key),None)
+        return {'id':key,'total':job['total'],'workers':workers,'mode':job['mode'],
+                'seed_count':len(seeds),'queued':position is not None and position>1,
+                'queue_position':position,'variant_names':job['variant_names']}
 
 def select_engine(path):
     global ENGINE_COMPATIBILITY,ENGINE_DLL_SHA256

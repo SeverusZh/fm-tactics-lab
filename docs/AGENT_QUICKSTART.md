@@ -141,7 +141,7 @@ endpoint.json 包含：
 
 能力面：
 
-- 26 个工具：状态、引擎、草案、存档、运行、任务、结果与战术文件。
+- 28 个工具：状态、引擎、草案、存档、运行、任务、结果与战术文件。
 - 3 个静态资源与 5 个资源模板：manifest、catalog、status、draft、job、save。
 - 3 个 prompt：单变量战术实验、基线对比、多对手扫描。
 - 支持进度通知、取消与结构化错误。
@@ -193,7 +193,7 @@ results_summary
 | app_unavailable | 确认应用已启动、endpoint.json 存在，且 FM27LAB_DATA 指向正确目录 |
 | 401 unauthorized | 重新读取 endpoint.json；应用重启后 token 已变化 |
 | 403 forbidden_host | 只能用 127.0.0.1 或 localhost 访问 |
-| 409 engine_busy | 等待或取消当前批次 |
+| 409 engine_busy | 控制面操作与活动任务冲突；自由模式提交会排队，等待或取消当前批次 |
 | 引擎不可用或不兼容 | 在引擎设置中选择包含 fm_Data 与 shared 的游戏根目录 |
 | 原生会话退出 104 | 确认引擎资产位于 Windows 本地路径，游戏资源完整 |
 | 存档读取失败 | 确认存档为受支持的 FM27 构建；查看 save_library 日志 |

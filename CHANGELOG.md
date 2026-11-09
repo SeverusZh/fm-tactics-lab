@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Add a local AI agent interface: /api/agent/v1 endpoints, fm27lab CLI, stdio MCP sidecar, file-backed drafts, endpoint discovery with token authentication, headless launcher mode, and cancellable save import and opponent scans.
+- Improve the agent surface: compact JSON tool text, richer draft/job/results payloads, batch draft edits, draft clone, legal option lookup, inline scenario file paths, cross-job paired comparisons, queued free-run submissions with queue positions, and shorter job wait defaults.
 
 ## v1108.5 — 2026-11-08
 

@@ -110,7 +110,7 @@ class Router:
         with self.app.LOCK:
             for job in sorted(self.app.JOBS.values(), key=lambda item: item.get("created", 0)):
                 if job.get("status") in ("queued", "running"):
-                    active = {key: value for key, value in job.items() if not key.startswith("_")}
+                    active = self._public_job(job)
                     active.pop("runs", None)
                     break
         return {
@@ -121,7 +121,18 @@ class Router:
         }
 
     def _public_job(self, job):
-        return {key: value for key, value in job.items() if not key.startswith("_")}
+        value = {key: value for key, value in job.items() if not key.startswith("_")}
+        if job.get("status") == "queued":
+            with self.app.LOCK:
+                active = sorted(
+                    (item for item in self.app.JOBS.values()
+                     if item.get("status") in ("queued", "running")),
+                    key=lambda item: item.get("created", 0))
+            for index, item in enumerate(active, start=1):
+                if item.get("id") == job.get("id"):
+                    value["queue_position"] = index
+                    break
+        return value
 
     def jobs_page(self, query):
         status = query.get("status")
@@ -271,7 +282,6 @@ class Router:
                 self.app.request_shutdown()
                 return self._ok({"accepted": True}, 202)
             if parts == ["runs"]:
-                self._ensure_idle()
                 return self._ok(self._call(self.app.start_run, data), 202)
             if parts == ["validate"]:
                 scenario = self._call(self.app.validate_scenario, data["scenario"])

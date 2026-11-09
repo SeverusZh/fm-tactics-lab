@@ -168,7 +168,7 @@ fm27lab mcp                    以 stdio 启动 MCP sidecar
 | validation_failed | 400 | 否 | 参数或场景校验失败，details 带 field 或 side/slot |
 | engine_unavailable | 409 | 否 | 引擎资源缺失或不可用 |
 | engine_incompatible | 409 | 否 | 兼容检查失败 |
-| engine_busy | 409 | 是 | 已有任务运行，details 带 active_job |
+| engine_busy | 409 | 是 | 控制面操作与活动任务冲突；自由模式 /runs 已改为排队，不再返回此错误 |
 | conflict | 409 | 否 | 状态不允许，如运行中删除 |
 | idempotency_conflict | 409 | 否 | 同一幂等键载荷不同 |
 | storage_insufficient | 507 | 是 | 磁盘空间不足 |
@@ -215,7 +215,7 @@ fm27lab mcp                    以 stdio 启动 MCP sidecar
 | POST | /api/agent/v1/jobs/{id}/resume | workers | 202 id |
 | POST | /api/agent/v1/jobs/{id}/rename | name | id、name |
 | POST | /api/agent/v1/jobs/{id}/delete | 无 | id |
-| POST | /api/agent/v1/runs | scenario、reference、seeds、workers、event_details、name | 202 id、total |
+| POST | /api/agent/v1/runs | scenario、reference、seeds、workers、event_details、name | 202 id、total、workers、mode、queued、queue_position |
 | POST | /api/agent/v1/engine/select | game_root | 引擎兼容状态 |
 | POST | /api/agent/v1/validate | scenario | scenario、records |
 | POST | /api/agent/v1/repair | scenario | scenario、changes |
@@ -411,7 +411,7 @@ draft_id 格式：dr_ 加 12 位十六进制。
 | fm27lab status | 无 | 清单、引擎、活动任务 |
 | fm27lab mcp | 无 | 以 stdio 启动 MCP sidecar |
 | fm27lab engine select | --game PATH | 设置游戏根并预检 |
-| fm27lab draft create | --from default、save、fmf、job、inline；--name；--save-id；--club；--tactic；--job；--variant；--file；--side；--base-draft；--inline FILE | 创建草案 |
+| fm27lab draft create | --from default、save、fmf、job、inline、draft；--name；--save-id；--club；--tactic；--job；--variant；--file；--side；--base-draft；--inline FILE | 创建草案；inline 读入场景文件，draft 从 --base-draft 克隆 |
 | fm27lab draft list | 无 | 列出草案 |
 | fm27lab draft show | ID、--full | 摘要或完整场景 |
 | fm27lab draft edit | ID、--op、--team A 或 B、--phase、--group、--option、--value、--slot、--role、--duty、--starters、--bench、--positions | 语义编辑 |
@@ -483,25 +483,27 @@ draft_id 格式：dr_ 加 12 位十六进制。
 | --- | --- |
 | lab_status | 清单、引擎兼容、活动任务、存档活动状态 |
 | engine_select | 设置游戏根并预检 |
-| draft_create | 从默认、存档、战术文件、任务导出或内联场景创建草案 |
-| draft_get | 读取草案摘要或完整场景 |
-| draft_edit | 单步语义编辑 |
+| draft_create | 从默认、存档、战术文件、任务导出、内联场景或已有草案创建草案 |
+| draft_get | 读取草案摘要、完整场景或场景文件 |
+| draft_edit | 单步或批量语义编辑 |
 | draft_validate | 校验并规范化 |
 | draft_list | 列出草案 |
-| draft_delete | 删除草案 |
+| draft_options | 查询合法角色、职责与球队指令选项 |
+| draft_delete | 删除一个或多个草案 |
 | career_import | 导入存档，返回 save_id |
 | career_status | 存档导入进度 |
 | career_team | 读取球队、球员、战术与选择 |
 | career_opponents | 扫描同联赛对手 |
 | career_preview | 预览指定对手 |
 | career_cancel | 取消导入或扫描 |
-| experiment_run | 自由模式批次，可带对照草案 |
+| experiment_run | 自由模式批次，支持多候选与对照草案 |
 | career_run | 存档对战批次 |
-| job_get | 任务详情与 runs 分页 |
+| job_get | 任务进度或详情，可只取进度 |
 | job_wait | 等待任务终态或超时 |
 | job_list | 任务分页 |
 | job_action | 取消、续跑、删除、重命名 |
 | results_summary | 汇总指标、分布与配对差值 |
+| results_compare | 多任务同种子配对比较与置信区间 |
 | results_matches | 逐场分页，可选事件 |
 | results_csv | 导出 CSV 并返回路径 |
 | fmf_import | 战术文件导入草案 |
@@ -510,23 +512,25 @@ draft_id 格式：dr_ 加 12 位十六进制。
 
 ### 8.3 工具参数细则
 
-通用输出：成功返回 content 文本摘要与 structuredContent 数据；失败 isError 为 true，structuredContent 为错误封套。
+通用输出：成功返回 content 紧凑 JSON 文本与 structuredContent 数据；文本用于模型读取，structuredContent 供程序消费。失败 isError 为 true，structuredContent 为错误封套。
 
-lab_status：无参数。返回 manifest、engine 兼容状态、active_job、save_active。
+lab_status：无参数。返回 manifest、engine 兼容状态、active_job、save_active、paths。paths 含 data_dir、runs_dir、drafts_dir、exports_dir 及常见 WSL 映射提示。
 
 engine_select：game_root 字符串必填。返回兼容状态，等价于 /api/agent/v1/engine/select。
 
-draft_create：source 必填，取值 default、save、fmf、job、inline；name 可选；save 来源需要 save_id、club_uid、tactic_index，可选 lineup、bench；fmf 来源需要 side、file_base64 或 file_path，以及 base_scenario 或 base_draft_id；job 来源需要 job_id、variant；inline 来源需要 scenario。返回 draft_id 与摘要。
+draft_create：source 必填，取值 default、save、fmf、job、inline、draft；name 可选；save 来源需要 save_id、club_uid、tactic_index，可选 lineup、bench；fmf 来源需要 side、file_base64 或 file_path，以及 base_scenario 或 base_draft_id；job 来源需要 job_id、variant；inline 来源需要 scenario 或 scenario_path，后者支持 Windows 与 \\wsl.localhost UNC 路径；draft 来源需要 base_draft_id，从已有草案克隆。返回 draft_id 与摘要。
 
-draft_get：draft_id 必填；include_scenario 布尔，默认 false。返回摘要或完整场景。
+draft_get：draft_id 必填；include_scenario 布尔，默认 false；save_scenario 布尔，默认 false，为真时把完整场景写入 dataDir/agent/exports/scenarios 并返回 scenario_path、scenario_sha256、scenario_bytes。返回摘要，按需附带场景。
 
-draft_edit：draft_id 与 op 必填，其余按 op 必填，字段同 6.2。返回 draft_id、changed、摘要与校验结果。
+draft_edit：draft_id 必填；单步用 op 加 op 字段，批量用 ops 数组。批量按顺序应用后统一校验，全部成功才落盘；失败时草案保持原样。返回 draft_id、changed、ops、摘要与校验结果。
 
 draft_validate：draft_id 必填。返回 valid、errors、records、摘要。
 
 draft_list：无参数。返回草案摘要列表。
 
-draft_delete：draft_id 必填。返回 deleted。
+draft_options：draft_id 必填；side 默认 0；phase 可选，省略时返回两个阶段；slot 可选；include_team_instructions 默认 false。返回该阶段各位置的合法角色、职责与可选球队指令。
+
+draft_delete：draft_id 或 draft_ids 二选一。返回删除结果与逐项错误。
 
 career_import：save_path 必填；wait 布尔，默认 false；timeout_seconds 默认 60。未等待时返回 save_id 与状态；等待时最多等 timeout_seconds，超时返回当前进度，由 Agent 继续轮询。
 
@@ -540,23 +544,25 @@ career_preview：save_id、club_uid、key、draft_id 必填；适配器从草案
 
 career_cancel：kind 取 import 或 opponents，save_id 必填，club_uid 在 opponents 时必填。返回 accepted。
 
-experiment_run：draft_id 必填；baseline_draft_id 可选；seeds 为起始与数量，或长度 1 到 10000 的唯一整数数组；workers 可选；event_details 默认 true；name 可选。返回 job_id、total、workers。
+experiment_run：draft_id 或 candidates 二选一；candidates 为 1 到 20 个草案，每项含 draft_id 与可选 name；baseline_draft_id 可选；seeds 为起始与数量，或长度 1 到 10000 的唯一整数数组；workers 可选；event_details 默认 true；name 可选。多草案按队列依次执行，返回 jobs 列表与合计 total；单草案返回 job_id、total、workers、mode、queued、queue_position、seeds。
 
-career_run：save_id、club_uid、draft_id、opponents、count、first_seed 必填；baseline_draft_id、workers、event_details、name 可选。返回 job_id、total、workers。
+career_run：save_id、club_uid、draft_id、opponents、count、first_seed 必填；baseline_draft_id、workers、event_details、name 可选。返回 job_id、total、workers、mode。
 
-job_get：job_id 必填；runs_offset、runs_limit、variant 可选。返回任务详情与 runs 分页。
+job_get：job_id 必填；runs_offset、runs_limit、variant 可选；include_runs 布尔，默认 true，为 false 时只返回进度。返回任务进度、排队位置与按需的 runs 分页。
 
-job_wait：job_id 必填；timeout_seconds 默认 60，最大 300；poll_ms 默认 1000。返回任务详情；超时返回当前状态并带 timed_out。
+job_wait：job_id 必填；timeout_seconds 默认 45，最大 300；poll_ms 默认 1000。返回任务进度；超时返回当前状态、timed_out 与 next_poll_seconds。受客户端调用超时约束，建议 timeout_seconds 不超过 45。
 
-job_list：status、limit、offset 可选。返回分页。
+job_list：status、limit、offset 可选。返回分页摘要与排队位置。
 
 job_action：job_id 与 action 必填，action 取 cancel、resume、delete、rename；resume 可带 workers；rename 必须带 name。返回对应结果。
 
 results_summary：job_id 必填。返回 metrics、distributions、paired、failures 摘要、timings。
 
-results_matches：job_id 必填；variant、seed、limit、offset、include_events 可选。返回 runs 分页与 runs_total；带 seed 时返回单场。
+results_compare：baseline_job_id 与 candidate_job_ids 必填；candidate_job_ids 为 1 到 20 个任务；variant 默认 B；reps 默认 2000。按同种子配对返回每个候选的 Δ胜率、Δ积分、Δ净胜球、ΔxGD 与 bootstrap 95% 置信区间。
 
-results_csv：job_id 必填；out 可选。MCP 工具只接受 dataDir/agent/exports 下的相对文件名，默认按 job_id 命名；CLI 的 --out 可写用户指定路径。返回 path、sha256、rows。
+results_matches：job_id 必填；variant、seed、limit、offset、include_events 可选。返回 runs 分页与 runs_total；带 seed 时返回单场。文本只返回紧凑比分与关键统计。
+
+results_csv：job_id 必填；out 可选。MCP 工具只接受 dataDir/agent/exports 下的相对文件名，默认按 job_id 命名；CLI 的 --out 可写用户指定路径。CSV 含双方统计、xGA、比分变化与进球时间线；返回 path、path_wsl_hint、sha256、rows、columns。
 
 fmf_import：draft_id、side、file_base64 或 file_path 必填。返回更新后的草案摘要与 report。
 
@@ -571,6 +577,8 @@ setpiece_export：draft_id、side、type、variant 必填。返回 filename、pa
 | fm27://manifest | 清单与能力 |
 | fm27://catalog | 领域枚举与默认值 |
 | fm27://status | 引擎、活动任务、存档状态 |
+| fm27://paths | 数据、草案、运行与导出目录，含常见 WSL 映射 |
+| fm27://workflow/free-mode | 自由模式战术对比的推荐调用顺序与判读口径 |
 | fm27://drafts/{draft_id} | 草案 JSON |
 | fm27://jobs/{job_id} | 任务摘要 |
 | fm27://jobs/{job_id}/export | 汇总、方案与 provenance |
@@ -592,7 +600,8 @@ setpiece_export：draft_id、side、type、variant 必填。返回 filename、pa
 - 请求带 progressToken 时，job_wait 按 poll_ms 轮询并发送 notifications/progress，字段为 progress、total，可选 message。
 - 收到 notifications/cancelled 时停止等待，保留 job，不自动取消。
 - 阶段变化通过 notifications/message 发送，级别 info。
-- 工具文本摘要控制在 2 KB 内，明细走 structuredContent 或资源。
+- 工具文本为紧凑 JSON，上限 16 KB；超限时返回截断标记与替代读取提示，不再截断 JSON 中段。
+- 需要完整逐场数据时用 results_csv 或运行目录 summary.json。
 
 ### 8.7 客户端配置
 
@@ -607,6 +616,8 @@ setpiece_export：draft_id、side、type、variant 必填。返回 filename、pa
 }
 ```
 
+部分客户端对单次工具调用有独立超时，默认常见为 60 秒。若需要更长的 job_wait，应把该客户端的工具超时配置到 300 秒以上；否则保持 timeout_seconds 不超过 45，按返回的 next_poll_seconds 轮询。
+
 ### 8.8 工具 schema 细则
 
 工具 inputSchema 由 src/fm27_agent/schemas.py 单点定义，MCP 与 CLI 共用同一份参数定义。字段类型、必填与约束与 8.3 一致；枚举值来自 manifest 与 catalog。错误统一映射为 4.3 错误码。
@@ -618,21 +629,43 @@ setpiece_export：draft_id、side、type、variant 必填。返回 filename、pa
 ```text
 lab_status
 draft_create source=default name=baseline
-draft_create source=default name=pressing
-draft_edit pressing op=team_instruction side=1 phase=out_of_possession group=<逼抢组> option=<更高强度>
-draft_validate pressing
-experiment_run draft_id=pressing baseline_draft_id=baseline seeds={start:101,count:10} workers=2 event_details=false
-job_wait job_id timeout_seconds=300
+draft_get baseline save_scenario=true
+draft_create source=inline scenario_path=<受控场景文件> name=controlled-baseline
+draft_validate controlled-baseline
+draft_create source=draft base_draft_id=controlled-baseline name=candidate
+draft_edit candidate ops=[...]
+draft_validate candidate
+experiment_run draft_id=candidate baseline_draft_id=controlled-baseline seeds={start:5001,count:200} workers=4 event_details=false
+job_wait job_id timeout_seconds=45
 results_summary job_id
 ```
+
+受控夹具要求：
+
+- 双方首发 11 人属性完全一致，lineup 相同，非战术配置同源，针对性指令中性化。
+- 每个首发的 attributes[0..14] 中，当前战术两阶段使用到的位置熟练度设为满值 20。
+- 受控场景用 draft_create source=inline scenario_path 创建，避免把大 JSON 塞进工具参数。
+- 基线可复现后再开始候选。
 
 读取口径：
 
 - metrics.B.win_rate 与 win_interval 判断变化是否稳定。
 - paired.goal_difference_delta 判断同种子配对差值。
-- 先 2 到 6 场探测，再扩到 20 到 100 场。
+- 200 场只做筛选；确认至少两个独立种子块各 200 场，合并后用 results_compare 计算配对差与置信区间。
+- 2 到 6 场只用于校准流程，不进入比较表。
 
-### 9.2 存档对战
+### 9.2 多候选批次
+
+```text
+experiment_run candidates=[{draft_id:A,name:候选A},{draft_id:B,name:候选B}] baseline_draft_id=baseline seeds={start:5001,count:200} workers=4 event_details=false
+job_get job_id=<批次中每个 job> include_runs=false
+job_wait job_id=<当前队首 job> timeout_seconds=45
+results_compare baseline_job_id=<基准 job> candidate_job_ids=[<候选 job>,...] reps=2000
+```
+
+多草案提交后由引擎队列依次执行；job_get 与 job_list 的 queue_position 表示当前排队位置。避免并发提交大量批次，单批候选建议不超过 10 个。
+
+### 9.3 存档对战
 
 ```text
 career_import save_path=... wait=false
@@ -650,7 +683,7 @@ results_summary job_id
 
 注意 count 为每对手总场数，必须偶数，主客场各半。
 
-### 9.3 战术文件往返
+### 9.4 战术文件往返
 
 ```text
 draft_create source=job job_id variant=B
@@ -670,7 +703,7 @@ fmf_export draft_id side=1
 - 破坏性操作需要显式参数：删除草案与实验、切换游戏根、覆盖导出文件。
 - 不提取、不打包、不上传游戏 DLL 与资源；存档与结果仅保留本机。
 - 日志只记录命令、耗时、退出码与错误码，不记录完整场景与存档内容。
-- 单任务限制由 App 执行，Agent 层不排队、不重试提交。
+- 自由模式提交由 App 队列串行执行，Agent 层不重试提交；引擎、存档与控制面操作仍要求任务空闲。
 
 ## 11. 性能与预算
 
@@ -686,9 +719,9 @@ fmf_export draft_id side=1
 | 战术对比 | 每方案 10 到 20 场，同种子 |
 | 对手扫描 | 每对手 4 到 6 场，偶数 |
 | 单次提交上限 | 10000 场，超出需用户确认 |
-| job_wait 单次 | 60 秒，最大 300 秒 |
+| job_wait 单次 | 45 秒，最大 300 秒；受客户端工具超时约束 |
 
-- 提交回包带 total；运行中 job 带 eta_seconds 与 matches_per_minute。
+- 提交回包带 total、workers、mode、queued、queue_position；运行中 job 带 eta_seconds 与 matches_per_minute。
 - 首次实际运行后记录单场耗时，用于后续预算。
 
 ## 12. 兼容与版本
@@ -707,11 +740,11 @@ fmf_export draft_id side=1
 | --- | --- | --- |
 | A1 | 发现与鉴权 | 无 token 访问 Agent 端点返回 401；错误 Host 返回 403；UI 页面正常 |
 | A2 | 清单与 schema | manifest 字段齐全；schema 包可解析；主版本不匹配时 CLI 与 MCP 明确报错 |
-| A3 | 草案 | 五种来源均可创建；编辑、校验、删除、列表均通过；非法编辑不落盘 |
-| A4 | 自由模式 | 通过 CLI 与 MCP 各完成一次 A/B 对比；结果含 metrics 与 paired |
+| A3 | 草案 | 六种来源均可创建；单步与批量编辑、校验、删除、列表、选项查询均通过；非法编辑不落盘 |
+| A4 | 自由模式 | 通过 CLI 与 MCP 各完成一次 A/B 对比；多候选提交进入队列并按序执行；结果含 metrics 与 paired |
 | A5 | 存档模式 | 导入、球队读取、对手扫描、预览、批次运行完成；count 口径正确 |
 | A6 | 任务 | 列表分页、详情分页、取消、续跑、删除、重命名、导出均通过 |
-| A7 | 结果 | 汇总、逐场分页、单场事件、CSV 列正确 |
+| A7 | 结果 | 汇总、逐场分页、单场事件、跨任务配对、CSV 双方列与进球时间线正确 |
 | A8 | 战术文件 | FMF 导入导出往返一致；定位球导出回读通过 |
 | A9 | 错误 | 每个错误码至少一条用例；错误可重试标记正确 |
 | A10 | 幂等 | 同键同载荷不重复建任务；同键异载荷返回 409 |
@@ -720,6 +753,7 @@ fmf_export draft_id side=1
 | A13 | 安全边界 | 路径越界被拒；不暴露原生宿主 |
 | A14 | 恢复 | App 重启后任务标记 interrupted，可续跑；草案保留 |
 | A15 | 性能基线 | 记录单场耗时与批次吞吐，写入验收记录 |
+| A16 | MCP 文本 | 工具文本为可解析 JSON；超限返回截断标记；results_summary、job_get、draft_list 含关键数据 |
 
 ## 14. 实施分期
 

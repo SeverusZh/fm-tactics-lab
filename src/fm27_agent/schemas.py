@@ -66,11 +66,17 @@ _SEEDS = {
     "description": "起始种子与数量 {start, count}，或 1 到 10000 个唯一整数",
 }
 
+SCENARIO_PATH = {
+    "type": "string",
+    "minLength": 1,
+    "description": "schema 4 场景 JSON 文件路径，支持 Windows 路径与 \\\\wsl.localhost UNC 路径",
+}
+
 _DRAFT_CREATE_PROPERTIES = {
     "source": {
         "type": "string",
-        "enum": ["default", "save", "fmf", "job", "inline"],
-        "description": "草案来源",
+        "enum": ["default", "save", "fmf", "job", "inline", "draft"],
+        "description": "草案来源：draft 表示从 base_draft_id 克隆",
     },
     "name": {"type": "string", "maxLength": 100, "description": "草案名称"},
     "save_id": SAVE_ID,
@@ -95,10 +101,10 @@ _DRAFT_CREATE_PROPERTIES = {
     "job_id": JOB_ID,
     "variant": {"type": "string", "minLength": 1, "description": "任务导出中的方案名"},
     "scenario": {"type": "object", "description": "内联来源的 schema 4 场景"},
+    "scenario_path": SCENARIO_PATH,
 }
 
-_DRAFT_EDIT_PROPERTIES = {
-    "draft_id": DRAFT_ID,
+_DRAFT_EDIT_ITEM_PROPERTIES = {
     "op": {
         "type": "string",
         "enum": ["team_instruction", "mentality", "role", "player_instruction",
@@ -144,6 +150,18 @@ _DRAFT_EDIT_PROPERTIES = {
     },
 }
 
+_DRAFT_EDIT_PROPERTIES = {
+    "draft_id": DRAFT_ID,
+    **_DRAFT_EDIT_ITEM_PROPERTIES,
+    "ops": {
+        "type": "array",
+        "items": _object(_DRAFT_EDIT_ITEM_PROPERTIES, required=("op",)),
+        "minItems": 1,
+        "maxItems": 32,
+        "description": "批量语义编辑；按顺序应用后统一校验，全部成功才落盘",
+    },
+}
+
 _FMF_IMPORT_PROPERTIES = {
     "draft_id": DRAFT_ID,
     "side": SIDE,
@@ -165,25 +183,33 @@ TOOLS = [
     ),
     _tool(
         "draft_create",
-        "从默认场景、存档、战术文件、任务导出或内联场景创建草案。",
+        "从默认场景、存档、战术文件、任务导出、内联场景或已有草案创建草案。"
+        "inline 来源可用 scenario 对象或 scenario_path 文件路径，大场景建议用文件路径。",
         _object(_DRAFT_CREATE_PROPERTIES, required=("source",)),
     ),
     _tool(
         "draft_get",
-        "读取草案摘要；include_scenario 为真时附带完整场景。",
+        "读取草案摘要；include_scenario 为真时附带完整场景，save_scenario 为真时把场景写入导出目录并返回路径。",
         _object(
             {
                 "draft_id": DRAFT_ID,
                 "include_scenario": {"type": "boolean", "default": False,
-                                     "description": "是否返回完整场景"},
+                                     "description": "是否在 structuredContent 返回完整场景"},
+                "save_scenario": {"type": "boolean", "default": False,
+                                  "description": "是否把完整场景写入 dataDir/agent/exports/scenarios"},
             },
             required=("draft_id",),
         ),
     ),
     _tool(
         "draft_edit",
-        "对草案执行单步语义编辑，通过校验后落盘并返回变更摘要。",
-        _object(_DRAFT_EDIT_PROPERTIES, required=("draft_id", "op")),
+        "对草案执行单步或批量语义编辑；批量时按顺序应用后统一校验，全部成功才落盘。",
+        {
+            "type": "object",
+            "properties": _DRAFT_EDIT_PROPERTIES,
+            "required": ["draft_id"],
+            "oneOf": [{"required": ["op"]}, {"required": ["ops"]}],
+        },
     ),
     _tool(
         "draft_validate",
@@ -196,9 +222,40 @@ TOOLS = [
         _object({}),
     ),
     _tool(
+        "draft_options",
+        "查询草案在指定球队与阶段下的合法角色、职责与可选球队指令，避免试错。",
+        _object(
+            {
+                "draft_id": DRAFT_ID,
+                "side": {**SIDE, "default": 0},
+                "phase": PHASE,
+                "slot": {"type": "integer", "minimum": 0, "maximum": 10,
+                         "description": "位置序号；省略时返回全部位置摘要"},
+                "include_team_instructions": {"type": "boolean", "default": False,
+                                              "description": "是否返回该阶段的球队指令组与选项"},
+            },
+            required=("draft_id",),
+        ),
+    ),
+    _tool(
         "draft_delete",
-        "物理删除草案；已提交实验保存的场景快照不受影响。",
-        _object({"draft_id": DRAFT_ID}, required=("draft_id",)),
+        "删除一个或多个草案；已提交实验保存的场景快照不受影响。",
+        {
+            "type": "object",
+            "properties": {
+                "draft_id": DRAFT_ID,
+                "draft_ids": {
+                    "type": "array",
+                    "items": DRAFT_ID,
+                    "minItems": 1,
+                    "maxItems": 100,
+                    "uniqueItems": True,
+                    "description": "批量删除的草案标识",
+                },
+            },
+            "required": [],
+            "oneOf": [{"required": ["draft_id"]}, {"required": ["draft_ids"]}],
+        },
     ),
     _tool(
         "career_import",
@@ -264,18 +321,35 @@ TOOLS = [
     ),
     _tool(
         "experiment_run",
-        "提交自由模式批次；提供 baseline_draft_id 时为同种子 A/B 对照实验。",
-        _object(
-            {
+        "提交自由模式批次；单草案或 candidates 多草案均可，提供 baseline_draft_id 时每个草案做同种子 A/B 对照。"
+        "多草案按队列依次执行，返回每个草案的 job_id 与 total。",
+        {
+            "type": "object",
+            "properties": {
                 "draft_id": DRAFT_ID,
+                "candidates": {
+                    "type": "array",
+                    "items": _object(
+                        {
+                            "draft_id": DRAFT_ID,
+                            "name": {"type": "string", "maxLength": 100,
+                                     "description": "方案名称"},
+                        },
+                        required=("draft_id",),
+                    ),
+                    "minItems": 1,
+                    "maxItems": 20,
+                    "description": "多个候选草案；与 draft_id 二选一",
+                },
                 "baseline_draft_id": DRAFT_ID,
                 "seeds": _SEEDS,
                 "workers": WORKERS,
                 "event_details": EVENT_DETAILS,
                 "name": {"type": "string", "maxLength": 100, "description": "实验名称"},
             },
-            required=("draft_id", "seeds"),
-        ),
+            "required": ["seeds"],
+            "oneOf": [{"required": ["draft_id"]}, {"required": ["candidates"]}],
+        },
     ),
     _tool(
         "career_run",
@@ -306,7 +380,7 @@ TOOLS = [
     ),
     _tool(
         "job_get",
-        "读取任务详情与 runs 分页。",
+        "读取任务进度或详情；include_runs 为假时只返回进度与排队位置，不返回逐场结果。",
         _object(
             {
                 "job_id": JOB_ID,
@@ -315,18 +389,21 @@ TOOLS = [
                 "runs_limit": {"type": "integer", "minimum": 1, "maximum": 200,
                                "default": 50, "description": "runs 分页大小"},
                 "variant": {"type": "string", "minLength": 1, "description": "方案过滤"},
+                "include_runs": {"type": "boolean", "default": True,
+                                 "description": "是否返回逐场 runs；看进度时可设为 false"},
             },
             required=("job_id",),
         ),
     ),
     _tool(
         "job_wait",
-        "轮询等待任务终态或超时；请求带 _meta.progressToken 时发送进度通知。",
+        "轮询等待任务终态或超时；超时返回当前进度与 next_poll_seconds。"
+        "受 MCP 客户端调用超时约束，timeout_seconds 建议不超过 45。",
         _object(
             {
                 "job_id": JOB_ID,
                 "timeout_seconds": {"type": "number", "minimum": 0, "maximum": 300,
-                                    "default": 60, "description": "等待上限，最大 300 秒"},
+                                    "default": 45, "description": "等待上限，建议不超过 45 秒"},
                 "poll_ms": {"type": "integer", "minimum": 50, "maximum": 60000,
                             "default": 1000, "description": "轮询间隔毫秒"},
             },
@@ -335,7 +412,7 @@ TOOLS = [
     ),
     _tool(
         "job_list",
-        "按状态分页列出任务。",
+        "按状态分页列出任务摘要与排队位置。",
         _object(
             {
                 "status": JOB_STATUS,
@@ -369,12 +446,34 @@ TOOLS = [
     ),
     _tool(
         "results_summary",
-        "返回汇总指标、分数分布、配对差值、失败摘要与耗时。",
+        "返回汇总指标、分数分布、配对差值、失败摘要与耗时；文本为紧凑 JSON。",
         _object({"job_id": JOB_ID}, required=("job_id",)),
     ),
     _tool(
+        "results_compare",
+        "对多个任务按同种子做配对比较，返回每场差值均值与 bootstrap 置信区间。",
+        _object(
+            {
+                "baseline_job_id": JOB_ID,
+                "candidate_job_ids": {
+                    "type": "array",
+                    "items": JOB_ID,
+                    "minItems": 1,
+                    "maxItems": 20,
+                    "uniqueItems": True,
+                    "description": "待比较的候选任务",
+                },
+                "variant": {"type": "string", "minLength": 1, "default": "B",
+                            "description": "参与比较的方案标签"},
+                "reps": {"type": "integer", "minimum": 100, "maximum": 20000,
+                         "default": 2000, "description": "bootstrap 重采样次数"},
+            },
+            required=("baseline_job_id", "candidate_job_ids"),
+        ),
+    ),
+    _tool(
         "results_matches",
-        "逐场分页读取结果；指定 seed 时返回单场。",
+        "逐场分页读取结果；指定 seed 时返回单场。文本返回紧凑比分与关键统计。",
         _object(
             {
                 "job_id": JOB_ID,
@@ -393,7 +492,7 @@ TOOLS = [
     ),
     _tool(
         "results_csv",
-        "生成 CSV 写入 dataDir/agent/exports，返回 path、sha256 与 rows。",
+        "生成逐场 CSV 写入 dataDir/agent/exports，含双方统计与比分变化；返回 path、sha256 与 rows。",
         _object(
             {
                 "job_id": JOB_ID,
@@ -460,6 +559,18 @@ RESOURCES = [
         "name": "status",
         "description": "引擎兼容、活动任务与存档状态",
         "mimeType": "application/json",
+    },
+    {
+        "uri": "fm27://paths",
+        "name": "paths",
+        "description": "数据、草案、运行与导出目录，含 Windows 与常见 WSL 映射",
+        "mimeType": "application/json",
+    },
+    {
+        "uri": "fm27://workflow/free-mode",
+        "name": "free-mode-workflow",
+        "description": "自由模式战术对比的推荐调用顺序与判读口径",
+        "mimeType": "text/markdown",
     },
 ]
 

@@ -19,16 +19,18 @@ SRC = ROOT / "src"
 
 TOOL_NAMES = {
     "lab_status", "engine_select", "draft_create", "draft_get", "draft_edit",
-    "draft_validate", "draft_list", "draft_delete", "career_import", "career_status",
-    "career_team", "career_opponents", "career_preview", "career_cancel",
-    "experiment_run", "career_run", "job_get", "job_wait", "job_list", "job_action",
-    "results_summary", "results_matches", "results_csv", "fmf_import", "fmf_export",
-    "setpiece_export",
+    "draft_validate", "draft_list", "draft_options", "draft_delete",
+    "career_import", "career_status", "career_team", "career_opponents",
+    "career_preview", "career_cancel", "experiment_run", "career_run", "job_get",
+    "job_wait", "job_list", "job_action", "results_summary", "results_compare",
+    "results_matches", "results_csv", "fmf_import", "fmf_export", "setpiece_export",
 }
 
 BASE_CSV_COLUMNS = [
     "mode", "variant", "seed", "home_goals", "away_goals", "shots",
     "shots_on_target", "xg", "possession", "passes", "completed_passes",
+    "opponent_shots", "opponent_shots_on_target", "xga", "opponent_possession",
+    "opponent_passes", "opponent_completed_passes", "score_changes", "goal_minutes",
     "elapsed_seconds", "attempts", "log",
 ]
 
@@ -247,10 +249,11 @@ class McpSidecarTests(unittest.TestCase):
         response = self.sidecar.request("tools/list")
         tools = response["result"]["tools"]
         names = {tool["name"] for tool in tools}
-        self.assertEqual(len(tools), 26)
+        self.assertEqual(len(tools), 28)
         self.assertEqual(names, TOOL_NAMES)
         for key in ("lab_status", "draft_create", "experiment_run", "job_wait",
-                    "results_csv", "career_run", "setpiece_export"):
+                    "results_csv", "results_compare", "draft_options", "career_run",
+                    "setpiece_export"):
             self.assertIn(key, names)
         by_name = {tool["name"]: tool for tool in tools}
         for tool in tools:
@@ -260,7 +263,9 @@ class McpSidecarTests(unittest.TestCase):
             self.assertIn("required", tool["inputSchema"])
         self.assertEqual(by_name["engine_select"]["inputSchema"]["required"], ["game_root"])
         source = by_name["draft_create"]["inputSchema"]["properties"]["source"]
-        self.assertEqual(source["enum"], ["default", "save", "fmf", "job", "inline"])
+        self.assertEqual(source["enum"], ["default", "save", "fmf", "job", "inline", "draft"])
+        self.assertEqual(by_name["job_wait"]["inputSchema"]["properties"]["timeout_seconds"]["default"],
+                         45)
 
     def test_draft_edit_run_wait_and_results(self):
         created = self.call_tool("draft_create", {"source": "default", "name": "MCP 基线"})
@@ -351,12 +356,185 @@ class McpSidecarTests(unittest.TestCase):
         self.assertTrue(single["structuredContent"]["found"])
         self.assertEqual(single["structuredContent"]["run"]["seed"], 102)
 
+    def text_body(self, result):
+        self.assertFalse(result.get("isError"), result)
+        text = result["content"][0]["text"]
+        return json.loads(text)
+
+    def test_text_payloads_are_json_and_data_rich(self):
+        created = self.call_tool("draft_create", {"source": "default", "name": "文本基线"})
+        draft_id = created["structuredContent"]["draft_id"]
+        body = self.text_body(created)
+        self.assertEqual(body["draft_id"], draft_id)
+        self.assertIn("teams", body["draft"])
+
+        edited = self.call_tool("draft_edit", {
+            "draft_id": draft_id, "op": "mentality", "side": 0, "value": 5,
+        })
+        self.assertTrue(self.text_body(edited)["validation"]["valid"])
+        listed = self.text_body(self.call_tool("draft_list", {}))
+        self.assertIn(draft_id, [item["draft_id"] for item in listed["drafts"]])
+        validated = self.text_body(self.call_tool("draft_validate", {"draft_id": draft_id}))
+        self.assertTrue(validated["valid"])
+        fetched = self.text_body(self.call_tool(
+            "draft_get", {"draft_id": draft_id, "include_scenario": True}))
+        self.assertIn("scenario_bytes", fetched)
+        self.assertNotIn("scenario", fetched)
+
+        submitted = self.call_tool("experiment_run", {
+            "draft_id": draft_id,
+            "seeds": {"start": 301, "count": 3},
+            "event_details": False,
+        })
+        run = submitted["structuredContent"]
+        job_id = run["job_id"]
+        run_text = self.text_body(submitted)
+        self.assertEqual(run_text["total"], 3)
+        progress = self.text_body(self.call_tool(
+            "job_get", {"job_id": job_id, "include_runs": False}))
+        self.assertEqual(progress["id"], job_id)
+        self.assertNotIn("runs", progress)
+        summary = self.text_body(self.call_tool("results_summary", {"job_id": job_id}))
+        self.assertEqual(summary["metrics"]["B"]["n"], 3)
+        waited = self.text_body(self.call_tool(
+            "job_wait", {"job_id": job_id, "timeout_seconds": 5, "poll_ms": 50}))
+        self.assertFalse(waited["timed_out"])
+        status = self.text_body(self.call_tool("lab_status", {}))
+        self.assertIn("paths", status)
+        self.assertIn("data_dir", status["paths"])
+
+    def test_draft_clone_inline_path_batch_edit_and_options(self):
+        base = self.call_tool("draft_create", {"source": "default", "name": "克隆源"})
+        base_id = base["structuredContent"]["draft_id"]
+        scenario = self.call_tool(
+            "draft_get", {"draft_id": base_id, "include_scenario": True}
+        )["structuredContent"]["scenario"]
+
+        cloned = self.call_tool("draft_create", {
+            "source": "draft", "base_draft_id": base_id, "name": "克隆草案",
+        })
+        clone_id = cloned["structuredContent"]["draft_id"]
+        self.assertNotEqual(clone_id, base_id)
+
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "scenario.json"
+            path.write_text(json.dumps(scenario, ensure_ascii=False), encoding="utf-8")
+            inline = self.call_tool("draft_create", {
+                "source": "inline", "scenario_path": str(path), "name": "内联文件",
+            })
+        inline_id = inline["structuredContent"]["draft_id"]
+
+        batch = self.call_tool("draft_edit", {
+            "draft_id": clone_id,
+            "ops": [
+                {"op": "mentality", "side": 0, "value": 6},
+                {"op": "team_instruction", "side": 0, "phase": "in_possession",
+                 "group": "1", "option": 12},
+            ],
+        })
+        batch_body = batch["structuredContent"]
+        self.assertEqual(batch_body["ops"], ["mentality", "team_instruction"])
+        edited_scenario = self.call_tool(
+            "draft_get", {"draft_id": clone_id, "include_scenario": True}
+        )["structuredContent"]["scenario"]
+        self.assertEqual(edited_scenario["teams"][0]["mentality"], 6)
+
+        before = edited_scenario
+        bad = self.call_tool("draft_edit", {
+            "draft_id": clone_id,
+            "ops": [
+                {"op": "mentality", "side": 0, "value": 2},
+                {"op": "role", "side": 0, "phase": "in_possession", "slot": 0,
+                 "role": "BadRole"},
+            ],
+        })
+        self.assertTrue(bad.get("isError"), bad)
+        self.assertIn("可用角色", bad["content"][0]["text"])
+        after = self.call_tool(
+            "draft_get", {"draft_id": clone_id, "include_scenario": True}
+        )["structuredContent"]["scenario"]
+        self.assertEqual(after, before)
+
+        options = self.call_tool("draft_options", {
+            "draft_id": clone_id, "phase": "in_possession",
+            "include_team_instructions": True,
+        })["structuredContent"]
+        self.assertEqual(len(options["phases"][0]["slots"]), 11)
+        self.assertTrue(options["phases"][0]["slots"][0]["valid_roles"])
+        self.assertTrue(options["phases"][0]["team_instructions"])
+        single = self.call_tool("draft_options", {
+            "draft_id": clone_id, "phase": "in_possession", "slot": 3,
+        })["structuredContent"]
+        self.assertEqual(len(single["phases"][0]["slots"]), 1)
+        self.assertEqual(single["phases"][0]["slots"][0]["slot"], 3)
+
+        fetched = self.call_tool(
+            "draft_get", {"draft_id": clone_id, "save_scenario": True}
+        )["structuredContent"]
+        saved_path = Path(fetched["scenario_path"])
+        self.assertTrue(saved_path.is_file())
+        self.assertEqual(hashlib.sha256(saved_path.read_bytes()).hexdigest(),
+                         fetched["scenario_sha256"])
+
+        deleted = self.call_tool("draft_delete", {"draft_ids": [clone_id, inline_id]})
+        deleted_body = deleted["structuredContent"]
+        self.assertEqual(deleted_body["deleted_count"], 2)
+        self.assertEqual(deleted_body["error_count"], 0)
+
+    def test_candidate_batch_and_results_compare(self):
+        first = self.call_tool("draft_create", {"source": "default", "name": "候选甲"})
+        second = self.call_tool("draft_create", {"source": "default", "name": "候选乙"})
+        submitted = self.call_tool("experiment_run", {
+            "candidates": [
+                {"draft_id": first["structuredContent"]["draft_id"], "name": "候选甲批次"},
+                {"draft_id": second["structuredContent"]["draft_id"], "name": "候选乙批次"},
+            ],
+            "seeds": {"start": 401, "count": 3},
+            "workers": 2,
+            "event_details": False,
+        })
+        body = submitted["structuredContent"]
+        self.assertEqual(len(body["jobs"]), 2)
+        self.assertEqual(body["total"], 6)
+        self.assertEqual(len({job["job_id"] for job in body["jobs"]}), 2)
+        compared = self.call_tool("results_compare", {
+            "baseline_job_id": body["jobs"][0]["job_id"],
+            "candidate_job_ids": [body["jobs"][1]["job_id"]],
+            "reps": 200,
+        })["structuredContent"]
+        candidate = compared["candidates"][0]
+        self.assertEqual(compared["baseline"]["metrics"]["n"], 3)
+        self.assertEqual(candidate["paired"]["seeds"], 3)
+        self.assertEqual(candidate["paired"]["win_rate_delta"], 0.0)
+        self.assertEqual(candidate["paired"]["goal_difference_delta"], 0.0)
+
+    def test_job_wait_timeout_returns_next_poll(self):
+        draft = self.call_tool("draft_create", {"source": "default", "name": "等待测试"})
+        submitted = self.call_tool("experiment_run", {
+            "draft_id": draft["structuredContent"]["draft_id"],
+            "seeds": {"start": 501, "count": 3},
+            "event_details": False,
+        })
+        job_id = submitted["structuredContent"]["job_id"]
+        self.mock.hold_job(job_id)
+        try:
+            waited = self.call_tool(
+                "job_wait", {"job_id": job_id, "timeout_seconds": 0, "poll_ms": 50})
+            body = waited["structuredContent"]
+            self.assertTrue(body["timed_out"])
+            self.assertGreaterEqual(body["next_poll_seconds"], 3)
+            self.assertIn("next_poll_seconds", self.text_body(waited))
+        finally:
+            self.mock.release_job(job_id)
+
     def test_resources_prompts_and_career_smoke(self):
         resources = self.sidecar.request("resources/list")["result"]["resources"]
         uris = {resource["uri"] for resource in resources}
         self.assertIn("fm27://manifest", uris)
         self.assertIn("fm27://catalog", uris)
         self.assertIn("fm27://status", uris)
+        self.assertIn("fm27://paths", uris)
+        self.assertIn("fm27://workflow/free-mode", uris)
 
         templates = self.sidecar.request("resources/templates/list")["result"]["resourceTemplates"]
         template_uris = {template["uriTemplate"] for template in templates}
@@ -374,6 +552,10 @@ class McpSidecarTests(unittest.TestCase):
         status = self.sidecar.request(
             "resources/read", {"uri": "fm27://status"})["result"]["contents"][0]
         self.assertIn("engine_compatibility", json.loads(status["text"]))
+        workflow = self.sidecar.request(
+            "resources/read", {"uri": "fm27://workflow/free-mode"})["result"]["contents"][0]
+        self.assertEqual(workflow["mimeType"], "text/markdown")
+        self.assertIn("results_compare", workflow["text"])
         save = self.sidecar.request(
             "resources/read", {"uri": "fm27://saves/" + "a" * 16})["result"]["contents"][0]
         self.assertEqual(json.loads(save["text"])["id"], "a" * 16)

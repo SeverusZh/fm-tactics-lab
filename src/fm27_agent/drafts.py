@@ -119,6 +119,17 @@ class DraftService:
         return scenario, {"kind": "fmf", "side": int(side),
                           "base_draft_id": base_draft, "report": loaded.get("report")}
 
+    def _from_draft(self, params):
+        base_draft_id = params.get("base_draft_id")
+        if not base_draft_id:
+            raise AgentError("validation_failed", "draft 来源需要 base_draft_id")
+        base = self._load(base_draft_id)
+        return copy.deepcopy(base["scenario"]), {
+            "kind": "draft",
+            "base_draft_id": base_draft_id,
+            "base_name": base.get("name"),
+        }
+
     def _from_job(self, params):
         job_id = params.get("job_id")
         variant = params.get("variant") or "B"
@@ -143,12 +154,24 @@ class DraftService:
             scenario, origin = self._from_fmf(params)
         elif source == "job":
             scenario, origin = self._from_job(params)
+        elif source == "draft":
+            scenario, origin = self._from_draft(params)
         elif source == "inline":
-            scenario = self._scenario(params.get("scenario"))
-            origin = {"kind": "inline"}
+            scenario = params.get("scenario")
+            if scenario is None:
+                path = params.get("scenario_path")
+                if not path:
+                    raise AgentError("validation_failed",
+                                     "inline 来源需要 scenario 或 scenario_path")
+                try:
+                    scenario = json.loads(Path(path).expanduser().read_text(encoding="utf-8-sig"))
+                except (OSError, ValueError) as error:
+                    raise AgentError("validation_failed", f"无法读取场景文件：{error}") from None
+            scenario = self._scenario(scenario)
+            origin = {"kind": "inline", "scenario_path": params.get("scenario_path")}
         else:
             raise AgentError("validation_failed",
-                             "source 必须是 default、save、fmf、job 或 inline")
+                             "source 必须是 default、save、fmf、job、inline 或 draft")
         scenario = self._normalize(scenario)
         draft = {
             "schema": 1,
@@ -221,6 +244,21 @@ class DraftService:
         except OSError:
             raise AgentError("not_found", f"草案不存在：{draft_id}") from None
         return {"draft_id": draft_id, "deleted": True}
+
+    def delete_many(self, draft_ids):
+        if not isinstance(draft_ids, list) or not draft_ids:
+            raise AgentError("validation_failed", "draft_ids 必须是非空数组")
+        deleted = []
+        errors = []
+        for draft_id in draft_ids:
+            try:
+                self.delete(draft_id)
+                deleted.append(draft_id)
+            except AgentError as error:
+                errors.append({"draft_id": draft_id, "code": error.code,
+                               "message": error.message})
+        return {"deleted": deleted, "errors": errors,
+                "deleted_count": len(deleted), "error_count": len(errors)}
 
     def _plan(self, scenario, side, phase):
         teams = scenario.get("teams") or []
@@ -326,22 +364,75 @@ class DraftService:
             return None
         raise AgentError("validation_failed", f"未知编辑操作：{op}")
 
-    def edit(self, draft_id, op, **params):
+    def _role_hint(self, scenario, side, phase, slot):
+        try:
+            catalog = (self.client.catalog() or {}).get("catalog") or {}
+            positions = {item["id"]: item for item in catalog.get("positions") or []}
+            roles = {item["id"]: item for item in catalog.get("roles") or []}
+            context = catalog.get("role_eligibility_context") or {}
+            _, plan = self._plan(scenario, side, phase)
+            cells = plan.get("assignments") or []
+            defenders = sum(bool(positions[cell["position"]]["mask"] & 16) for cell in cells)
+            defensive_midfielders = sum(
+                bool(positions[cell["position"]]["mask"] & 0x80) for cell in cells)
+            key = f"{3 if defenders >= 3 else 0}:{int(defensive_midfielders == 1)}"
+            position = cells[slot]["position"]
+            phase_index = 0 if phase == "in_possession" else 1
+            options = context[key][position][phase_index]
+            labels = [f"{roles.get(item, {}).get('label') or item}({item})" for item in options]
+            return f"位置 {position} 可用角色：{'、'.join(labels)}"
+        except (AgentError, KeyError, IndexError, TypeError, ValueError):
+            return None
+
+    def _validate_with_hint(self, scenario, operations):
+        try:
+            return self.client.validate(scenario)
+        except AgentError as error:
+            if error.code != "validation_failed":
+                raise
+            hints = []
+            for operation, params in operations:
+                if operation != "role":
+                    continue
+                hint = self._role_hint(scenario, params.get("side"), params.get("phase"),
+                                       params.get("slot"))
+                if hint and hint not in hints:
+                    hints.append(hint)
+            if hints:
+                raise AgentError("validation_failed",
+                                 f"{error.message}；{'；'.join(hints)}",
+                                 error.details) from None
+            raise
+
+    def edit_many(self, draft_id, operations):
+        if not isinstance(operations, list) or not operations:
+            raise AgentError("validation_failed", "ops 必须是非空数组")
+        normalized_ops = []
+        for index, item in enumerate(operations):
+            if not isinstance(item, dict) or not isinstance(item.get("op"), str):
+                raise AgentError("validation_failed", f"ops[{index}] 缺少 op")
+            params = {key: value for key, value in item.items() if key != "op"}
+            normalized_ops.append((item["op"], params))
         draft = self._load(draft_id)
         scenario = copy.deepcopy(draft["scenario"])
-        replacement = self._apply(scenario, op, params)
-        if replacement is not None:
-            scenario = replacement
+        for operation, params in normalized_ops:
+            replacement = self._apply(scenario, operation, params)
+            if replacement is not None:
+                scenario = replacement
         normalized = self._normalize(scenario)
-        validated = self.client.validate(normalized)
+        validated = self._validate_with_hint(normalized, normalized_ops)
         draft["scenario"] = normalized
         self._save(draft)
         return {
             "draft_id": draft_id,
             "changed": True,
+            "ops": [operation for operation, _ in normalized_ops],
             "summary": self.summary(draft),
             "validation": {"valid": True, "records": validated.get("records")},
         }
+
+    def edit(self, draft_id, op, **params):
+        return self.edit_many(draft_id, [{**params, "op": op}])
 
     def validate(self, draft_id):
         draft = self._load(draft_id)

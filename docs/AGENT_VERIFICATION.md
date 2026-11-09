@@ -33,7 +33,7 @@ python3 -m unittest discover -s tests -v
 
 - test_agent_contract：token、Host、Cookie、错误封套、分页、幂等、发现文件与启动脚本。
 - test_agent_client：发现、请求、错误映射、任务等待、分页、种子展开。
-- test_agent_drafts：五种来源、语义编辑、校验回滚、列表与删除。
+- test_agent_drafts：六种来源、语义编辑、校验回滚、列表与删除。
 - test_agent_server：路由、清单、分页、幂等、忙碌冲突、shutdown。
 - test_agent_cli：命令行参数、JSON 输出、退出码、等待、CSV、career 与 FMF。
 - test_agent_mcp：stdio 初始化、工具列表、工具调用、资源、prompt、错误。
@@ -81,7 +81,7 @@ Mock 服务端位于 tests/agent_mock.py，只实现协议形状，不实现业�
 
 - 找不到 endpoint.json：确认 App 已启动，或检查 FM27LAB_DATA 是否指向正确数据目录。
 - 401：确认调用方读取的是当前实例的 endpoint.json；App 重启后 token 会轮换。
-- 409 engine_busy：读取返回中的 active_job，等待或取消后再提交。
+- 409 engine_busy：控制面操作读取返回中的 active_job，等待或取消后再提交；自由模式 /runs 会进入队列。
 - 引擎不兼容：按现有引擎设置选择游戏根目录，或按 TROUBLESHOOTING.md 检查构建匹配。
 - MCP 无响应：确认 sidecar 的 stderr 日志；stdout 只承载协议消息。
 
@@ -117,4 +117,5 @@ Mock 服务端位于 tests/agent_mock.py，只实现协议形状，不实现业�
 - 存档读取依赖 fmsave 0.9.0；不同构建或损坏存档仍需按 TROUBLESHOOTING.md 排查。
 - MCP 协议版本支持 2025-06-18 与 2024-11-05；其他版本按客户端协商处理。
 - 首期不提供定位球片段实验、实验执行力与原生 AI 生成对手的 Agent 工具。
-- 多 Agent 并发仍为单任务；忙时返回 engine_busy。
+- 多 Agent 自由模式提交进入串行队列，由引擎逐个执行；引擎切换、存档与控制面操作仍要求空闲。
+- 队列、MCP 紧凑文本与新增工具已在源码测试集验证；Windows 实机复验需在重新打包后执行。

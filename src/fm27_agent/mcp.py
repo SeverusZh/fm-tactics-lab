@@ -7,6 +7,7 @@ import csv
 import hashlib
 import io
 import json
+import random
 import re
 import sys
 import threading
@@ -23,9 +24,22 @@ PROTOCOL_VERSIONS = schemas.PROTOCOL_VERSIONS
 LATEST_PROTOCOL = schemas.LATEST_PROTOCOL
 CAREER_TERMINAL = ("complete", "error", "empty", "cancelled")
 MAX_WAIT_SECONDS = 300.0
-MAX_TEXT_CHARS = 2048
+MAX_TEXT_CHARS = 16000
 RUN_PAGE_SIZE = 200
 EXPORT_SUBDIR = ("agent", "exports")
+FREE_MODE_WORKFLOW = """# 自由模式战术对比
+
+1. lab_status 确认引擎兼容且无活动任务，记录 paths。
+2. draft_create source=default -> fmf_import 双方 -> draft_validate。
+3. 构造受控夹具：draft_get save_scenario=true 取得场景，双方首发属性一致、lineup 相同、位置熟练度满值；draft_create source=inline scenario_path=<文件> 并 draft_validate。
+4. 候选用 draft_create source=draft 克隆受控基准，draft_edit ops 批量修改，draft_validate。
+5. experiment_run 单草案或 candidates，同种子 200 场，workers 用上限，event_details=false。
+6. job_get include_runs=false 看进度与 queue_position；job_wait timeout_seconds<=45；超时按 next_poll_seconds 轮询。
+7. results_summary 读单任务；results_compare 读跨任务同种子配对与 95%CI；results_csv 取逐场双方数据。
+8. 200 场只做筛选；确认需两个独立种子块各 200 场且方向一致；再做消融。
+9. fmf_export 导出后重新 fmf_import，静态对比场景并跑同种子 200 场验证逐场一致。
+"""
+
 
 PARSE_ERROR = -32700
 INVALID_REQUEST = -32600
@@ -38,6 +52,8 @@ RESOURCE_NOT_FOUND = -32002
 BASE_CSV_COLUMNS = [
     "mode", "variant", "seed", "home_goals", "away_goals", "shots",
     "shots_on_target", "xg", "possession", "passes", "completed_passes",
+    "opponent_shots", "opponent_shots_on_target", "xga", "opponent_possession",
+    "opponent_passes", "opponent_completed_passes", "score_changes", "goal_minutes",
     "elapsed_seconds", "attempts", "log",
 ]
 CAREER_CSV_COLUMNS = ["opponent_key", "venue", "tested_side"]
@@ -159,6 +175,87 @@ def _truncate(text):
     return text[: MAX_TEXT_CHARS - 16] + "…（已截断）"
 
 
+def _json_text(data, hint=None):
+    text = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
+    if len(text) <= MAX_TEXT_CHARS:
+        return text
+    value = {
+        "truncated": True,
+        "chars": len(text),
+        "keys": list(data)[:24] if isinstance(data, dict) else [],
+        "hint": hint or "结果过大，请使用分页参数或读取运行目录 summary.json",
+    }
+    return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+
+
+def _wsl_hint(path):
+    text = str(path or "")
+    match = re.match(r"^([A-Za-z]):[\\/](.*)$", text)
+    if not match:
+        return None
+    return "/mnt/" + match.group(1).lower() + "/" + match.group(2).replace("\\", "/")
+
+
+def _progress_view(job):
+    total = job.get("total")
+    completed = job.get("completed")
+    progress = round(completed / total, 4) if isinstance(total, int) and total else None
+    return {
+        "id": job.get("id") or job.get("job_id"),
+        "name": job.get("name"),
+        "status": job.get("status"),
+        "mode": job.get("mode"),
+        "completed": completed,
+        "total": total,
+        "progress": progress,
+        "queue_position": job.get("queue_position"),
+        "eta_seconds": job.get("eta_seconds"),
+        "elapsed_seconds": job.get("elapsed_seconds"),
+        "matches_per_minute": job.get("matches_per_minute"),
+        "active_count": len(job.get("active") or []),
+        "failures": len(job.get("failures") or []),
+        "error": job.get("error"),
+    }
+
+
+def _draft_view(draft):
+    teams = []
+    for team in draft.get("teams") or []:
+        teams.append({
+            "name": team.get("name"),
+            "tactic_name": team.get("tactic_name"),
+            "mentality": team.get("mentality"),
+            "lineup": team.get("lineup"),
+            "players": team.get("players"),
+        })
+    return {
+        "draft_id": draft.get("draft_id"),
+        "name": draft.get("name"),
+        "source": draft.get("source"),
+        "updated_at": draft.get("updated_at"),
+        "scenario_schema": draft.get("scenario_schema"),
+        "teams": teams,
+    }
+
+
+def _match_view(run):
+    teams = (run.get("statistics") or {}).get("teams") or []
+    home = teams[0] if len(teams) > 0 else {}
+    away = teams[1] if len(teams) > 1 else {}
+    goals_for, goals_against = _score(run)
+    return {
+        "variant": run.get("variant"),
+        "seed": run.get("seed"),
+        "score": [goals_for, goals_against],
+        "xg": home.get("xg"),
+        "xga": away.get("xg"),
+        "shots": home.get("shots"),
+        "sot": home.get("shots_on_target"),
+        "poss": home.get("possession"),
+        "elapsed_seconds": run.get("elapsed_seconds"),
+    }
+
+
 def _number(value):
     try:
         return float(value)
@@ -237,6 +334,97 @@ def _paired_metrics(runs):
     }
 
 
+def _oriented_score(run):
+    score = (run.get("result") or {}).get("score") or []
+    if len(score) < 2:
+        return None, None
+    side = run.get("tested_side")
+    side = side if side in (0, 1) else 0
+    return score[side], score[1 - side]
+
+
+def _oriented_stats(run):
+    teams = (run.get("statistics") or {}).get("teams") or []
+    side = run.get("tested_side")
+    side = side if side in (0, 1) else 0
+    if len(teams) <= side:
+        return {}
+    return teams[side]
+
+
+def _compare_metrics(runs):
+    n = len(runs)
+    if not n:
+        return {"n": 0}
+    wins = 0
+    draws = 0
+    goals_for = 0
+    goals_against = 0
+    points = 0
+    xg = 0.0
+    xga = 0.0
+    shots = 0.0
+    shots_on_target = 0.0
+    possession = 0.0
+    for run in runs:
+        gf, ga = _oriented_score(run)
+        if gf is None:
+            continue
+        goals_for += gf
+        goals_against += ga
+        if gf > ga:
+            wins += 1
+            points += 3
+        elif gf == ga:
+            draws += 1
+            points += 1
+        me = _oriented_stats(run)
+        opponent = (run.get("statistics") or {}).get("teams") or []
+        other = opponent[1] if run.get("tested_side") in (0, None) else opponent[0]
+        xg += _number(me.get("xg"))
+        xga += _number(other.get("xg"))
+        shots += _number(me.get("shots"))
+        shots_on_target += _number(me.get("shots_on_target"))
+        possession += _number(me.get("possession"))
+    return {
+        "n": n,
+        "wins": wins,
+        "draws": draws,
+        "losses": n - wins - draws,
+        "win_rate": round(wins / n, 4),
+        "points": round(points / n, 4),
+        "goals_for": round(goals_for / n, 4),
+        "goals_against": round(goals_against / n, 4),
+        "xg": round(xg / n, 4),
+        "xga": round(xga / n, 4),
+        "shots": round(shots / n, 3),
+        "shots_on_target": round(shots_on_target / n, 3),
+        "possession": round(possession / n, 4),
+    }
+
+
+def _oriented_xgd(run):
+    teams = (run.get("statistics") or {}).get("teams") or []
+    side = run.get("tested_side")
+    side = side if side in (0, 1) else 0
+    if len(teams) <= side:
+        return 0.0
+    return _number(teams[side].get("xg")) - _number(teams[1 - side].get("xg"))
+
+
+def _bootstrap_ci(values, reps=2000, alpha=0.05, seed=20261108):
+    if not values:
+        return [None, None]
+    rng = random.Random(seed)
+    size = len(values)
+    means = []
+    for _ in range(reps):
+        means.append(sum(values[rng.randrange(size)] for _ in range(size)) / size)
+    means.sort()
+    return [round(means[int(alpha / 2 * reps)], 4),
+            round(means[int((1 - alpha / 2) * reps)], 4)]
+
+
 class McpServer:
     def __init__(self, data_dir=None, base_url=None, token=None, timeout=120.0,
                  stdin=None, stdout=None, stderr=None):
@@ -263,6 +451,7 @@ class McpServer:
             "draft_edit": self._tool_draft_edit,
             "draft_validate": self._tool_draft_validate,
             "draft_list": self._tool_draft_list,
+            "draft_options": self._tool_draft_options,
             "draft_delete": self._tool_draft_delete,
             "career_import": self._tool_career_import,
             "career_status": self._tool_career_status,
@@ -277,6 +466,7 @@ class McpServer:
             "job_list": self._tool_job_list,
             "job_action": self._tool_job_action,
             "results_summary": self._tool_results_summary,
+            "results_compare": self._tool_results_compare,
             "results_matches": self._tool_results_matches,
             "results_csv": self._tool_results_csv,
             "fmf_import": self._tool_fmf_import,
@@ -535,56 +725,155 @@ class McpServer:
 
     def _summary(self, name, data):
         if not isinstance(data, dict):
-            return _truncate(json.dumps(data, ensure_ascii=False))
+            return _json_text(data)
         if name == "lab_status":
             manifest = data.get("manifest") or {}
             engine = data.get("engine") or {}
-            compatible = "是" if engine.get("compatible") else "否"
-            return _truncate(
-                f"应用 {manifest.get('api') or '?'} / 版本 {manifest.get('server_version') or '?'}；"
-                f"引擎兼容={compatible}；活动任务={data.get('active_job') or '无'}；"
-                f"存档活动={data.get('save_active') or '无'}"
-            )
+            return _json_text({
+                "api": manifest.get("api"),
+                "server_version": manifest.get("server_version"),
+                "adapter_version": manifest.get("adapter_version"),
+                "engine_build": manifest.get("engine_build"),
+                "scenario_schema": manifest.get("scenario_schema"),
+                "batch_schema": manifest.get("batch_schema"),
+                "capabilities": manifest.get("capabilities"),
+                "limits": manifest.get("limits"),
+                "engine": {
+                    "compatible": engine.get("compatible"),
+                    "profile_version": (engine.get("profile") or {}).get("version"),
+                },
+                "active_job": _progress_view(data["active_job"]) if data.get("active_job") else None,
+                "save_active": data.get("save_active"),
+                "paths": data.get("paths"),
+            })
         if name == "draft_create":
-            return f"已创建草案 {data.get('draft_id')}"
+            return _json_text({
+                "draft_id": data.get("draft_id"),
+                "draft": _draft_view((data.get("draft") or {})),
+            })
         if name == "draft_edit":
-            return f"草案 {data.get('draft_id')} 已更新"
+            return _json_text({
+                "draft_id": data.get("draft_id"),
+                "changed": data.get("changed"),
+                "ops": data.get("ops"),
+                "validation": data.get("validation"),
+                "draft": _draft_view((data.get("summary") or {})),
+            })
         if name == "draft_validate":
-            state = "通过" if data.get("valid") else "失败"
-            return f"草案 {data.get('draft_id')} 校验{state}"
+            return _json_text({
+                "draft_id": data.get("draft_id"),
+                "valid": data.get("valid"),
+                "errors": data.get("errors"),
+                "records": data.get("records"),
+                "draft": _draft_view((data.get("summary") or {})),
+            })
         if name == "draft_list":
             drafts = data.get("drafts") or []
-            return f"共 {len(drafts)} 个草案"
+            return _json_text({"drafts": [_draft_view(item) for item in drafts]})
+        if name == "draft_get":
+            value = _draft_view(data)
+            scenario = data.get("scenario")
+            if isinstance(scenario, dict):
+                value["scenario_bytes"] = len(json.dumps(scenario, ensure_ascii=False))
+            for key in ("scenario_path", "scenario_sha256"):
+                if data.get(key) is not None:
+                    value[key] = data.get(key)
+            return _json_text(value)
+        if name == "draft_options":
+            return _json_text(data)
         if name == "draft_delete":
-            return f"已删除草案 {data.get('draft_id')}"
+            return _json_text(data)
         if name in ("experiment_run", "career_run"):
-            return f"已提交任务 {data.get('job_id')}，共 {data.get('total')} 场"
+            return _json_text({
+                "job_id": data.get("job_id"),
+                "total": data.get("total"),
+                "workers": data.get("workers"),
+                "mode": data.get("mode"),
+                "queued": data.get("queued"),
+                "queue_position": data.get("queue_position"),
+                "seeds": data.get("seeds"),
+                "jobs": data.get("jobs"),
+            })
         if name == "job_wait":
-            extras = ""
-            if data.get("timed_out"):
-                extras += "，已超时"
-            if data.get("stopped"):
-                extras += "，已停止等待"
-            return (f"任务 {data.get('id') or data.get('job_id')} 状态 {data.get('status')}，"
-                    f"完成 {data.get('completed')}/{data.get('total')}{extras}")
+            value = _progress_view(data)
+            value["timed_out"] = data.get("timed_out")
+            value["stopped"] = data.get("stopped")
+            value["next_poll_seconds"] = data.get("next_poll_seconds")
+            return _json_text(value)
+        if name == "job_get":
+            return _json_text(_progress_view(data))
+        if name == "job_list":
+            jobs = data.get("jobs") or []
+            return _json_text({
+                "jobs": [_progress_view(job) for job in jobs],
+                "total": data.get("total"),
+                "next_offset": data.get("next_offset"),
+            })
         if name == "job_action":
-            return f"任务 {data.get('job_id')} 操作 {data.get('action')} 已提交"
+            return _json_text(data)
         if name == "results_summary":
-            return f"任务 {data.get('job_id')} 状态 {data.get('status')}，汇总 {len(data.get('metrics') or {})} 个方案"
+            return _json_text({
+                "job_id": data.get("job_id"),
+                "status": data.get("status"),
+                "metrics": data.get("metrics"),
+                "paired": data.get("paired"),
+                "distributions": data.get("distributions"),
+                "timings": data.get("timings"),
+                "failures": data.get("failures"),
+            })
+        if name == "results_compare":
+            return _json_text(data)
         if name == "results_csv":
-            return f"CSV 已写入 {data.get('path')}，{data.get('rows')} 行"
+            return _json_text({
+                "job_id": data.get("job_id"),
+                "path": data.get("path"),
+                "path_wsl_hint": data.get("path_wsl_hint"),
+                "sha256": data.get("sha256"),
+                "rows": data.get("rows"),
+                "columns": data.get("columns"),
+            })
+        if name == "results_matches":
+            if data.get("seed") is not None:
+                run = data.get("run") or {}
+                return _json_text({
+                    "job_id": data.get("job_id"),
+                    "seed": data.get("seed"),
+                    "found": data.get("found"),
+                    "run": _match_view(run) if run else None,
+                })
+            rows = [_match_view(run) for run in (data.get("runs") or [])]
+            return _json_text({
+                "job_id": data.get("job_id"),
+                "runs_total": data.get("runs_total"),
+                "runs_offset": data.get("runs_offset"),
+                "next_offset": data.get("next_offset"),
+                "runs": rows,
+            })
+        if name in ("fmf_import", "fmf_export", "setpiece_export"):
+            return _json_text(data)
         if name == "career_import":
-            return f"存档 {data.get('save_id')} 状态 {data.get('status')}"
-        return _truncate(json.dumps(data, ensure_ascii=False))
+            return _json_text(data)
+        return _json_text(data)
 
     def _tool_lab_status(self, args):
         def operation(client):
             status = client.status()
+            data_dir = Path(getattr(client, "data_dir", None) or self.data_dir)
+            paths = {
+                "data_dir": str(data_dir),
+                "runs_dir": str(data_dir / "runs"),
+                "drafts_dir": str(data_dir / "agent" / "drafts"),
+                "exports_dir": str(data_dir / "agent" / "exports"),
+            }
+            paths["data_dir_wsl_hint"] = _wsl_hint(paths["data_dir"])
+            paths["runs_dir_wsl_hint"] = _wsl_hint(paths["runs_dir"])
+            paths["exports_dir_wsl_hint"] = _wsl_hint(paths["exports_dir"])
             return {
                 "manifest": client.manifest(),
                 "engine": status.get("engine_compatibility"),
                 "active_job": status.get("active_job"),
                 "save_active": status.get("save_active"),
+                "paths": paths,
             }
         return self._with_client(operation)
 
@@ -595,7 +884,7 @@ class McpServer:
         source = args["source"]
         keys = ("save_id", "club_uid", "tactic_index", "lineup", "bench", "side",
                 "file_base64", "file_path", "base_scenario", "base_draft_id", "job_id",
-                "variant", "scenario")
+                "variant", "scenario", "scenario_path")
         extra = {key: args[key] for key in keys if key in args}
 
         def operation(client):
@@ -604,15 +893,41 @@ class McpServer:
         return self._with_client(operation)
 
     def _tool_draft_get(self, args):
+        draft_id = args["draft_id"]
+        include_scenario = bool(args.get("include_scenario", False))
+        save_scenario = bool(args.get("save_scenario", False))
+
         def operation(client):
-            return self._drafts(client).get(
-                args["draft_id"], include_scenario=bool(args.get("include_scenario", False)))
+            service = self._drafts(client)
+            value = service.get(draft_id, include_scenario=include_scenario or save_scenario)
+            if save_scenario:
+                scenario = value.pop("scenario", None)
+                if not isinstance(scenario, dict):
+                    raise AgentError("internal_error", "草案场景缺失")
+                data_dir = Path(getattr(client, "data_dir", None) or self.data_dir)
+                target = data_dir.joinpath(*EXPORT_SUBDIR, "scenarios", f"{draft_id}.json")
+                target.parent.mkdir(parents=True, exist_ok=True)
+                payload = json.dumps(scenario, ensure_ascii=False, indent=2).encode("utf-8")
+                target.write_bytes(payload)
+                value["scenario_path"] = str(target)
+                value["scenario_sha256"] = hashlib.sha256(payload).hexdigest()
+                value["scenario_bytes"] = len(payload)
+                if include_scenario:
+                    value["scenario"] = scenario
+            return value
         return self._with_client(operation)
 
     def _tool_draft_edit(self, args):
         draft_id = args["draft_id"]
+        if "ops" in args:
+            operations = args["ops"]
+
+            def batch(client):
+                return self._drafts(client).edit_many(draft_id, operations)
+            return self._with_client(batch)
         op = args["op"]
-        extra = {key: value for key, value in args.items() if key not in ("draft_id", "op")}
+        extra = {key: value for key, value in args.items()
+                 if key not in ("draft_id", "op", "ops")}
         return self._with_client(lambda client: self._drafts(client).edit(draft_id, op, **extra))
 
     def _tool_draft_validate(self, args):
@@ -621,8 +936,89 @@ class McpServer:
     def _tool_draft_list(self, args):
         return self._with_client(lambda client: {"drafts": self._drafts(client).list()})
 
+    def _tool_draft_options(self, args):
+        draft_id = args["draft_id"]
+        side = int(args.get("side", 0))
+        phase = args.get("phase")
+        slot = args.get("slot")
+        include_team = bool(args.get("include_team_instructions", False))
+
+        def operation(client):
+            service = self._drafts(client)
+            scenario = service.scenario(draft_id)
+            catalog = (client.catalog() or {}).get("catalog") or {}
+            positions = {item["id"]: item for item in catalog.get("positions") or []}
+            roles = {item["id"]: item for item in catalog.get("roles") or []}
+            context = catalog.get("role_eligibility_context") or {}
+            groups = {int(item["id"]): item for item in catalog.get("team_instructions") or []}
+            teams = scenario.get("teams") or []
+            if side not in (0, 1) or side >= len(teams):
+                raise AgentError("validation_failed", "side 必须是 0 或 1")
+            team = teams[side]
+            phases = [phase] if phase else ["in_possession", "out_of_possession"]
+            result = {
+                "draft_id": draft_id,
+                "side": side,
+                "duties": list(catalog.get("duties") or []),
+                "phases": [],
+            }
+            for current_phase in phases:
+                plan = next((item for item in team.get("phase_plans") or []
+                             if item.get("phase") == current_phase), None)
+                if plan is None:
+                    raise AgentError("validation_failed", f"未知阶段：{current_phase}")
+                cells = plan.get("assignments") or []
+                defenders = sum(bool(positions.get(cell.get("position"), {}).get("mask", 0) & 16)
+                                for cell in cells)
+                defensive_midfielders = sum(
+                    bool(positions.get(cell.get("position"), {}).get("mask", 0) & 0x80)
+                    for cell in cells)
+                key = f"{3 if defenders >= 3 else 0}:{int(defensive_midfielders == 1)}"
+                phase_index = 0 if current_phase == "in_possession" else 1
+                entries = []
+                for index, cell in enumerate(cells):
+                    if slot is not None and index != slot:
+                        continue
+                    position = cell.get("position")
+                    options = (context.get(key) or {}).get(position) or [[], []]
+                    option_ids = options[phase_index] if len(options) > phase_index else []
+                    entries.append({
+                        "slot": index,
+                        "position": position,
+                        "role": cell.get("role"),
+                        "duty": cell.get("duty"),
+                        "valid_roles": [
+                            {"id": role_id, "label": (roles.get(role_id) or {}).get("label")}
+                            for role_id in option_ids
+                        ],
+                    })
+                value = {"phase": current_phase, "context_key": key, "slots": entries}
+                if include_team:
+                    team_instructions = []
+                    for group_id, current_value in (plan.get("team_instructions") or {}).items():
+                        if not str(group_id).isdigit():
+                            continue
+                        group = groups.get(int(group_id))
+                        if group is None:
+                            continue
+                        team_instructions.append({
+                            "group": str(group_id),
+                            "label": group.get("label"),
+                            "value": current_value,
+                            "options": [{"id": option["id"], "label": option["label"]}
+                                        for option in group.get("options") or []],
+                        })
+                    value["team_instructions"] = team_instructions
+                result["phases"].append(value)
+            return result
+        return self._with_client(operation)
+
     def _tool_draft_delete(self, args):
-        return self._with_client(lambda client: self._drafts(client).delete(args["draft_id"]))
+        if "draft_ids" in args:
+            return self._with_client(
+                lambda client: self._drafts(client).delete_many(args["draft_ids"]))
+        return self._with_client(
+            lambda client: self._drafts(client).delete(args["draft_id"]))
 
     def _tool_career_import(self, args):
         save_path = args["save_path"]
@@ -687,24 +1083,59 @@ class McpServer:
         raise AgentError("validation_failed", "取消对手扫描需要 club_uid")
 
     def _tool_experiment_run(self, args):
-        draft_id = args["draft_id"]
         baseline_id = args.get("baseline_draft_id")
         seeds = expand_seeds(args["seeds"])
         workers = args.get("workers")
         event_details = bool(args.get("event_details", True))
         name = args.get("name")
+        per_job_total = len(seeds) * (2 if baseline_id else 1)
+        seed_summary = {"count": len(seeds), "first": seeds[0], "last": seeds[-1]}
+        candidates = args.get("candidates")
 
-        def operation(client):
-            drafts = self._drafts(client)
+        def submit(client, drafts, draft_id, draft_name):
             scenario = drafts.scenario(draft_id)
             reference = drafts.scenario(baseline_id) if baseline_id else None
             created = client.run(scenario, reference=reference, seeds=seeds, workers=workers,
-                                 event_details=event_details, name=name)
+                                 event_details=event_details, name=draft_name)
+            total = created.get("total")
             return {
                 "job_id": created.get("id"),
-                "total": created.get("total"),
+                "draft_id": draft_id,
+                "name": draft_name,
+                "total": total if isinstance(total, int) else per_job_total,
                 "workers": created.get("workers", workers or 1),
+                "mode": created.get("mode") or ("comparison" if baseline_id else "single"),
+                "queued": created.get("queued"),
+                "queue_position": created.get("queue_position"),
             }
+
+        def operation(client):
+            drafts = self._drafts(client)
+            if candidates:
+                jobs = []
+                try:
+                    for candidate in candidates:
+                        candidate_id = candidate["draft_id"]
+                        candidate_name = candidate.get("name") or name
+                        jobs.append(submit(client, drafts, candidate_id, candidate_name))
+                except Exception:
+                    for job in jobs:
+                        try:
+                            client.cancel(job["job_id"])
+                        except Exception:
+                            pass
+                    raise
+                return {
+                    "jobs": jobs,
+                    "job_id": jobs[0]["job_id"],
+                    "total": sum(job["total"] for job in jobs),
+                    "workers": jobs[0]["workers"],
+                    "mode": jobs[0]["mode"],
+                    "seeds": seed_summary,
+                }
+            job = submit(client, drafts, args["draft_id"], name)
+            job["seeds"] = seed_summary
+            return job
         return self._with_client(operation, retry=False)
 
     def _tool_career_run(self, args):
@@ -727,24 +1158,37 @@ class McpServer:
             created = client.career_run(save_id, club_uid, scenario, opponents, count, first_seed,
                                         reference=reference, workers=workers,
                                         event_details=event_details, name=name)
+            total = created.get("total")
             return {
                 "job_id": created.get("id"),
-                "total": created.get("total"),
+                "total": total if isinstance(total, int) else len(opponents) * count * (2 if baseline_id else 1),
                 "workers": created.get("workers", workers or 1),
+                "mode": created.get("mode") or ("comparison" if baseline_id else "single"),
+                "queued": created.get("queued"),
+                "queue_position": created.get("queue_position"),
             }
         return self._with_client(operation, retry=False)
 
     def _tool_job_get(self, args):
-        return self._with_client(lambda client: client.job(
-            args["job_id"],
-            runs_offset=args.get("runs_offset"),
-            runs_limit=args.get("runs_limit"),
-            variant=args.get("variant"),
-        ))
+        include_runs = bool(args.get("include_runs", True))
+        runs_limit = args.get("runs_limit") if include_runs else 1
+
+        def operation(client):
+            detail = client.job(
+                args["job_id"],
+                runs_offset=args.get("runs_offset"),
+                runs_limit=runs_limit,
+                variant=args.get("variant"),
+            )
+            if not include_runs:
+                detail = dict(detail)
+                detail["runs"] = []
+            return detail
+        return self._with_client(operation)
 
     def _tool_job_wait(self, args):
         job_id = args["job_id"]
-        timeout = min(max(_number(args.get("timeout_seconds", 60)), 0.0), MAX_WAIT_SECONDS)
+        timeout = min(max(_number(args.get("timeout_seconds", 45)), 0.0), MAX_WAIT_SECONDS)
         poll = max(0.05, _number(args.get("poll_ms", 1000)) / 1000.0)
         context = self._context()
         token = context.progress_token if context is not None else None
@@ -767,10 +1211,18 @@ class McpServer:
             "logger": SERVER_NAME,
             "data": {"job_id": job_id, "event": "wait_started", "timeout_seconds": timeout},
         })
-        return self._with_client(lambda client: client.wait_job(
-            job_id, timeout=timeout, poll=poll, on_progress=on_progress,
-            should_stop=should_stop,
-        ))
+
+        def operation(client):
+            job = client.wait_job(job_id, timeout=timeout, poll=poll, on_progress=on_progress,
+                                  should_stop=should_stop)
+            if isinstance(job, dict) and job.get("timed_out"):
+                eta = job.get("eta_seconds")
+                if isinstance(eta, (int, float)) and eta >= 0:
+                    job["next_poll_seconds"] = max(3, min(30, int(eta) + 2))
+                else:
+                    job["next_poll_seconds"] = 5
+            return job
+        return self._with_client(operation)
 
     def _tool_job_list(self, args):
         return self._with_client(lambda client: client.jobs(
@@ -835,6 +1287,72 @@ class McpServer:
             "timings": timings,
         }
 
+    def _tool_results_compare(self, args):
+        baseline_id = args["baseline_job_id"]
+        candidate_ids = list(args["candidate_job_ids"])
+        variant = args.get("variant") or "B"
+        reps = int(args.get("reps", 2000))
+
+        def select_runs(job):
+            runs = list(job.get("runs") or [])
+            filtered = [run for run in runs if run.get("variant") == variant]
+            return filtered or runs
+
+        def operation(client):
+            baseline = self._fetch_job(client, baseline_id)
+            baseline_runs = select_runs(baseline)
+            baseline_by_seed = {run["seed"]: run for run in baseline_runs
+                                if isinstance(run.get("seed"), int)}
+            result = {
+                "baseline": {
+                    "job_id": baseline.get("id") or baseline_id,
+                    "name": baseline.get("name"),
+                    "metrics": _compare_metrics(baseline_runs),
+                },
+                "variant": variant,
+                "candidates": [],
+            }
+            for candidate_id in candidate_ids:
+                candidate = self._fetch_job(client, candidate_id)
+                candidate_runs = select_runs(candidate)
+                candidate_by_seed = {run["seed"]: run for run in candidate_runs
+                                     if isinstance(run.get("seed"), int)}
+                seeds = sorted(set(baseline_by_seed) & set(candidate_by_seed))
+                win_delta = []
+                points_delta = []
+                gd_delta = []
+                xgd_delta = []
+                for seed in seeds:
+                    base_run = baseline_by_seed[seed]
+                    candidate_run = candidate_by_seed[seed]
+                    bgf, bga = _oriented_score(base_run)
+                    cgf, cga = _oriented_score(candidate_run)
+                    if None in (bgf, bga, cgf, cga):
+                        continue
+                    win_delta.append((1 if cgf > cga else 0) - (1 if bgf > bga else 0))
+                    points_delta.append((3 if cgf > cga else 1 if cgf == cga else 0)
+                                        - (3 if bgf > bga else 1 if bgf == bga else 0))
+                    gd_delta.append((cgf - cga) - (bgf - bga))
+                    xgd_delta.append(_oriented_xgd(candidate_run) - _oriented_xgd(base_run))
+                result["candidates"].append({
+                    "job_id": candidate.get("id") or candidate_id,
+                    "name": candidate.get("name"),
+                    "metrics": _compare_metrics(candidate_runs),
+                    "paired": {
+                        "seeds": len(win_delta),
+                        "win_rate_delta": round(sum(win_delta) / len(win_delta), 4) if win_delta else None,
+                        "win_rate_delta_ci": _bootstrap_ci(win_delta, reps),
+                        "points_delta": round(sum(points_delta) / len(points_delta), 4) if points_delta else None,
+                        "points_delta_ci": _bootstrap_ci(points_delta, reps),
+                        "goal_difference_delta": round(sum(gd_delta) / len(gd_delta), 4) if gd_delta else None,
+                        "goal_difference_delta_ci": _bootstrap_ci(gd_delta, reps),
+                        "xgd_delta": round(sum(xgd_delta) / len(xgd_delta), 4) if xgd_delta else None,
+                        "xgd_delta_ci": _bootstrap_ci(xgd_delta, reps),
+                    },
+                })
+            return result
+        return self._with_client(operation)
+
     def _tool_results_matches(self, args):
         job_id = args["job_id"]
         variant = args.get("variant")
@@ -875,6 +1393,7 @@ class McpServer:
             return {
                 "job_id": job_id,
                 "path": str(target),
+                "path_wsl_hint": _wsl_hint(target),
                 "sha256": sha256,
                 "rows": count,
                 "columns": columns,
@@ -912,10 +1431,13 @@ class McpServer:
         def operation(client):
             scenario = self._drafts(client).scenario(draft_id)
             exported = client.fmf_export(side, scenario, name=name)
+            path = exported.get("path")
             return {
                 "draft_id": draft_id,
                 "filename": exported.get("filename"),
-                "path": exported.get("path"),
+                "path": path,
+                "path_wsl_hint": _wsl_hint(path),
+                "install_hint": "把导出的 .fmf 复制到 FM27 战术目录，或在游戏战术界面导入。",
                 "sha256": exported.get("sha256"),
                 "report": exported.get("report"),
             }
@@ -1029,6 +1551,23 @@ class McpServer:
             return self._resource_json(uri, self._with_client(lambda client: client.catalog()))
         if host == "status" and not parts:
             return self._resource_json(uri, self._with_client(lambda client: client.status()))
+        if host == "workflow" and parts == ["free-mode"]:
+            return {"contents": [{"uri": uri, "mimeType": "text/markdown",
+                                  "text": FREE_MODE_WORKFLOW}]}
+        if host == "paths" and not parts:
+            def operation(client):
+                data_dir = Path(getattr(client, "data_dir", None) or self.data_dir)
+                paths = {
+                    "data_dir": str(data_dir),
+                    "runs_dir": str(data_dir / "runs"),
+                    "drafts_dir": str(data_dir / "agent" / "drafts"),
+                    "exports_dir": str(data_dir / "agent" / "exports"),
+                }
+                paths["data_dir_wsl_hint"] = _wsl_hint(paths["data_dir"])
+                paths["runs_dir_wsl_hint"] = _wsl_hint(paths["runs_dir"])
+                paths["exports_dir_wsl_hint"] = _wsl_hint(paths["exports_dir"])
+                return {"paths": paths, "limits": client.manifest().get("limits")}
+            return self._resource_json(uri, self._with_client(operation))
         if host == "drafts" and len(parts) == 1:
             draft_id = parts[0]
             data = self._with_client(
@@ -1098,26 +1637,25 @@ def _prompt_text(name, arguments):
     draft_id = arguments.get("draft_id")
     if name == "test_tactic_change":
         instruction = arguments.get("instruction")
-        seeds = arguments.get("seeds") or "101:10"
+        seeds = arguments.get("seeds") or "5001:200"
         return (
             f"对草案 {draft_id} 执行单变量对照实验。变更内容：{instruction}。"
-            f"先用 draft_create source=default 建立基线草案并 draft_validate，"
-            f"再用 draft_edit draft_id={draft_id} 只应用本次变更并 draft_validate 校验；"
-            f"然后 experiment_run draft_id={draft_id} baseline_draft_id=<基线草案> "
-            f"seeds={seeds} workers=2 event_details=false，job_wait 到终态后用 "
-            f"results_summary 读取 metrics.A/metrics.B 与 paired.goal_difference_delta。"
-            f"先跑 2 到 6 场探测，确认方向后再扩到 20 到 100 场。"
+            f"先建立受控夹具：draft_get 基准草案 save_scenario=true，生成双方属性一致、"
+            f"位置熟练度满值的场景，再用 draft_create source=inline scenario_path=<文件> 创建受控基准并 draft_validate。"
+            f"候选从受控基准 draft_create source=draft 克隆，只用 draft_edit ops 应用本次变更并 draft_validate。"
+            f"然后 experiment_run draft_id={draft_id} baseline_draft_id=<受控基准> seeds={seeds} "
+            f"workers=2 event_details=false，job_wait timeout_seconds=45，"
+            f"再用 results_compare 读取配对差与置信区间。200 场只做筛选，确认需两个独立种子块。"
         )
     if name == "compare_baseline_vs_current":
         baseline_id = arguments.get("baseline_draft_id")
-        seeds = arguments.get("seeds") or "101:10"
+        seeds = arguments.get("seeds") or "5001:200"
         return (
-            f"比较基线草案 {baseline_id} 与当前草案 {draft_id}。先 draft_validate 两者，"
+            f"比较受控基准草案 {baseline_id} 与当前草案 {draft_id}。先 draft_validate 两者，"
             f"再 experiment_run draft_id={draft_id} baseline_draft_id={baseline_id} "
-            f"seeds={seeds} event_details=false，job_wait 后读取 results_summary。"
+            f"seeds={seeds} event_details=false，job_wait timeout_seconds=45 后读取 results_summary。"
             f"若 paired.n 为 0，说明没有同种子配对，可用 results_matches 逐场核对。"
-            f"用 metrics.B.win_rate 与 win_interval 判断变化是否稳定，"
-            f"用 paired.goal_difference_delta 判断同种子下的净胜球变化。"
+            f"两个独立种子块合并后用 results_compare 计算 ΔWin、ΔPts、ΔGD、ΔxGD 与 95%CI。"
         )
     if name == "opponent_sweep":
         save_id = arguments.get("save_id")
@@ -1149,6 +1687,23 @@ def _csv_columns(job):
     return columns
 
 
+def _goal_minutes(run):
+    values = []
+    previous = [0, 0]
+    for change in run.get("score_changes") or []:
+        score = change.get("score") or []
+        if len(score) < 2:
+            continue
+        clock = _number(change.get("clock"))
+        minute = round(clock / 240.0, 1) if clock else None
+        for side in (0, 1):
+            delta = int(score[side]) - previous[side]
+            for _ in range(max(0, delta)):
+                values.append({"side": side, "minute": minute})
+        previous = [int(score[0]), int(score[1])]
+    return _compact(values)
+
+
 def _csv_rows(job, columns):
     mode = job.get("mode") or ""
     rows = []
@@ -1171,6 +1726,14 @@ def _csv_rows(job, columns):
             "possession": home.get("possession"),
             "passes": home.get("passes"),
             "completed_passes": home.get("completed_passes"),
+            "opponent_shots": away.get("shots"),
+            "opponent_shots_on_target": away.get("shots_on_target"),
+            "xga": away.get("xg"),
+            "opponent_possession": away.get("possession"),
+            "opponent_passes": away.get("passes"),
+            "opponent_completed_passes": away.get("completed_passes"),
+            "score_changes": _compact(run.get("score_changes")),
+            "goal_minutes": _goal_minutes(run),
             "elapsed_seconds": run.get("elapsed_seconds"),
             "attempts": run.get("attempts"),
             "log": run.get("log"),

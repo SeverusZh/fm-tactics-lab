@@ -150,7 +150,36 @@ class _Handler(BaseHTTPRequestHandler):
                 "server": {"pid": 1, "port": self.state.port, "api": "fm27lab/v1"},
             })
         if path == "/api/agent/v1/catalog":
-            return self._send(200, {"catalog": {"roles": [], "positions": []}})
+            positions = [
+                ("GK", 1), ("LB", 8), ("CB", 16), ("RB", 4), ("DM", 128),
+                ("CM", 1024), ("LW", 4096), ("ST", 16384), ("RW", 2048),
+                ("LM", 512), ("RM", 256),
+            ]
+            role_context = {
+                key: {
+                    position: [["MockGoalkeeper", "MockCentreBack"],
+                               ["OPMockGoalkeeper", "OPMockCentreBack"]]
+                    for position, _ in positions
+                }
+                for key in ("0:0", "0:1", "3:0", "3:1")
+            }
+            return self._send(200, {"catalog": {
+                "positions": [{"id": position, "mask": mask} for position, mask in positions],
+                "roles": [
+                    {"id": "MockGoalkeeper", "label": "模拟门将"},
+                    {"id": "MockCentreBack", "label": "模拟中卫"},
+                    {"id": "MockMidfielder", "label": "模拟中场"},
+                    {"id": "OPMockGoalkeeper", "label": "模拟无球门将"},
+                    {"id": "OPMockCentreBack", "label": "模拟无球中卫"},
+                    {"id": "OPMockMidfielder", "label": "模拟无球中场"},
+                ],
+                "role_eligibility_context": role_context,
+                "duties": ["0", "2097152", "4194304"],
+                "team_instructions": [{
+                    "id": 1, "label": "传球方式", "phase": 0,
+                    "options": [{"id": 11, "label": "短传"}, {"id": 12, "label": "直传"}],
+                }],
+            }})
         if path == "/api/agent/v1/defaults":
             return self._send(200, {"scenario": make_scenario()})
         if path == "/api/agent/v1/schemas":
@@ -188,6 +217,12 @@ class _Handler(BaseHTTPRequestHandler):
             status, payload = self.state.create_job(body, "single")
             return self._send(status, payload)
         if path == "/api/agent/v1/validate":
+            roles = [cell.get("role")
+                     for team in (body.get("scenario") or {}).get("teams") or []
+                     for plan in team.get("phase_plans") or []
+                     for cell in plan.get("assignments") or []]
+            if "BadRole" in roles:
+                return self._error(400, "validation_failed", "该位置或当前阵型不可使用所选原版角色")
             return self._send(200, {"scenario": body.get("scenario"), "records": 30})
         if path == "/api/agent/v1/repair":
             return self._send(200, {"scenario": body.get("scenario"), "changes": []})
@@ -333,6 +368,16 @@ class MockAgentServer:
 
     def _send_response(self, status, payload):
         return status, payload
+
+    def hold_job(self, job_id):
+        job = self.jobs[job_id]
+        job.update(status="running", completed=0, eta_seconds=10)
+        return job
+
+    def release_job(self, job_id):
+        job = self.jobs[job_id]
+        job.update(status="complete", completed=job.get("total") or 0, eta_seconds=0)
+        return job
 
     def _error_response(self, status, code, message):
         return status, {"error": {"code": code, "message": message,

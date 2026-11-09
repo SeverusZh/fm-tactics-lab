@@ -188,14 +188,6 @@ def _read_bytes(path):
         raise AgentError("not_found", f"无法读取文件：{error}", {"path": str(path)}) from None
 
 
-def _read_json_file(path):
-    payload = _read_bytes(path)
-    try:
-        return json.loads(payload.decode("utf-8"))
-    except (ValueError, UnicodeDecodeError):
-        raise AgentError("validation_failed", f"JSON 文件无法解析：{path}") from None
-
-
 def _read_base64_file(path):
     return base64.b64encode(_read_bytes(path)).decode("ascii")
 
@@ -611,10 +603,14 @@ def _cmd_draft_create(args, client, options):
         if not args.job:
             raise UsageError("job 来源需要 --job")
         params = {"job_id": args.job, "variant": args.variant}
+    elif source == "draft":
+        if not args.base_draft:
+            raise UsageError("draft 来源需要 --base-draft")
+        params = {"base_draft_id": args.base_draft}
     elif source == "inline":
         if not args.inline:
             raise UsageError("inline 来源需要 --inline")
-        params = {"scenario": _read_json_file(args.inline)}
+        params = {"scenario_path": args.inline}
     result = service.create(source=source, name=args.name, **params)
     _emit(result, options, _print_draft)
     return EXIT_OK
@@ -1283,7 +1279,7 @@ def _build_parser():
     draft_sub = draft.add_subparsers(dest="draft_command", required=True)
     create = draft_sub.add_parser("create", help="创建草案")
     create.add_argument("--from", dest="source", default="default",
-                        choices=["default", "save", "fmf", "job", "inline"],
+                        choices=["default", "save", "fmf", "job", "inline", "draft"],
                         help="草案来源")
     create.add_argument("--name")
     create.add_argument("--save-id", dest="save_id")

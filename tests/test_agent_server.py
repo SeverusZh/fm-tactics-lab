@@ -180,11 +180,16 @@ class RouterTests(unittest.TestCase):
         self.assertEqual(caught.exception.code, "idempotency_conflict")
 
     def test_busy_and_cancel(self):
-        self.app.JOBS["active"] = {"id": "active", "status": "running", "created": 1}
+        self.app.JOBS["active"] = {"id": "active", "status": "queued", "created": 1}
+        status, payload, _ = self.router.post(
+            "/api/agent/v1/runs",
+            {"scenario": {}, "seeds": [1], "event_details": True}, {})
+        self.assertEqual(status, 202)
+        self.assertEqual(payload["id"], "jobnew")
         with self.assertRaises(agent_server.AgentHttpError) as caught:
-            self.router.post("/api/agent/v1/runs",
-                             {"scenario": {}, "seeds": [1], "event_details": True}, {})
+            self.router.post("/api/agent/v1/engine/select", {"game_root": "C:/game"}, {})
         self.assertEqual(caught.exception.code, "engine_busy")
+        self.assertEqual(self.router.status()["active_job"]["queue_position"], 1)
         status, payload, _ = self.router.post("/api/agent/v1/jobs/active/cancel", {}, {})
         self.assertTrue(payload["accepted"])
 
