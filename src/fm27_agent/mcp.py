@@ -9,6 +9,7 @@ import io
 import json
 import random
 import re
+import secrets
 import sys
 import threading
 import time
@@ -23,6 +24,8 @@ SERVER_NAME = schemas.SERVER_NAME
 PROTOCOL_VERSIONS = schemas.PROTOCOL_VERSIONS
 LATEST_PROTOCOL = schemas.LATEST_PROTOCOL
 CAREER_TERMINAL = ("complete", "error", "empty", "cancelled")
+# The app rotates its token on restart; retry once after reloading endpoint.json.
+RECONNECT_CODES = ("app_unavailable", "unauthorized")
 MAX_WAIT_SECONDS = 300.0
 MAX_TEXT_CHARS = 16000
 RUN_PAGE_SIZE = 200
@@ -36,8 +39,9 @@ FREE_MODE_WORKFLOW = """# 自由模式战术对比
 5. experiment_run 单草案或 candidates，同种子 200 场，workers 用上限，event_details=false。
 6. job_get include_runs=false 看进度与 queue_position；job_wait timeout_seconds<=45；超时按 next_poll_seconds 轮询。
 7. results_summary 读单任务；results_compare 读跨任务同种子配对与 95%CI；results_csv 取逐场双方数据。
-8. 200 场只做筛选；确认需两个独立种子块各 200 场且方向一致；再做消融。
-9. fmf_export 导出后重新 fmf_import，静态对比场景并跑同种子 200 场验证逐场一致。
+8. 随机模式：场景带 away_tactic_pool 时，同一任务的 A/B 共享一次抽签（同 seed 同客队战术）；results_summary 的 tactic_pool.draws 给出每套抽中次数。跨任务比较前先看 results_compare 的 comparable；抽签不同会被拒绝配对。
+9. 200 场只做筛选；确认需两个独立种子块各 200 场且方向一致；再做消融。
+10. fmf_export 导出后重新 fmf_import，静态对比场景并跑同种子 200 场验证逐场一致。
 """
 
 
@@ -50,7 +54,8 @@ APP_ERROR = -32000
 RESOURCE_NOT_FOUND = -32002
 
 BASE_CSV_COLUMNS = [
-    "mode", "variant", "seed", "home_goals", "away_goals", "shots",
+    "mode", "variant", "seed", "tactic_pool_entry_index", "tactic_pool_entry_name",
+    "home_goals", "away_goals", "shots",
     "shots_on_target", "xg", "possession", "passes", "completed_passes",
     "opponent_shots", "opponent_shots_on_target", "xga", "opponent_possession",
     "opponent_passes", "opponent_completed_passes", "score_changes", "goal_minutes",
@@ -218,6 +223,18 @@ def _progress_view(job):
     }
 
 
+def _engine_profile(engine):
+    profile = engine.get("profile") if isinstance(engine, dict) else None
+    return profile if isinstance(profile, (dict, str)) else None
+
+
+def _engine_profile_version(engine):
+    profile = _engine_profile(engine)
+    if isinstance(profile, dict):
+        return profile.get("version")
+    return profile if isinstance(profile, str) else None
+
+
 def _draft_view(draft):
     teams = []
     for team in draft.get("teams") or []:
@@ -234,6 +251,7 @@ def _draft_view(draft):
         "source": draft.get("source"),
         "updated_at": draft.get("updated_at"),
         "scenario_schema": draft.get("scenario_schema"),
+        "away_tactic_pool": draft.get("away_tactic_pool"),
         "teams": teams,
     }
 
@@ -253,6 +271,7 @@ def _match_view(run):
         "sot": home.get("shots_on_target"),
         "poss": home.get("possession"),
         "elapsed_seconds": run.get("elapsed_seconds"),
+        "tactic_pool_entry": run.get("tactic_pool_entry"),
     }
 
 
@@ -423,6 +442,64 @@ def _bootstrap_ci(values, reps=2000, alpha=0.05, seed=20261108):
     means.sort()
     return [round(means[int(alpha / 2 * reps)], 4),
             round(means[int((1 - alpha / 2) * reps)], 4)]
+
+
+def _pool_view(job):
+    pool = job.get("tactic_pool") if isinstance(job, dict) else None
+    if not isinstance(pool, dict) or not pool.get("enabled"):
+        return None
+    rows = []
+    for entry in pool.get("entries") or []:
+        if not isinstance(entry, dict):
+            continue
+        rows.append({"index": entry.get("index"), "name": entry.get("name"),
+                     "weight": entry.get("weight"), "probability": entry.get("probability")})
+    draws = pool.get("draws") if isinstance(pool.get("draws"), dict) else {}
+    counts = draws.get("counts") if isinstance(draws.get("counts"), dict) else {}
+    for row in rows:
+        row["draws"] = int(counts.get(str(row.get("index")), 0))
+    return {
+        "profile": pool.get("profile"),
+        "salt": pool.get("salt"),
+        "uniform": pool.get("uniform"),
+        "entries": rows,
+        "draws": {"total": draws.get("total"),
+                  "counts": {str(row.get("index")): row["draws"] for row in rows}},
+    }
+
+
+def _pool_pairing(baseline, candidate, seeds):
+    """Decide whether two jobs paired the same away tactic draw on every shared seed."""
+    if baseline is None and candidate is None:
+        return True, None, None
+    seeds = [seed for seed in seeds if isinstance(seed, int)]
+    salts = {"baseline": baseline.get("salt") if baseline else None,
+             "candidate": candidate.get("salt") if candidate else None}
+    info = {"salts": salts, "common_seeds": len(seeds),
+            "draw_mismatches": None, "mismatched_seeds": []}
+    if baseline is None or candidate is None:
+        if baseline is None:
+            reason = "基线任务未使用随机客队战术池，候选任务使用了随机客队战术池"
+        else:
+            reason = "候选任务未使用随机客队战术池，基线任务使用了随机客队战术池"
+        return False, reason, info
+    if baseline.get("entries") != candidate.get("entries"):
+        return False, "两个任务的客队战术池条目不同，同种子抽签无法对齐", info
+    if not seeds:
+        return False, "没有同种子比赛，无法核对随机客队战术池抽签", info
+    missing = [seed for seed in seeds
+               if seed not in baseline.get("draws", {}) or seed not in candidate.get("draws", {})]
+    if missing:
+        info["missing_seeds"] = missing[:20]
+        return False, "缺少同种子的客队战术池抽签记录，不能配对", info
+    mismatched = [seed for seed in seeds
+                  if baseline["draws"][seed] != candidate["draws"][seed]]
+    info["draw_mismatches"] = len(mismatched)
+    info["mismatched_seeds"] = mismatched[:20]
+    if mismatched:
+        return False, (f"客队战术池抽签不同：{len(mismatched)}/{len(seeds)} 个同种子场次"
+                       "抽中不同战术"), info
+    return True, None, info
 
 
 class McpServer:
@@ -625,12 +702,12 @@ class McpServer:
                           timeout=self.timeout)
         return Client(data_dir=self.data_dir, timeout=self.timeout)
 
-    def _with_client(self, operation, retry=True):
+    def _with_client(self, operation, retry=True, codes=RECONNECT_CODES):
         client = self._ensure_client()
         try:
             return operation(client)
         except AgentError as error:
-            if error.code != "app_unavailable":
+            if error.code not in codes:
                 raise
             changed = False
             try:
@@ -727,8 +804,8 @@ class McpServer:
         if not isinstance(data, dict):
             return _json_text(data)
         if name == "lab_status":
-            manifest = data.get("manifest") or {}
-            engine = data.get("engine") or {}
+            manifest = data.get("manifest") if isinstance(data.get("manifest"), dict) else {}
+            engine = data.get("engine") if isinstance(data.get("engine"), dict) else {}
             return _json_text({
                 "api": manifest.get("api"),
                 "server_version": manifest.get("server_version"),
@@ -740,9 +817,12 @@ class McpServer:
                 "limits": manifest.get("limits"),
                 "engine": {
                     "compatible": engine.get("compatible"),
-                    "profile_version": (engine.get("profile") or {}).get("version"),
+                    "profile": _engine_profile(engine),
+                    "profile_version": _engine_profile_version(engine),
+                    "reason": engine.get("reason"),
+                    "can_simulate": engine.get("can_simulate"),
                 },
-                "active_job": _progress_view(data["active_job"]) if data.get("active_job") else None,
+                "active_job": _progress_view(data["active_job"]) if isinstance(data.get("active_job"), dict) else None,
                 "save_active": data.get("save_active"),
                 "paths": data.get("paths"),
             })
@@ -815,9 +895,11 @@ class McpServer:
             return _json_text({
                 "job_id": data.get("job_id"),
                 "status": data.get("status"),
+                "mode": data.get("mode"),
                 "metrics": data.get("metrics"),
                 "paired": data.get("paired"),
                 "distributions": data.get("distributions"),
+                "tactic_pool": data.get("tactic_pool"),
                 "timings": data.get("timings"),
                 "failures": data.get("failures"),
             })
@@ -858,6 +940,8 @@ class McpServer:
     def _tool_lab_status(self, args):
         def operation(client):
             status = client.status()
+            if not isinstance(status, dict):
+                status = {}
             data_dir = Path(getattr(client, "data_dir", None) or self.data_dir)
             paths = {
                 "data_dir": str(data_dir),
@@ -868,10 +952,14 @@ class McpServer:
             paths["data_dir_wsl_hint"] = _wsl_hint(paths["data_dir"])
             paths["runs_dir_wsl_hint"] = _wsl_hint(paths["runs_dir"])
             paths["exports_dir_wsl_hint"] = _wsl_hint(paths["exports_dir"])
+            engine = status.get("engine_compatibility")
+            if not isinstance(engine, dict):
+                engine = status.get("engine")
+            manifest = client.manifest()
             return {
-                "manifest": client.manifest(),
-                "engine": status.get("engine_compatibility"),
-                "active_job": status.get("active_job"),
+                "manifest": manifest if isinstance(manifest, dict) else {},
+                "engine": engine if isinstance(engine, dict) else {},
+                "active_job": status.get("active_job") if isinstance(status.get("active_job"), dict) else None,
                 "save_active": status.get("save_active"),
                 "paths": paths,
             }
@@ -1091,12 +1179,15 @@ class McpServer:
         per_job_total = len(seeds) * (2 if baseline_id else 1)
         seed_summary = {"count": len(seeds), "first": seeds[0], "last": seeds[-1]}
         candidates = args.get("candidates")
+        submission_keys = ["mcp-run-" + secrets.token_hex(12)
+                           for _ in (candidates if candidates else [None])]
 
-        def submit(client, drafts, draft_id, draft_name):
+        def submit(client, drafts, draft_id, draft_name, idempotency_key):
             scenario = drafts.scenario(draft_id)
             reference = drafts.scenario(baseline_id) if baseline_id else None
             created = client.run(scenario, reference=reference, seeds=seeds, workers=workers,
-                                 event_details=event_details, name=draft_name)
+                                 event_details=event_details, name=draft_name,
+                                 idempotency_key=idempotency_key)
             total = created.get("total")
             return {
                 "job_id": created.get("id"),
@@ -1114,10 +1205,11 @@ class McpServer:
             if candidates:
                 jobs = []
                 try:
-                    for candidate in candidates:
+                    for index, candidate in enumerate(candidates):
                         candidate_id = candidate["draft_id"]
                         candidate_name = candidate.get("name") or name
-                        jobs.append(submit(client, drafts, candidate_id, candidate_name))
+                        jobs.append(submit(client, drafts, candidate_id, candidate_name,
+                                           submission_keys[index]))
                 except Exception:
                     for job in jobs:
                         try:
@@ -1133,10 +1225,10 @@ class McpServer:
                     "mode": jobs[0]["mode"],
                     "seeds": seed_summary,
                 }
-            job = submit(client, drafts, args["draft_id"], name)
+            job = submit(client, drafts, args["draft_id"], name, submission_keys[0])
             job["seeds"] = seed_summary
             return job
-        return self._with_client(operation, retry=False)
+        return self._with_client(operation)
 
     def _tool_career_run(self, args):
         save_id = args["save_id"]
@@ -1150,6 +1242,7 @@ class McpServer:
         name = args.get("name")
         count = int(args["count"])
         first_seed = int(args["first_seed"])
+        idempotency_key = "mcp-career-run-" + secrets.token_hex(12)
 
         def operation(client):
             drafts = self._drafts(client)
@@ -1157,7 +1250,8 @@ class McpServer:
             reference = drafts.scenario(baseline_id) if baseline_id else None
             created = client.career_run(save_id, club_uid, scenario, opponents, count, first_seed,
                                         reference=reference, workers=workers,
-                                        event_details=event_details, name=name)
+                                        event_details=event_details, name=name,
+                                        idempotency_key=idempotency_key)
             total = created.get("total")
             return {
                 "job_id": created.get("id"),
@@ -1167,7 +1261,7 @@ class McpServer:
                 "queued": created.get("queued"),
                 "queue_position": created.get("queue_position"),
             }
-        return self._with_client(operation, retry=False)
+        return self._with_client(operation)
 
     def _tool_job_get(self, args):
         include_runs = bool(args.get("include_runs", True))
@@ -1276,9 +1370,11 @@ class McpServer:
         return {
             "job_id": job.get("id") or args["job_id"],
             "status": job.get("status"),
+            "mode": job.get("mode"),
             "metrics": metrics,
             "distributions": _scorelines(runs),
             "paired": paired,
+            "tactic_pool": _pool_view(job),
             "failures": {
                 "count": len(failures),
                 "items": failures[:20],
@@ -1301,6 +1397,7 @@ class McpServer:
         def operation(client):
             baseline = self._fetch_job(client, baseline_id)
             baseline_runs = select_runs(baseline)
+            baseline_pool = self._pool_draws(client, baseline)
             baseline_by_seed = {run["seed"]: run for run in baseline_runs
                                 if isinstance(run.get("seed"), int)}
             result = {
@@ -1308,6 +1405,7 @@ class McpServer:
                     "job_id": baseline.get("id") or baseline_id,
                     "name": baseline.get("name"),
                     "metrics": _compare_metrics(baseline_runs),
+                    "tactic_pool": _pool_view(baseline),
                 },
                 "variant": variant,
                 "candidates": [],
@@ -1318,6 +1416,22 @@ class McpServer:
                 candidate_by_seed = {run["seed"]: run for run in candidate_runs
                                      if isinstance(run.get("seed"), int)}
                 seeds = sorted(set(baseline_by_seed) & set(candidate_by_seed))
+                comparable, reason, pairing = _pool_pairing(
+                    baseline_pool, self._pool_draws(client, candidate), seeds)
+                entry = {
+                    "job_id": candidate.get("id") or candidate_id,
+                    "name": candidate.get("name"),
+                    "metrics": _compare_metrics(candidate_runs),
+                    "tactic_pool": _pool_view(candidate),
+                    "comparable": comparable,
+                    "reason": reason,
+                }
+                if pairing is not None:
+                    entry["pairing"] = pairing
+                if not comparable:
+                    entry["paired"] = None
+                    result["candidates"].append(entry)
+                    continue
                 win_delta = []
                 points_delta = []
                 gd_delta = []
@@ -1334,22 +1448,18 @@ class McpServer:
                                         - (3 if bgf > bga else 1 if bgf == bga else 0))
                     gd_delta.append((cgf - cga) - (bgf - bga))
                     xgd_delta.append(_oriented_xgd(candidate_run) - _oriented_xgd(base_run))
-                result["candidates"].append({
-                    "job_id": candidate.get("id") or candidate_id,
-                    "name": candidate.get("name"),
-                    "metrics": _compare_metrics(candidate_runs),
-                    "paired": {
-                        "seeds": len(win_delta),
-                        "win_rate_delta": round(sum(win_delta) / len(win_delta), 4) if win_delta else None,
-                        "win_rate_delta_ci": _bootstrap_ci(win_delta, reps),
-                        "points_delta": round(sum(points_delta) / len(points_delta), 4) if points_delta else None,
-                        "points_delta_ci": _bootstrap_ci(points_delta, reps),
-                        "goal_difference_delta": round(sum(gd_delta) / len(gd_delta), 4) if gd_delta else None,
-                        "goal_difference_delta_ci": _bootstrap_ci(gd_delta, reps),
-                        "xgd_delta": round(sum(xgd_delta) / len(xgd_delta), 4) if xgd_delta else None,
-                        "xgd_delta_ci": _bootstrap_ci(xgd_delta, reps),
-                    },
-                })
+                entry["paired"] = {
+                    "seeds": len(win_delta),
+                    "win_rate_delta": round(sum(win_delta) / len(win_delta), 4) if win_delta else None,
+                    "win_rate_delta_ci": _bootstrap_ci(win_delta, reps),
+                    "points_delta": round(sum(points_delta) / len(points_delta), 4) if points_delta else None,
+                    "points_delta_ci": _bootstrap_ci(points_delta, reps),
+                    "goal_difference_delta": round(sum(gd_delta) / len(gd_delta), 4) if gd_delta else None,
+                    "goal_difference_delta_ci": _bootstrap_ci(gd_delta, reps),
+                    "xgd_delta": round(sum(xgd_delta) / len(xgd_delta), 4) if xgd_delta else None,
+                    "xgd_delta_ci": _bootstrap_ci(xgd_delta, reps),
+                }
+                result["candidates"].append(entry)
             return result
         return self._with_client(operation)
 
@@ -1493,6 +1603,36 @@ class McpServer:
             time.sleep(min(0.5, remaining))
 
     # Job helpers
+
+    def _pool_draws(self, client, job):
+        pool = job.get("tactic_pool") if isinstance(job, dict) else None
+        if not isinstance(pool, dict) or not pool.get("enabled"):
+            return None
+        provenance = {}
+        try:
+            exported = client.job_export(job.get("id"))
+            if isinstance(exported, dict):
+                provenance = exported.get("provenance") or {}
+        except AgentError:
+            provenance = {}
+        recorded = provenance.get("pool") if isinstance(provenance, dict) else None
+        recorded = recorded if isinstance(recorded, dict) else {}
+        entries = recorded.get("entries") or pool.get("entries") or []
+        signature = []
+        for entry in entries:
+            if isinstance(entry, dict):
+                signature.append((entry.get("index"), entry.get("name"), entry.get("weight")))
+        raw = recorded.get("draws") if isinstance(recorded.get("draws"), dict) else {}
+        draws = {}
+        for seed, index in raw.items():
+            try:
+                draws[int(seed)] = index
+            except (TypeError, ValueError):
+                continue
+        salt = recorded.get("salt")
+        if salt is None:
+            salt = pool.get("salt")
+        return {"salt": salt if salt is not None else "", "entries": signature, "draws": draws}
 
     def _fetch_job(self, client, job_id, variant=None):
         detail = client.job(job_id, runs_offset=0, runs_limit=RUN_PAGE_SIZE, variant=variant)
@@ -1714,10 +1854,15 @@ def _csv_rows(job, columns):
         away = teams[1] if len(teams) > 1 else {}
         goals_for, goals_against = _score(run)
         events = run.get("events") or {}
+        pool_entry = run.get("tactic_pool_entry")
+        if not isinstance(pool_entry, dict):
+            pool_entry = {}
         row = {
             "mode": mode,
             "variant": run.get("variant"),
             "seed": run.get("seed"),
+            "tactic_pool_entry_index": pool_entry.get("index"),
+            "tactic_pool_entry_name": pool_entry.get("name"),
             "home_goals": goals_for,
             "away_goals": goals_against,
             "shots": home.get("shots"),

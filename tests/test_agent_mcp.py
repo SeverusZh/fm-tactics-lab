@@ -1,8 +1,10 @@
 """End-to-end tests for the fm27lab MCP stdio sidecar."""
+import csv
 import hashlib
 import json
 import os
 import queue
+import secrets
 import subprocess
 import sys
 import tempfile
@@ -12,7 +14,9 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from agent_mock import start_server
+from agent_mock import POOL_PROFILE, make_pool_scenario, start_server
+
+import fm27_tactic_pool
 
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src"
@@ -27,7 +31,8 @@ TOOL_NAMES = {
 }
 
 BASE_CSV_COLUMNS = [
-    "mode", "variant", "seed", "home_goals", "away_goals", "shots",
+    "mode", "variant", "seed", "tactic_pool_entry_index", "tactic_pool_entry_name",
+    "home_goals", "away_goals", "shots",
     "shots_on_target", "xg", "possession", "passes", "completed_passes",
     "opponent_shots", "opponent_shots_on_target", "xga", "opponent_possession",
     "opponent_passes", "opponent_completed_passes", "score_changes", "goal_minutes",
@@ -605,6 +610,217 @@ class McpSidecarTests(unittest.TestCase):
         rename = self.call_tool("job_action", {"job_id": "job00000001", "action": "rename"})
         self.assertTrue(rename.get("isError"))
         self.assertEqual(rename["structuredContent"]["error"]["code"], "validation_failed")
+
+    def test_lab_status_handles_string_engine_profile(self):
+        result = self.call_tool("lab_status", {})
+        self.assertFalse(result.get("isError"), result)
+        data = result["structuredContent"]
+        self.assertEqual(data["manifest"]["server_version"], "test")
+        self.assertEqual(data["engine"]["profile"], "fm27_desktop_2493426_adapter_v1")
+        text = self.text_body(result)
+        self.assertEqual(text["engine"]["profile_version"],
+                         "fm27_desktop_2493426_adapter_v1")
+        self.assertEqual(text["engine"]["can_simulate"], True)
+
+    def test_tool_call_reloads_endpoint_after_token_rotation(self):
+        mock = start_server()
+        temp = tempfile.TemporaryDirectory()
+        try:
+            data_dir = Path(temp.name)
+            agent_dir = data_dir / "agent"
+            agent_dir.mkdir(parents=True, exist_ok=True)
+            endpoint = {"schema": 1, "api": "fm27lab/v1", "url": mock.url,
+                        "token": mock.token, "pid": os.getpid(),
+                        "data_dir": str(data_dir), "versions": {"server": "test"}}
+            (agent_dir / "endpoint.json").write_text(
+                json.dumps(endpoint, ensure_ascii=False), encoding="utf-8")
+            sidecar = SidecarProcess(data_dir)
+            try:
+                response = sidecar.request("initialize", {
+                    "protocolVersion": "2025-06-18", "capabilities": {},
+                    "clientInfo": {"name": "rotation-client", "version": "1.0"}})
+                self.assertIn("result", response, sidecar.stderr_tail())
+                sidecar.notify("notifications/initialized")
+                draft = call_tool(sidecar, "draft_create",
+                                  {"source": "default", "name": "轮换草案"})
+                draft_id = draft["structuredContent"]["draft_id"]
+                self.assertFalse(call_tool(sidecar, "lab_status", {}).get("isError"))
+                rotated = secrets.token_hex(16)
+                mock.token = rotated
+                endpoint["token"] = rotated
+                (agent_dir / "endpoint.json").write_text(
+                    json.dumps(endpoint, ensure_ascii=False), encoding="utf-8")
+                retried = call_tool(sidecar, "lab_status", {})
+                self.assertFalse(retried.get("isError"), retried)
+                self.assertEqual(retried["structuredContent"]["manifest"]["api"],
+                                 "fm27lab/v1")
+                rotated_again = secrets.token_hex(16)
+                mock.token = rotated_again
+                endpoint["token"] = rotated_again
+                (agent_dir / "endpoint.json").write_text(
+                    json.dumps(endpoint, ensure_ascii=False), encoding="utf-8")
+                submitted = call_tool(sidecar, "experiment_run", {
+                    "draft_id": draft_id, "seeds": {"start": 11, "count": 2},
+                    "event_details": False})
+                self.assertFalse(submitted.get("isError"), submitted)
+                self.assertIn("job_id", submitted["structuredContent"])
+            finally:
+                sidecar.close()
+        finally:
+            mock.stop()
+            temp.cleanup()
+
+    def test_pool_round_trips_through_draft_sources(self):
+        expected_pool = {"enabled": True, "entries": 2,
+                         "uniform": {"enabled": True, "attribute_value": 15}}
+        scenario = make_pool_scenario()
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "pool.json"
+            path.write_text(json.dumps(scenario, ensure_ascii=False), encoding="utf-8")
+            created = self.call_tool("draft_create", {
+                "source": "inline", "scenario_path": str(path), "name": "池往返"})
+        body = created["structuredContent"]
+        draft_id = body["draft_id"]
+        self.assertEqual(body["draft"]["away_tactic_pool"], expected_pool)
+        fetched = self.call_tool("draft_get", {"draft_id": draft_id, "include_scenario": True})
+        fetched_pool = fetched["structuredContent"]["scenario"]["away_tactic_pool"]
+        self.assertEqual([entry["name"] for entry in fetched_pool["entries"]],
+                         ["池战术甲", "池战术乙"])
+        saved = self.call_tool("draft_get", {"draft_id": draft_id, "save_scenario": True})
+        saved_path = Path(saved["structuredContent"]["scenario_path"])
+        saved_scenario = json.loads(saved_path.read_text(encoding="utf-8"))
+        self.assertEqual(len(saved_scenario["away_tactic_pool"]["entries"]), 2)
+        cloned = self.call_tool("draft_create", {"source": "draft", "base_draft_id": draft_id})
+        self.assertEqual(cloned["structuredContent"]["draft"]["away_tactic_pool"], expected_pool)
+        imported = self.call_tool("draft_create", {
+            "source": "fmf", "side": 1, "file_base64": "QUFB", "base_draft_id": draft_id})
+        self.assertEqual(imported["structuredContent"]["draft"]["away_tactic_pool"],
+                         expected_pool)
+        submitted = self.call_tool("experiment_run", {
+            "draft_id": draft_id, "seeds": {"start": 701, "count": 2},
+            "event_details": False})
+        job_id = submitted["structuredContent"]["job_id"]
+        from_job = self.call_tool("draft_create", {
+            "source": "job", "job_id": job_id, "variant": "B"})
+        self.assertEqual(from_job["structuredContent"]["draft"]["away_tactic_pool"],
+                         expected_pool)
+
+    def test_pool_ab_same_draw_and_results_views(self):
+        scenario = make_pool_scenario()
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "pool.json"
+            path.write_text(json.dumps(scenario, ensure_ascii=False), encoding="utf-8")
+            candidate = self.call_tool("draft_create", {
+                "source": "inline", "scenario_path": str(path), "name": "池候选"})
+            baseline = self.call_tool("draft_create", {
+                "source": "inline", "scenario_path": str(path), "name": "池基准"})
+        candidate_id = candidate["structuredContent"]["draft_id"]
+        baseline_id = baseline["structuredContent"]["draft_id"]
+        submitted = self.call_tool("experiment_run", {
+            "draft_id": candidate_id, "baseline_draft_id": baseline_id,
+            "seeds": {"start": 801, "count": 6}, "event_details": False})
+        submitted_body = submitted["structuredContent"]
+        self.assertEqual(submitted_body["total"], 12)
+        self.assertEqual(submitted_body["mode"], "comparison")
+        job_id = submitted_body["job_id"]
+        job = self.call_tool("job_get", {"job_id": job_id, "runs_limit": 200})
+        runs = job["structuredContent"]["runs"]
+        self.assertEqual(len(runs), 12)
+        draws = {}
+        for run in runs:
+            entry = run["tactic_pool_entry"]
+            draws.setdefault(run["seed"], {})[run["variant"]] = entry["index"]
+            self.assertIn(entry["name"], ("池战术甲", "池战术乙"))
+        for seed, paired in draws.items():
+            self.assertEqual(len(paired), 2, seed)
+            self.assertEqual(paired["A"], paired["B"])
+        summary = self.call_tool("results_summary", {"job_id": job_id})
+        data = summary["structuredContent"]
+        self.assertEqual(data["metrics"]["A"]["n"], 6)
+        self.assertEqual(data["metrics"]["B"]["n"], 6)
+        pool = data["tactic_pool"]
+        self.assertEqual(pool["salt"], job_id)
+        self.assertEqual(pool["draws"]["total"], 6)
+        self.assertEqual(sum(row["draws"] for row in pool["entries"]), 6)
+        self.assertEqual({row["name"] for row in pool["entries"]},
+                         {"池战术甲", "池战术乙"})
+        text = self.text_body(summary)
+        self.assertEqual(text["tactic_pool"]["draws"]["total"], 6)
+        seed = sorted(draws)[0]
+        single = self.call_tool("results_matches", {"job_id": job_id, "seed": seed})
+        single_body = single["structuredContent"]
+        self.assertTrue(single_body["found"])
+        self.assertIn(single_body["run"]["tactic_pool_entry"]["index"], (0, 1))
+        page = self.call_tool("results_matches", {"job_id": job_id, "limit": 200})
+        self.assertTrue(all(run["tactic_pool_entry"] for run in page["structuredContent"]["runs"]))
+        exported = self.call_tool("results_csv", {"job_id": job_id, "out": "pool.csv"})
+        exported_body = exported["structuredContent"]
+        self.assertEqual(exported_body["columns"], BASE_CSV_COLUMNS)
+        with Path(exported_body["path"]).open(encoding="utf-8", newline="") as handle:
+            rows = list(csv.DictReader(handle))
+        self.assertEqual(len(rows), 12)
+        for row in rows:
+            self.assertIn(row["tactic_pool_entry_index"], ("0", "1"))
+            self.assertIn(row["tactic_pool_entry_name"], ("池战术甲", "池战术乙"))
+
+    def test_results_compare_rejects_unpaired_pool_draws(self):
+        pool_scenario = make_pool_scenario()
+        other_pool = make_pool_scenario(("别的甲", "别的乙"))
+        plain = self.call_tool("draft_create", {"source": "default", "name": "无池"})
+        with tempfile.TemporaryDirectory() as folder:
+            first_path = Path(folder) / "pool.json"
+            first_path.write_text(json.dumps(pool_scenario, ensure_ascii=False), encoding="utf-8")
+            pooled = self.call_tool("draft_create", {
+                "source": "inline", "scenario_path": str(first_path), "name": "池"})
+            second_path = Path(folder) / "other.json"
+            second_path.write_text(json.dumps(other_pool, ensure_ascii=False), encoding="utf-8")
+            other = self.call_tool("draft_create", {
+                "source": "inline", "scenario_path": str(second_path), "name": "别的池"})
+        seeds = {"start": 901, "count": 8}
+        plain_job = self.call_tool("experiment_run", {
+            "draft_id": plain["structuredContent"]["draft_id"], "seeds": seeds,
+            "event_details": False})["structuredContent"]["job_id"]
+        pooled_job = self.call_tool("experiment_run", {
+            "draft_id": pooled["structuredContent"]["draft_id"], "seeds": seeds,
+            "event_details": False})["structuredContent"]["job_id"]
+        other_job = self.call_tool("experiment_run", {
+            "draft_id": other["structuredContent"]["draft_id"], "seeds": seeds,
+            "event_details": False})["structuredContent"]["job_id"]
+        compared = self.call_tool("results_compare", {
+            "baseline_job_id": plain_job,
+            "candidate_job_ids": [pooled_job], "reps": 200})["structuredContent"]
+        candidate = compared["candidates"][0]
+        self.assertFalse(candidate["comparable"])
+        self.assertIn("战术池", candidate["reason"])
+        self.assertIsNone(candidate["paired"])
+        compared = self.call_tool("results_compare", {
+            "baseline_job_id": pooled_job,
+            "candidate_job_ids": [other_job], "reps": 200})["structuredContent"]
+        candidate = compared["candidates"][0]
+        self.assertFalse(candidate["comparable"])
+        self.assertIn("条目", candidate["reason"])
+        entries = pool_scenario["away_tactic_pool"]["entries"]
+        baseline_draws = {seed: fm27_tactic_pool.draw_index(entries, seed, pooled_job)
+                          for seed in range(901, 909)}
+        mismatch_job = None
+        for _ in range(4):
+            job_id = self.call_tool("experiment_run", {
+                "draft_id": pooled["structuredContent"]["draft_id"], "seeds": seeds,
+                "event_details": False})["structuredContent"]["job_id"]
+            candidate_draws = {seed: fm27_tactic_pool.draw_index(entries, seed, job_id)
+                               for seed in range(901, 909)}
+            if any(baseline_draws[seed] != candidate_draws[seed] for seed in baseline_draws):
+                mismatch_job = job_id
+                break
+        self.assertIsNotNone(mismatch_job)
+        compared = self.call_tool("results_compare", {
+            "baseline_job_id": pooled_job,
+            "candidate_job_ids": [mismatch_job], "reps": 200})["structuredContent"]
+        candidate = compared["candidates"][0]
+        self.assertFalse(candidate["comparable"])
+        self.assertIn("抽签", candidate["reason"])
+        self.assertIsNone(candidate["paired"])
+        self.assertGreater(candidate["pairing"]["draw_mismatches"], 0)
 
     def test_app_unavailable_returns_tool_error(self):
         with tempfile.TemporaryDirectory() as folder:

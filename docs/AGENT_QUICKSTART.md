@@ -7,8 +7,8 @@
 - 查询引擎兼容状态与批次限制。
 - 从默认场景、FM27 存档、FMF 战术文件或已有实验创建草案。
 - 语义化修改双阶段战术、角色、职责、定位球之外的战术层设置。
-- 提交自由推演或存档对战批次，按种子运行并对比。
-- 等待、取消、续跑、分页读取结果与导出 CSV。
+- 提交自由推演或存档对战批次，按种子运行并对比；自由模式支持随机客队战术池与 A/B 共享抽签。
+- 等待、取消、续跑、分页读取结果与导出 CSV；排队中的批次可立即取消。
 - 通过 MCP 暴露同一套能力给任意支持 stdio 的 Agent 客户端。
 
 ## 2. 前置条件
@@ -86,7 +86,7 @@ endpoint.json 包含：
 | draft create/list/show/edit/validate/delete | 草案工作区 |
 | run | 自由推演批次，可带 baseline 对照 |
 | job list/get/wait/action/logs/export | 任务管理 |
-| results summary/matches/match/csv | 结果读取 |
+| results summary/matches/match/csv | 结果读取；随机模式含每套客队战术抽中次数与逐场抽签列 |
 | career import/status/team/opponents/preview/cancel/run | 存档对战 |
 | fmf import/export、setpiece export | 战术文件往返 |
 
@@ -161,6 +161,18 @@ job_wait
 results_summary
 ```
 
+随机客队战术池对比：
+
+```text
+draft_create source=inline scenario_path="<含 away_tactic_pool 的场景文件>"
+draft_validate
+experiment_run draft_id=<池草案> baseline_draft_id=<池草案> seeds={start:101,count:20} event_details=false
+job_wait
+results_summary
+```
+
+同一任务的 A/B 共享一次抽签；summary 的 tactic_pool.draws 给出每套客队战术的抽中次数。跨任务 results_compare 会核对抽签，抽中不同战术时返回 comparable=false。
+
 存档对战：
 
 ```text
@@ -178,6 +190,7 @@ results_summary
 
 ## 8. 数据、日志与安全
 
+- 提交：自由模式与多候选批次进入同一 FIFO 队列，按创建顺序串行执行；UI 路径忙时返回 409，Agent 路径返回 queued 与 queue_position。
 - 实验：<dataDir>\runs
 - 存档缓存：<dataDir>\save_library
 - 导出：<dataDir>\agent\exports
@@ -191,16 +204,17 @@ results_summary
 | 现象 | 处理 |
 | --- | --- |
 | app_unavailable | 确认应用已启动、endpoint.json 存在，且 FM27LAB_DATA 指向正确目录 |
-| 401 unauthorized | 重新读取 endpoint.json；应用重启后 token 已变化 |
+| 401 unauthorized | 应用重启后 token 已轮换；MCP 会自动重读 endpoint.json 并重试一次，直接调用 HTTP 时需手动重读 |
 | 403 forbidden_host | 只能用 127.0.0.1 或 localhost 访问 |
-| 409 engine_busy | 控制面操作与活动任务冲突；自由模式提交会排队，等待或取消当前批次 |
+| 409 engine_busy | 控制面操作与活动任务冲突；UI 的自由模式提交在忙时返回 409，Agent 提交会排队并返回 queue_position，等待或取消当前批次 |
 | 引擎不可用或不兼容 | 在引擎设置中选择包含 fm_Data 与 shared 的游戏根目录 |
 | 原生会话退出 104 | 确认引擎资产位于 Windows 本地路径，游戏资源完整 |
 | 存档读取失败 | 确认存档为受支持的 FM27 构建；查看 save_library 日志 |
 
 ## 10. 已知限制
 
-- 同一时刻只允许一个批次任务。
-- 首期不提供定位球片段实验、实验执行力与原生 AI 生成对手。
+- 同一时刻只允许一个批次任务，按创建顺序串行执行。
+- 随机客队战术池只支持自由推演；定位球片段与存档对战不支持。
+- 定位球片段实验、实验执行力与原生 AI 生成对手只作为场景字段提交，暂无独立 MCP 工具。
 - 仅本机回环访问。
 - 不同 FM27 构建需要匹配的适配器；升级后重新执行兼容预检。

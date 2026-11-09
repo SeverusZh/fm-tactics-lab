@@ -324,7 +324,8 @@ class AgentCliTests(unittest.TestCase):
             rows = list(csv.DictReader(handle))
         self.assertEqual(len(rows), 4)
         self.assertEqual(list(rows[0].keys()), [
-            "mode", "variant", "seed", "home_goals", "away_goals", "shots",
+            "mode", "variant", "seed", "tactic_pool_entry_index",
+            "tactic_pool_entry_name", "home_goals", "away_goals", "shots",
             "shots_on_target", "xg", "possession", "passes", "completed_passes",
             "elapsed_seconds", "attempts", "log", "goals", "cards"])
         self.assertEqual(rows[0]["mode"], "comparison")

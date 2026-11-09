@@ -3,7 +3,7 @@
 状态：设计草案 v1，待评审
 适用范围：本机 Windows 部署；MCP 为主、CLI 为辅；首期核心能力
 快速启动：[AGENT_QUICKSTART.md](AGENT_QUICKSTART.md)
-依据：v1108.5 源码静态分析；控制面与推演内核的逐行证据保存在本机 .team 目录，不随仓库分发
+依据：v1109.3 源码静态分析；控制面与推演内核的逐行证据保存在本机 .team 目录，不随仓库分发
 
 ## 决策基线
 
@@ -13,7 +13,7 @@
 | 改造 | 允许服务端增量改造 |
 | 部署 | 仅本机 Windows |
 | 范围 | 首期自由推演与存档对战核心 |
-| 并发 | 单任务，忙时报错 |
+| 并发 | 单任务串行；UI 忙时报 409，Agent 提交进入 FIFO 队列 |
 | 草案 | draftId 与文件化草案 |
 
 ## 1. 目标与非目标
@@ -27,7 +27,7 @@
 非目标：
 
 - 远程或局域网访问；默认仅本机 loopback。
-- 多任务队列与多租户并发；首期单任务，忙时报错。
+- 多租户并发；单条 FIFO 提交队列由服务端串行执行，取消与排队位置可见。
 - 定位球片段实验、实验执行力、原生 AI 生成对手；后续版本。
 - 绕过原生兼容检查、DLL 指纹门禁或完赛校验。
 - 游戏资源提取、再分发或替代原生引擎。
@@ -168,7 +168,7 @@ fm27lab mcp                    以 stdio 启动 MCP sidecar
 | validation_failed | 400 | 否 | 参数或场景校验失败，details 带 field 或 side/slot |
 | engine_unavailable | 409 | 否 | 引擎资源缺失或不可用 |
 | engine_incompatible | 409 | 否 | 兼容检查失败 |
-| engine_busy | 409 | 是 | 控制面操作与活动任务冲突；自由模式 /runs 已改为排队，不再返回此错误 |
+| engine_busy | 409 | 是 | 控制面操作与活动任务冲突；Agent 自由模式 /runs 进入 FIFO 队列，不返回此错误；UI /api/run 忙时仍返回 409 |
 | conflict | 409 | 否 | 状态不允许，如运行中删除 |
 | idempotency_conflict | 409 | 否 | 同一幂等键载荷不同 |
 | storage_insufficient | 507 | 是 | 磁盘空间不足 |
@@ -196,6 +196,7 @@ fm27lab mcp                    以 stdio 启动 MCP sidecar
 - 同键同载荷返回首次响应，并带响应头 Idempotency-Replayed: true。
 - 同键不同载荷返回 409 idempotency_conflict。
 - 键保存在内存，有效期 24 小时；App 重启后清空。
+- experiment_run 与 career_run 每次工具调用自动生成幂等键；token 轮换或端口变化后 MCP 重读 endpoint.json 并重试时不会重复建任务。
 
 ### 4.6 端点总表
 
@@ -242,7 +243,7 @@ manifest 示例：
 ```json
 {
   "api": "fm27lab/v1",
-  "server_version": "1108.5",
+  "server_version": "1109.3",
   "adapter_version": "27.0.0+2493426",
   "engine_build": null,
   "scenario_schema": 3,
@@ -271,7 +272,7 @@ Schema 包包含：
 
 | Agent 端点 | 复用现有实现 |
 | --- | --- |
-| runs | /api/run 的校验、任务创建与 execute |
+| runs | 与 UI 共用的 start_run 校验、pool 展开、任务创建与 execute；Agent 路径允许 FIFO 排队 |
 | career/import 与 career/status | SaveLibrary.start 与 status |
 | career/team、load、selection、preview | SaveLibrary.club、load_team、select_squad、inspect_opponents、opponent_team |
 | career/opponents | SaveLibrary.begin_opponents |
@@ -288,7 +289,8 @@ Schema 包包含：
 沿用现有格式：
 
 - schema 3 为权威输入；schema 4 为双阶段视图，字段为 teams[].phase_plans[2]。
-- 顶层字段：schema、rules、fixture、teams[2]，可选 native_generation、experimental_execution。
+- 顶层字段：schema、rules、fixture、teams[2]，可选 native_generation、experimental_execution、away_tactic_pool。
+- away_tactic_pool 启用后按权重逐场抽取客队战术；A/B 对照共享一次抽签，提交时展开为每个条目的完整场景并写入 provenance。
 - 球队字段：name、tactic_name、mentality、instructions、lineup、captains、takers、setpieces、opposition、players、phases 或 phase_plans、roster_size、native_extra_team_bits。
 - Agent 只操作 schema 4；提交时由服务端归一化为 schema 3。
 
@@ -305,7 +307,7 @@ draft_id 格式：dr_ 加 12 位十六进制。
   "created_at": "2026-11-08T18:40:00+08:00",
   "updated_at": "2026-11-08T18:42:10+08:00",
   "source": {"kind": "default", "ref": null},
-  "meta": {"api": "fm27lab/v1", "scenario_view_schema": 4, "server_version": "1108.5"},
+  "meta": {"api": "fm27lab/v1", "scenario_view_schema": 4, "server_version": "1109.3"},
   "scenario": {"schema": 4, "rules": "game", "fixture": "bundled_match_pkm", "teams": []}
 }
 ```
@@ -327,6 +329,7 @@ draft_id 格式：dr_ 加 12 位十六进制。
 - run 精简字段：variant、seed、sequence、score、statistics、verified、attempts、elapsed_seconds、native_elapsed_seconds、log、events 可选。
 - 失败继续放在 job.failures，字段同现有实现。
 - 状态机沿用 queued、running、complete、error、cancelled、interrupted。
+- 排队中取消立即落 cancelled 且不再执行；运行中取消由 runner 在安全点落地；续跑与提交共用同一串行闸门。
 
 ### 5.4 Career
 
@@ -339,6 +342,8 @@ draft_id 格式：dr_ 加 12 位十六进制。
 
 - metrics 沿用现有结构，含 n、wins、draws、losses、win_rate、win_interval、goals_for、goals_against、points。
 - 存档模式追加 xg、xga、possession、shots、pass_completion、opponent_metrics、paired。
+- 随机模式 job 追加 tactic_pool：salt、uniform、entries（weight、probability）与 draws（total 与每套抽中次数）；draws 按 seed 计数，同一 seed 的 A/B 只算一次。
+- results_compare 对任一方带战术池的任务先核对抽签与条目：同种子抽中不同战术、仅一方启用池或条目不同时返回 comparable=false 与原因，paired 置空。
 - results_csv 输出列见 CLI 章节。
 
 ## 6. Draft 工作区
@@ -351,7 +356,7 @@ draft_id 格式：dr_ 加 12 位十六进制。
 | save | save_id、club_uid、tactic_index，可选 lineup、bench | 调用 career/load 生成场景，转 schema 4 |
 | fmf | file_base64 或 file_path、side、base_scenario 或 base_draft_id | 调用 fmf/import，结果转 schema 4 |
 | job | job_id、variant | 调用 jobs/{id}/export，取指定 variant 的场景 |
-| inline | scenario | 直接校验并保存 |
+| inline | scenario 或 scenario_path | 直接校验并保存；来源为 draft、job、fmf、inline 时 away_tactic_pool 均原样保留 |
 
 ### 6.2 语义编辑
 
@@ -460,7 +465,7 @@ draft_id 格式：dr_ 加 12 位十六进制。
 
 ### 7.4 CSV 列
 
-自由模式：mode、variant、seed、home_goals、away_goals、shots、shots_on_target、xg、possession、passes、completed_passes、elapsed_seconds、attempts、log。
+自由模式：mode、variant、seed、tactic_pool_entry_index、tactic_pool_entry_name、home_goals、away_goals、shots、shots_on_target、xg、possession、passes、completed_passes、elapsed_seconds、attempts、log。战术池列为抽中的客队战术序号与名称；未启用池时留空。MCP results_csv 另含对手统计、xGA、比分变化与进球时间线列。
 存档模式追加：opponent_key、venue、tested_side。
 事件明细导出时追加：goals、cards 的紧凑 JSON 字符串。
 
@@ -502,8 +507,8 @@ draft_id 格式：dr_ 加 12 位十六进制。
 | job_wait | 等待任务终态或超时 |
 | job_list | 任务分页 |
 | job_action | 取消、续跑、删除、重命名 |
-| results_summary | 汇总指标、分布与配对差值 |
-| results_compare | 多任务同种子配对比较与置信区间 |
+| results_summary | 汇总指标、分布、配对差值与随机池抽中次数 |
+| results_compare | 多任务同种子配对比较与置信区间；战术池抽签不一致时拒绝配对 |
 | results_matches | 逐场分页，可选事件 |
 | results_csv | 导出 CSV 并返回路径 |
 | fmf_import | 战术文件导入草案 |
@@ -544,7 +549,7 @@ career_preview：save_id、club_uid、key、draft_id 必填；适配器从草案
 
 career_cancel：kind 取 import 或 opponents，save_id 必填，club_uid 在 opponents 时必填。返回 accepted。
 
-experiment_run：draft_id 或 candidates 二选一；candidates 为 1 到 20 个草案，每项含 draft_id 与可选 name；baseline_draft_id 可选；seeds 为起始与数量，或长度 1 到 10000 的唯一整数数组；workers 可选；event_details 默认 true；name 可选。多草案按队列依次执行，返回 jobs 列表与合计 total；单草案返回 job_id、total、workers、mode、queued、queue_position、seeds。
+experiment_run：draft_id 或 candidates 二选一；candidates 为 1 到 20 个草案，每项含 draft_id 与可选 name；baseline_draft_id 可选；seeds 为起始与数量，或长度 1 到 10000 的唯一整数数组；workers 可选；event_details 默认 true；name 可选。场景带启用的 away_tactic_pool 时，服务端按 seed 与任务 salt 只抽一次，A/B 共享同一套客队战术。多草案按创建顺序进入同一 FIFO 队列串行执行；返回 jobs 列表与合计 total；单草案返回 job_id、total、workers、mode、seed_count、queued、queue_position、variant_names、seeds。
 
 career_run：save_id、club_uid、draft_id、opponents、count、first_seed 必填；baseline_draft_id、workers、event_details、name 可选。返回 job_id、total、workers、mode。
 
@@ -556,13 +561,13 @@ job_list：status、limit、offset 可选。返回分页摘要与排队位置。
 
 job_action：job_id 与 action 必填，action 取 cancel、resume、delete、rename；resume 可带 workers；rename 必须带 name。返回对应结果。
 
-results_summary：job_id 必填。返回 metrics、distributions、paired、failures 摘要、timings。
+results_summary：job_id 必填。返回 mode、metrics（A/B 分列）、distributions、paired、tactic_pool、failures 摘要、timings。tactic_pool 含 salt、entries 与 draws：draws.total 为参与抽签的 seed 数，每个 entry 的 draws 为该套被抽中的次数（同 seed 的 A/B 只计一次）。
 
-results_compare：baseline_job_id 与 candidate_job_ids 必填；candidate_job_ids 为 1 到 20 个任务；variant 默认 B；reps 默认 2000。按同种子配对返回每个候选的 Δ胜率、Δ积分、Δ净胜球、ΔxGD 与 bootstrap 95% 置信区间。
+results_compare：baseline_job_id 与 candidate_job_ids 必填；candidate_job_ids 为 1 到 20 个任务；variant 默认 B；reps 默认 2000。按同种子配对返回每个候选的 Δ胜率、Δ积分、Δ净胜球、ΔxGD 与 bootstrap 95% 置信区间。任务带客队战术池时先读取 provenance 的抽签：仅一方启用池、条目不同或同种子抽中不同战术时返回 comparable=false、reason 与 pairing，paired 置空，禁止错误配对。
 
 results_matches：job_id 必填；variant、seed、limit、offset、include_events 可选。返回 runs 分页与 runs_total；带 seed 时返回单场。文本只返回紧凑比分与关键统计。
 
-results_csv：job_id 必填；out 可选。MCP 工具只接受 dataDir/agent/exports 下的相对文件名，默认按 job_id 命名；CLI 的 --out 可写用户指定路径。CSV 含双方统计、xGA、比分变化与进球时间线；返回 path、path_wsl_hint、sha256、rows、columns。
+results_csv：job_id 必填；out 可选。MCP 工具只接受 dataDir/agent/exports 下的相对文件名，默认按 job_id 命名；CLI 的 --out 可写用户指定路径。CSV 含双方统计、xGA、比分变化、进球时间线与客队战术抽签列（tactic_pool_entry_index、tactic_pool_entry_name；无池时留空）；返回 path、path_wsl_hint、sha256、rows、columns。
 
 fmf_import：draft_id、side、file_base64 或 file_path 必填。返回更新后的草案摘要与 report。
 
@@ -663,7 +668,9 @@ job_wait job_id=<当前队首 job> timeout_seconds=45
 results_compare baseline_job_id=<基准 job> candidate_job_ids=[<候选 job>,...] reps=2000
 ```
 
-多草案提交后由引擎队列依次执行；job_get 与 job_list 的 queue_position 表示当前排队位置。避免并发提交大量批次，单批候选建议不超过 10 个。
+多草案提交后进入服务端唯一队列，按创建顺序串行执行；job_get 与 job_list 的 queue_position 表示当前排队位置。排队中的任务可直接取消，状态立即变为 cancelled 且不再执行。避免并发提交大量批次，单批候选建议不超过 10 个。
+
+跨任务比较前检查 results_compare 的 comparable：若两任务都带客队战术池，salt 不同意味着同 seed 可能抽到不同战术，此时必须返回不可配对；需要跨任务比较时改用同一任务内的 A/B 对照。
 
 ### 9.3 存档对战
 
@@ -694,6 +701,23 @@ fmf_export draft_id side=1
 
 导出后 App 会立即回读并比对，report 中不一致会报错。
 
+### 9.5 随机客队战术池
+
+```text
+draft_create source=inline scenario_path=<含 away_tactic_pool 的场景文件>
+draft_validate
+draft_create source=draft base_draft_id=<池草案> name=候选
+experiment_run draft_id=候选 baseline_draft_id=<池草案> seeds={start:5001,count:200} event_details=false
+job_wait job_id
+results_summary job_id
+```
+
+- 池草案可来自 inline、draft、job 或 fmf；创建后 draft_get include_scenario 与 save_scenario 均保留 away_tactic_pool。
+- 同一任务的 A/B 共享 salt 与 seed 抽签：同 seed 的客队战术完全相同，配对差值只反映战术变化。
+- results_summary 的 tactic_pool.draws 给出每套客队战术的抽中次数；results_matches 逐场返回 tactic_pool_entry。
+- 两个独立种子块应在同一实验配置下重复提交，再用 results_compare 比较；不同任务的 salt 不同，若同 seed 抽签不一致会被拒绝配对（comparable=false），此时不得手工合并配对结果。
+- 随机池不能与定位球片段或 native_generation 同时使用；存档对战不支持随机池。
+
 ## 10. 安全与隐私
 
 - 仅 loopback；Host 白名单；token 或 cookie；Origin 检查保留。
@@ -703,7 +727,7 @@ fmf_export draft_id side=1
 - 破坏性操作需要显式参数：删除草案与实验、切换游戏根、覆盖导出文件。
 - 不提取、不打包、不上传游戏 DLL 与资源；存档与结果仅保留本机。
 - 日志只记录命令、耗时、退出码与错误码，不记录完整场景与存档内容。
-- 自由模式提交由 App 队列串行执行，Agent 层不重试提交；引擎、存档与控制面操作仍要求任务空闲。
+- 自由模式提交由 App 唯一 FIFO 队列串行执行；UI 路径在忙碌时直接返回 409，Agent 路径返回 queued 与 queue_position。排队中取消立即落 cancelled，Agent 层不重试提交；引擎、存档与控制面操作仍要求任务空闲。
 
 ## 11. 性能与预算
 
@@ -732,6 +756,7 @@ fmf_export draft_id side=1
 - 引擎状态原样透出 compatible、trial_allowed、original_build_verified、resource_fingerprint。
 - 适配器版本绑定参考构建 27.0.0+2493426；升级时需要同步 adapter 与规格。
 - App 升级后旧草案仍可加载，但提交前必须重新校验；旧实验按 provenance 规则不可混跑。
+- server_version 与 fm27_agent_contract.APP_VERSION 同步为 1109.3；status 返回 engine_compatibility，其中 profile 可能是字符串 id（原生兼容事件透传），manifest 的 engine_build 仅在 profile 为对象时取值，MCP 文本同时兼容字符串与对象两种形状。
 - 幂等键与活动任务在重启后清空；状态以磁盘 summary 与 provenance 为准。
 
 ## 13. 验收标准
@@ -754,6 +779,8 @@ fmf_export draft_id side=1
 | A14 | 恢复 | App 重启后任务标记 interrupted，可续跑；草案保留 |
 | A15 | 性能基线 | 记录单场耗时与批次吞吐，写入验收记录 |
 | A16 | MCP 文本 | 工具文本为可解析 JSON；超限返回截断标记；results_summary、job_get、draft_list 含关键数据 |
+| A17 | 随机客队战术池 | 池场景经 inline/draft/job/fmf 往返不丢；同任务 A/B 同 seed 抽中同一战术；results_summary 给出每套抽中次数；results_compare 对抽签不同返回 comparable=false |
+| A18 | 状态与重连 | lab_status 兼容 engine_compatibility 与字符串 profile；token 轮换或端口变化时 MCP 重读 endpoint.json 并重试一次 |
 
 ## 14. 实施分期
 
@@ -770,7 +797,8 @@ fmf_export draft_id side=1
 - src/desktop_save_mode.py：读取进程句柄、取消与 cancelled 状态。
 - Launcher.cs：headless、token 感知的自检与关闭、入口脚本生成。
 - scripts/run.py 与 scripts/build_exe.py：现有 src 递归收集已覆盖 fm27_agent，无需新增文件清单。
-- tests：Agent 契约、CLI、MCP、安全用例。
+- src/fm27_agent：status 形状兼容、战术池摘要与结果视图、CSV 抽签列、results_compare 配对保护、token 轮换重试。
+- tests：Agent 契约、CLI、MCP、安全用例；mock 覆盖战术池与 A/B 同抽签；离线服务端队列串行、排队取消与池展开测试。
 
 ## 15. 风险与待评审问题
 

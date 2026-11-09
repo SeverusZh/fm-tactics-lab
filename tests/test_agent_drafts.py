@@ -8,7 +8,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "tests"))
 
-from agent_mock import start_server
+from agent_mock import make_pool_scenario, start_server
 from fm27_agent.client import AgentError, Client
 from fm27_agent.drafts import DraftService
 
@@ -68,6 +68,26 @@ class DraftTests(unittest.TestCase):
                                   positions=["GK", "LB", "CB", "RB", "DM", "CM",
                                              "LM", "RM", "LW", "ST", "RW"])
         self.assertTrue(edited["validation"]["valid"])
+
+    def test_pool_survives_all_creation_sources(self):
+        scenario = make_pool_scenario()
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "pool.json"
+            path.write_text(json.dumps(scenario, ensure_ascii=False), encoding="utf-8")
+            inline = self.drafts.create("inline", scenario_path=str(path))
+        self.assertEqual(inline["away_tactic_pool"], {
+            "enabled": True, "entries": 2,
+            "uniform": {"enabled": True, "attribute_value": 15}})
+        cloned = self.drafts.create("draft", base_draft_id=inline["draft_id"])
+        self.assertEqual(cloned["away_tactic_pool"]["entries"], 2)
+        job = self.client.run(scenario, seeds=[1, 2])
+        from_job = self.drafts.create("job", job_id=job["id"], variant="B")
+        self.assertEqual(from_job["away_tactic_pool"]["entries"], 2)
+        imported = self.drafts.create("fmf", side=1, file_base64="QUFB",
+                                      base_draft_id=cloned["draft_id"])
+        self.assertEqual(imported["away_tactic_pool"]["entries"], 2)
+        stored = self.drafts.scenario(inline["draft_id"])
+        self.assertEqual(len(stored["away_tactic_pool"]["entries"]), 2)
 
     def test_create_from_save_fmf_job_inline(self):
         saved = self.drafts.create("save", save_id="a" * 16, club_uid=1, tactic_index=0)

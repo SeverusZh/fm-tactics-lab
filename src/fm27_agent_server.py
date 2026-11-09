@@ -7,6 +7,7 @@ import json
 import os
 import secrets
 import threading
+import time
 from pathlib import Path
 
 import fm27_agent_contract as contract
@@ -26,6 +27,45 @@ class AgentHttpError(Exception):
     def payload(self):
         return contract.error_payload(self.code, self.message, self.details,
                                       self.retriable, self.retry_after_seconds)
+
+
+class RunGate:
+    """Holds one native match batch at a time so queued runs execute in order."""
+
+    def __init__(self):
+        self._lock = threading.Lock()
+
+    def __enter__(self):
+        self._lock.acquire()
+        return self
+
+    def __exit__(self, exc_type, exc, traceback):
+        self._lock.release()
+        return False
+
+
+def run_queue_state(jobs):
+    """Map each queued or running job to its 1-based queue position, oldest first."""
+    active = sorted((job for job in jobs.values()
+                     if job.get("status") in ("queued", "running")),
+                    key=lambda job: job.get("created", 0))
+    return {job.get("id"): index for index, job in enumerate(active, start=1)}
+
+
+def cancel_run_state(job, clock=time.time):
+    """Cancel a run in place; return True when an active native runner must also stop."""
+    if not isinstance(job, dict):
+        return False
+    status = job.get("status")
+    if status == "queued":
+        job["_cancel"] = True
+        job.update(status="cancelled", current=None, active=[], eta_seconds=None,
+                   finished=clock())
+        return False
+    if status == "running":
+        job["_cancel"] = True
+        return True
+    return False
 
 
 class Router:
@@ -124,14 +164,10 @@ class Router:
         value = {key: value for key, value in job.items() if not key.startswith("_")}
         if job.get("status") == "queued":
             with self.app.LOCK:
-                active = sorted(
-                    (item for item in self.app.JOBS.values()
-                     if item.get("status") in ("queued", "running")),
-                    key=lambda item: item.get("created", 0))
-            for index, item in enumerate(active, start=1):
-                if item.get("id") == job.get("id"):
-                    value["queue_position"] = index
-                    break
+                positions = run_queue_state(self.app.JOBS)
+            position = positions.get(job.get("id"))
+            if position is not None:
+                value["queue_position"] = position
         return value
 
     def jobs_page(self, query):

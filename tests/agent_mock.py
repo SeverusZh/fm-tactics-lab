@@ -3,11 +3,20 @@ from __future__ import annotations
 
 import json
 import secrets
+import sys
 import threading
 import time
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from urllib.parse import parse_qs, urlparse
+
+_SOURCE = Path(__file__).resolve().parents[1] / "src"
+if str(_SOURCE) not in sys.path:
+    sys.path.insert(0, str(_SOURCE))
+import fm27_tactic_pool
+
+POOL_PROFILE = fm27_tactic_pool.PROFILE
 
 
 def make_scenario(first="主队", second="客队"):
@@ -50,6 +59,45 @@ def make_scenario(first="主队", second="客队"):
         "fixture": "bundled_match_pkm",
         "teams": [team(first, positions), team(second, positions)],
     }
+
+
+def _pool_entry(name, team):
+    phases = []
+    for plan in team.get("phase_plans") or []:
+        phases.append([
+            {key: cell.get(key) for key in ("position", "role", "duty", "instructions",
+                                            "target_player", "target_position")}
+            for cell in plan.get("assignments") or []
+        ])
+    return {"name": name, "weight": 1, "tactic": {
+        "tactic_name": name,
+        "mentality": team.get("mentality", 3),
+        "instructions": {},
+        "native_extra_team_bits": "0",
+        "phases": phases,
+    }}
+
+
+def make_pool_scenario(names=("池战术甲", "池战术乙")):
+    """Scenario with an enabled, weighted away tactic pool on the second team."""
+    value = make_scenario()
+    team = value["teams"][1]
+    value["away_tactic_pool"] = {
+        "profile": POOL_PROFILE,
+        "enabled": True,
+        "entries": [_pool_entry(name, team) for name in names],
+        "uniform": {"enabled": True, "attribute_value": 15},
+    }
+    return value
+
+
+def enabled_pool(scenario):
+    if not isinstance(scenario, dict):
+        return None
+    pool = scenario.get("away_tactic_pool")
+    if isinstance(pool, dict) and pool.get("enabled") and pool.get("entries"):
+        return pool
+    return None
 
 
 def make_run(variant, seed, sequence):
@@ -144,8 +192,11 @@ class _Handler(BaseHTTPRequestHandler):
             })
         if path == "/api/agent/v1/status":
             return self._send(200, {
-                "engine_compatibility": {"compatible": True, "can_simulate": True,
-                                         "message": "ok"},
+                "engine_compatibility": {
+                    "compatible": True, "can_simulate": True, "reason": "ok",
+                    "message": "ok", "disposition": "verified",
+                    "profile": "fm27_desktop_2493426_adapter_v1",
+                },
                 "active_job": None, "save_active": None,
                 "server": {"pid": 1, "port": self.state.port, "api": "fm27lab/v1"},
             })
@@ -296,6 +347,9 @@ class MockAgentServer:
         self.busy = busy
         self.slow_jobs = slow_jobs
         self.jobs = {}
+        self.job_seeds = {}
+        self.job_scenarios = {}
+        self.job_pool_draws = {}
         self.calls = []
         self.lock = threading.Lock()
         self.next_job = 1
@@ -324,19 +378,35 @@ class MockAgentServer:
             return self._error_response(409, "engine_busy", "已有比赛运行中")
         job_id = f"job{self.next_job:08d}"
         self.next_job += 1
+        seeds = list(body.get("seeds") or [])
+        pool = enabled_pool(body.get("scenario")) or enabled_pool(body.get("reference"))
+        draws = {}
+        entry_rows = []
+        if pool:
+            draws = {seed: fm27_tactic_pool.draw_index(pool["entries"], seed, job_id)
+                     for seed in seeds}
+            probabilities = fm27_tactic_pool.probabilities(pool["entries"])
+            entry_rows = [{"index": index, "name": entry.get("name"),
+                           "weight": row["weight"], "probability": row["probability"]}
+                          for index, (entry, row) in enumerate(zip(pool["entries"], probabilities))]
         if mode == "career":
             total = len(body.get("opponents") or []) * int(body.get("count") or 0)
         else:
-            total = len(body.get("seeds") or []) * (2 if body.get("reference") else 1)
-        scenarios = [("B", 1)]
+            total = len(seeds) * (2 if body.get("reference") else 1)
+        scenarios = [("B", body.get("scenario"))]
         if body.get("reference"):
-            scenarios.insert(0, ("A", 1))
+            scenarios.insert(0, ("A", body.get("reference")))
         runs = []
         sequence = 0
-        for seed in body.get("seeds") or []:
+        for seed in seeds:
             for variant, _ in scenarios:
                 sequence += 1
-                runs.append(make_run(variant, seed, sequence))
+                run = make_run(variant, seed, sequence)
+                if pool:
+                    entry = entry_rows[draws[seed]]
+                    run["tactic_pool_entry"] = {key: entry[key]
+                                                for key in ("index", "name", "weight", "probability")}
+                runs.append(run)
         job = {
             "id": job_id,
             "name": body.get("name") or "测试实验",
@@ -356,7 +426,21 @@ class MockAgentServer:
             "eta_seconds": 0,
             "matches_per_minute": 0,
         }
+        if pool:
+            job["tactic_pool"] = {
+                "profile": pool.get("profile") or POOL_PROFILE,
+                "enabled": True,
+                "salt": job_id,
+                "uniform": pool.get("uniform"),
+                "entries": entry_rows,
+                "draws": {"total": len(draws),
+                          "counts": fm27_tactic_pool.completed_draw_counts(runs, len(entry_rows))},
+            }
         self.jobs[job_id] = job
+        self.job_seeds[job_id] = seeds
+        self.job_scenarios[job_id] = {variant: scenario for variant, scenario in scenarios
+                                      if isinstance(scenario, dict)}
+        self.job_pool_draws[job_id] = draws
         if self.slow_jobs:
             job.update(status="running", completed=0)
             def finish():
@@ -410,10 +494,20 @@ class MockAgentServer:
         return value
 
     def job_export(self, job):
+        job_id = job["id"]
+        pool = job.get("tactic_pool") if isinstance(job.get("tactic_pool"), dict) else None
+        draws = self.job_pool_draws.get(job_id) or {}
+        provenance = {"seeds": self.job_seeds.get(job_id) or [],
+                      "fixture_sha256": "0" * 64}
+        if pool and draws:
+            provenance["pool"] = {"salt": pool.get("salt"),
+                                  "entries": pool.get("entries"),
+                                  "draws": {str(seed): index for seed, index in draws.items()}}
+        scenarios = self.job_scenarios.get(job_id) or {
+            "A": make_scenario("对照主队", "对照客队"), "B": make_scenario()}
         return {"summary": {key: value for key, value in job.items() if key != "runs"},
-                "scenarios": {"A": make_scenario("对照主队", "对照客队"),
-                              "B": make_scenario()},
-                "provenance": {"seeds": [1], "fixture_sha256": "0" * 64}}
+                "scenarios": scenarios,
+                "provenance": provenance}
 
 
 def start_server(**kwargs):

@@ -34,11 +34,19 @@ python3 -m unittest discover -s tests -v
 - test_agent_contract：token、Host、Cookie、错误封套、分页、幂等、发现文件与启动脚本。
 - test_agent_client：发现、请求、错误映射、任务等待、分页、种子展开。
 - test_agent_drafts：六种来源、语义编辑、校验回滚、列表与删除。
-- test_agent_server：路由、清单、分页、幂等、忙碌冲突、shutdown。
+- test_agent_server：路由、清单、分页、幂等、忙碌冲突、shutdown；队列位置、排队取消与全局串行闸门。
+- test_tactics_server_queue：离线加载服务端，验证 UI 409、Agent FIFO 串行、排队取消立即落 cancelled、池展开与 provenance、续跑忙时冲突。
+- test_tactics_server_queue 与 test_tactic_pool 覆盖池场景：A/B 同抽签、逐场抽签记录、CSV 抽签列、跨任务配对保护。
 - test_agent_cli：命令行参数、JSON 输出、退出码、等待、CSV、career 与 FMF。
 - test_agent_mcp：stdio 初始化、工具列表、工具调用、资源、prompt、错误。
 
-Mock 服务端位于 tests/agent_mock.py，只实现协议形状，不实现业务校验。
+Mock 服务端位于 tests/agent_mock.py，只实现协议形状，不实现业务校验；它按真实抽签算法模拟战术池，A/B 同 seed 抽中同一套客队战术，并提供 job export 的抽签 provenance。
+
+当前自动化数量以最新提交为准（210 项）；以下命令必须全绿：
+
+@@@bash
+python3 -m unittest discover -s tests
+@@@
 
 ## 4. Windows 端到端验收
 
@@ -59,7 +67,7 @@ Mock 服务端位于 tests/agent_mock.py，只实现协议形状，不实现业�
 | A4 | 用 CLI 与 MCP 各跑一次 A/B 对比，每方案 2 场 | 任务完成，metrics 含 A/B，paired 存在 |
 | A5 | career import、team、opponents、preview、run | 存档导入可取消；对手报告生成；count 口径为每对手总场数 |
 | A6 | job list、job get、cancel、resume、rename、delete、export | 分页正确；取消后状态 cancelled；重启后可 resume 未完成任务 |
-| A7 | results summary、matches、match、csv | 指标、逐场、事件、CSV 列与规格 7.4 一致 |
+| A7 | results summary、matches、match、csv | 指标、逐场、事件、CSV 列与规格 7.4 一致；随机模式 summary 含 tactic_pool.draws、matches 含 tactic_pool_entry、CSV 含抽签列 |
 | A8 | fmf import、export、setpiece export | 导出文件可被原版解析器回读；report 中回读校验为真 |
 | A9 | 触发 validation_failed、engine_busy、not_found、app_unavailable | 错误码、HTTP 状态、retriable 与本说明一致 |
 | A10 | 同一 Idempotency-Key 重复提交 runs | 第二次返回同一 job id 且带 Idempotency-Replayed |
@@ -68,6 +76,9 @@ Mock 服务端位于 tests/agent_mock.py，只实现协议形状，不实现业�
 | A13 | 用绝对路径或越界路径调用导出 | 被拒绝；不写入 dataDir 之外 |
 | A14 | 运行中重启 App，重新打开任务列表 | 任务标记 interrupted；已完成结果仍可读 |
 | A15 | 记录 4 场、8 场、16 场批次耗时 | 得到单场耗时与吞吐基线，用于预算校准 |
+| A16 | 用 CLI/MCP 连续提交两个批次 | 第二个返回 queued 与 queue_position；按创建顺序串行执行；排队中取消立即 cancelled |
+| A17 | 提交带 away_tactic_pool 的 A/B 实验 | 同 seed 的 A/B 抽中同一客队战术；results_summary 含 tactic_pool.draws；跨任务抽签不同时 results_compare 返回 comparable=false |
+| A18 | 重启应用后继续用已连接的 MCP 调用 lab_status | sidecar 自动重读 endpoint.json 并重试成功；lab_status 兼容字符串 engine profile |
 
 ## 5. 安全验证
 
@@ -80,8 +91,8 @@ Mock 服务端位于 tests/agent_mock.py，只实现协议形状，不实现业�
 ## 6. 故障排查
 
 - 找不到 endpoint.json：确认 App 已启动，或检查 FM27LAB_DATA 是否指向正确数据目录。
-- 401：确认调用方读取的是当前实例的 endpoint.json；App 重启后 token 会轮换。
-- 409 engine_busy：控制面操作读取返回中的 active_job，等待或取消后再提交；自由模式 /runs 会进入队列。
+- 401：App 重启后 token 会轮换；1109.3 起 MCP 自动重读 endpoint.json 并重试一次，直接 HTTP 调用需要自行重读。
+- 409 engine_busy：控制面操作读取返回中的 active_job，等待或取消后再提交；MCP 的自由模式 /runs 进入 FIFO 队列，UI 路径忙时直接 409。
 - 引擎不兼容：按现有引擎设置选择游戏根目录，或按 TROUBLESHOOTING.md 检查构建匹配。
 - MCP 无响应：确认 sidecar 的 stderr 日志；stdout 只承载协议消息。
 
@@ -116,6 +127,9 @@ Mock 服务端位于 tests/agent_mock.py，只实现协议形状，不实现业�
 - A4、A5、A8 已在 Windows 实机完成；A15 的 4/8/16 场完整基线仍未单独测量。
 - 存档读取依赖 fmsave 0.9.0；不同构建或损坏存档仍需按 TROUBLESHOOTING.md 排查。
 - MCP 协议版本支持 2025-06-18 与 2024-11-05；其他版本按客户端协商处理。
-- 首期不提供定位球片段实验、实验执行力与原生 AI 生成对手的 Agent 工具。
+- 定位球片段实验、实验执行力与原生 AI 生成对手暂以完整场景字段提交，不提供独立 MCP 工具。
+- 随机客队战术池只支持自由推演；跨任务比较在抽签不同时会被拒绝，需要同任务 A/B 或同抽签设计。
+- 旧 MCP 客户端（1108.5 及以前）在 token 轮换后不会自动重读 endpoint.json，需要重启 sidecar；1109.3 起自动重试一次。
+- 服务端离线队列与池展开测试在 Linux 上以桩加载执行，未覆盖原生引擎实际调度；Windows 实机仍按 A4/A6/A16/A17 复验。
 - 多 Agent 自由模式提交进入串行队列，由引擎逐个执行；引擎切换、存档与控制面操作仍要求空闲。
-- 队列、MCP 紧凑文本与新增工具已在源码测试集验证；Windows 实机复验需在重新打包后执行。
+- 队列、战术池、MCP 紧凑文本与新增工具已在源码测试集验证；Windows 实机复验需在重新打包后执行。

@@ -22,6 +22,18 @@ def now_text():
     return datetime.now().astimezone().isoformat(timespec="seconds")
 
 
+def _pool_summary(pool):
+    if not isinstance(pool, dict):
+        return None
+    entries = pool.get("entries") if isinstance(pool.get("entries"), list) else []
+    uniform = pool.get("uniform") if isinstance(pool.get("uniform"), dict) else None
+    return {
+        "enabled": bool(pool.get("enabled")),
+        "entries": len(entries),
+        "uniform": copy.deepcopy(uniform),
+    }
+
+
 class DraftService:
     """Draft JSON files live under <dataDir>/agent/drafts."""
 
@@ -189,6 +201,7 @@ class DraftService:
 
     def summary(self, draft):
         scenario = draft.get("scenario") or {}
+        pool = scenario.get("away_tactic_pool")
         teams = []
         for team in scenario.get("teams") or []:
             teams.append({
@@ -206,6 +219,7 @@ class DraftService:
             "updated_at": draft.get("updated_at"),
             "source": draft.get("source"),
             "scenario_schema": (scenario.get("schema") if isinstance(scenario, dict) else None),
+            "away_tactic_pool": _pool_summary(pool),
             "teams": teams,
         }
 

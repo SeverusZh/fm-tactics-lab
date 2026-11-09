@@ -2,6 +2,7 @@ import json
 import sys
 import tempfile
 import threading
+import time
 import unittest
 from pathlib import Path
 
@@ -206,6 +207,61 @@ class RouterTests(unittest.TestCase):
                                               {"id": "a" * 16}, {})
         self.assertTrue(payload["accepted"])
         self.assertEqual(self.app.SAVE_LIBRARY.cancelled[0][0], "import")
+
+
+class RunQueueTests(unittest.TestCase):
+    def test_gate_serializes_overlapping_runs_in_submission_order(self):
+        gate = agent_server.RunGate()
+        events = []
+        lock = threading.Lock()
+
+        def work(name, hold):
+            with gate:
+                with lock:
+                    events.append(("start", name))
+                time.sleep(hold)
+                with lock:
+                    events.append(("end", name))
+
+        first = threading.Thread(target=work, args=("first", 0.15))
+        first.start()
+        time.sleep(0.02)
+        second = threading.Thread(target=work, args=("second", 0.01))
+        second.start()
+        first.join(timeout=5)
+        second.join(timeout=5)
+        self.assertEqual(events, [("start", "first"), ("end", "first"),
+                                  ("start", "second"), ("end", "second")])
+
+    def test_queue_state_orders_queued_and_running_by_creation(self):
+        jobs = {
+            "new": {"id": "new", "status": "queued", "created": 20},
+            "done": {"id": "done", "status": "complete", "created": 5},
+            "active": {"id": "active", "status": "running", "created": 10},
+            "old": {"id": "old", "status": "queued", "created": 1},
+        }
+        positions = agent_server.run_queue_state(jobs)
+        self.assertEqual(positions, {"old": 1, "active": 2, "new": 3})
+
+    def test_cancel_marks_queued_run_cancelled_immediately(self):
+        job = {"id": "queued", "status": "queued", "created": 1}
+        stopped = agent_server.cancel_run_state(job)
+        self.assertFalse(stopped)
+        self.assertEqual(job["status"], "cancelled")
+        self.assertTrue(job["_cancel"])
+        self.assertIn("finished", job)
+
+    def test_cancel_running_run_keeps_status_for_runner(self):
+        job = {"id": "running", "status": "running", "created": 1}
+        self.assertTrue(agent_server.cancel_run_state(job))
+        self.assertEqual(job["status"], "running")
+        self.assertTrue(job["_cancel"])
+
+    def test_cancel_finished_run_is_noop(self):
+        job = {"id": "done", "status": "complete", "created": 1}
+        self.assertFalse(agent_server.cancel_run_state(job))
+        self.assertEqual(job["status"], "complete")
+        self.assertNotIn("_cancel", job)
 
 
 if __name__ == "__main__":

@@ -45,7 +45,8 @@ EXIT_BY_ERROR = {
 
 BAD_JOB_STATES = ("error", "cancelled", "interrupted")
 CAREER_TERMINAL_STATES = ("complete", "error", "cancelled", "empty")
-CSV_FREE_COLUMNS = ("mode", "variant", "seed", "home_goals", "away_goals", "shots",
+CSV_FREE_COLUMNS = ("mode", "variant", "seed", "tactic_pool_entry_index",
+                    "tactic_pool_entry_name", "home_goals", "away_goals", "shots",
                     "shots_on_target", "xg", "possession", "passes",
                     "completed_passes", "elapsed_seconds", "attempts", "log")
 CSV_CAREER_COLUMNS = ("opponent_key", "venue", "tested_side")
@@ -930,8 +931,10 @@ def _csv_row(run, job_value, career, events):
     team = teams[side] if (isinstance(teams, list) and side < len(teams)
                            and isinstance(teams[side], dict)) else {}
     home, away = _score(run)
+    pool_entry = run.get("tactic_pool_entry") if isinstance(run.get("tactic_pool_entry"), dict) else {}
     row = [job_value.get("mode") or run.get("mode") or "", variant or "",
-           run.get("seed", ""), home, away, team.get("shots", ""),
+           run.get("seed", ""), pool_entry.get("index", ""), pool_entry.get("name", ""),
+           home, away, team.get("shots", ""),
            team.get("shots_on_target", ""), team.get("xg", ""),
            team.get("possession", ""), team.get("passes", ""),
            team.get("completed_passes", ""), run.get("elapsed_seconds", ""),

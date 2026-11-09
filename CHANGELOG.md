@@ -4,6 +4,10 @@
 
 - Add a local AI agent interface: /api/agent/v1 endpoints, fm27lab CLI, stdio MCP sidecar, file-backed drafts, endpoint discovery with token authentication, headless launcher mode, and cancellable save import and opponent scans.
 - Improve the agent surface: compact JSON tool text, richer draft/job/results payloads, batch draft edits, draft clone, legal option lookup, inline scenario file paths, cross-job paired comparisons, queued free-run submissions with queue positions, and shorter job wait defaults.
+- Unify run submission: the web UI and Agent interface share one start_run path; /api/run and /api/run-episodes keep the UI 409 behaviour while Agent submissions enter a real FIFO queue that executes one batch at a time in creation order; cancelling a queued run lands status cancelled immediately and resume uses the same serial gate.
+- Add random away tactic pool support to the Agent layer: draft summaries and inline/draft/job/fmf sources preserve away_tactic_pool; one task draws each seed once so A/B variants face the same opponent tactic; results_summary reports per-entry draw counts, results_matches exposes the drawn tactic, CSV gains tactic_pool_entry_index and tactic_pool_entry_name, and results_compare returns comparable=false instead of pairing tasks whose draws differ.
+- Fix the merged status contract: lab_status tolerates engine_compatibility with a string native profile, and MCP reloads endpoint.json and retries once after token rotation or an app restart; run submissions carry an idempotency key so the retry does not create duplicate jobs.
+- Bump the server and agent contract version to 1109.3; extend the offline server queue tests, the pool mock and the Agent/MCP regression suite (210 tests).
 
 ## v1109.3 · 2026-11-09
 

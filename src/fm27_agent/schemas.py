@@ -184,7 +184,8 @@ TOOLS = [
     _tool(
         "draft_create",
         "从默认场景、存档、战术文件、任务导出、内联场景或已有草案创建草案。"
-        "inline 来源可用 scenario 对象或 scenario_path 文件路径，大场景建议用文件路径。",
+        "inline 来源可用 scenario 对象或 scenario_path 文件路径，大场景建议用文件路径。"
+        "场景中的 away_tactic_pool 在所有来源（draft、job、fmf、inline）间保持不变。",
         _object(_DRAFT_CREATE_PROPERTIES, required=("source",)),
     ),
     _tool(
@@ -322,7 +323,8 @@ TOOLS = [
     _tool(
         "experiment_run",
         "提交自由模式批次；单草案或 candidates 多草案均可，提供 baseline_draft_id 时每个草案做同种子 A/B 对照。"
-        "多草案按队列依次执行，返回每个草案的 job_id 与 total。",
+        "场景启用 away_tactic_pool 时，同一任务的 A/B 共用一次抽签（同 seed 抽中同一套客队战术）。"
+        "多草案按创建顺序串行执行，返回每个草案的 job_id、total 与 queue_position。",
         {
             "type": "object",
             "properties": {
@@ -446,12 +448,13 @@ TOOLS = [
     ),
     _tool(
         "results_summary",
-        "返回汇总指标、分数分布、配对差值、失败摘要与耗时；文本为紧凑 JSON。",
+        "返回汇总指标、分数分布、配对差值、失败摘要与耗时；随机模式另含 tactic_pool.draws（每套抽中次数）；文本为紧凑 JSON。",
         _object({"job_id": JOB_ID}, required=("job_id",)),
     ),
     _tool(
         "results_compare",
-        "对多个任务按同种子做配对比较，返回每场差值均值与 bootstrap 置信区间。",
+        "对多个任务按同种子做配对比较，返回每场差值均值与 bootstrap 置信区间。"
+        "任务带客队战术池时先核对抽签；同种子抽中不同战术或仅一方启用池时返回 comparable=false 与原因，不做配对。",
         _object(
             {
                 "baseline_job_id": JOB_ID,
@@ -492,7 +495,7 @@ TOOLS = [
     ),
     _tool(
         "results_csv",
-        "生成逐场 CSV 写入 dataDir/agent/exports，含双方统计与比分变化；返回 path、sha256 与 rows。",
+        "生成逐场 CSV 写入 dataDir/agent/exports，含双方统计、比分变化与客队战术抽签列（无池时留空）；返回 path、sha256 与 rows。",
         _object(
             {
                 "job_id": JOB_ID,
