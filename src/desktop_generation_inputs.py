@@ -20,7 +20,7 @@ def export(source,folder,include_manager_section=False):
     source=Path(source);folder=Path(folder);bounded_output(folder);folder.mkdir(parents=True,exist_ok=True)
     before=source.stat()
     with source.open('rb')as stream:digest=hashlib.file_digest(stream,'sha256').hexdigest()
-    profiles={};by_uid={};person_by_uid={};original_read=reader._read_ability_block;original_person=reader._PersonObject
+    profiles={};by_uid={};person_by_uid={};headers={};original_read=reader._read_ability_block;original_person=reader._PersonObject
     def capture(db,header,layout):
         result=original_read(db,header,layout)
         if result[0]is not None and all(result[1:]):
@@ -34,6 +34,7 @@ def export(source,folder,include_manager_section=False):
     def person(*a,**kw):
         obj=original_person(*a,**kw)
         person_by_uid[obj.uid]=struct.unpack_from('<I',db,obj.header)[0]+1
+        headers[obj.uid]=obj.header
         if obj.header in profiles:by_uid[obj.uid]=profiles[obj.header]
         return obj
     reader._read_ability_block=capture;reader._PersonObject=person
@@ -53,11 +54,13 @@ def export(source,folder,include_manager_section=False):
                 for row in staff:
                     row['generation_profile']=by_uid.get(row['uid'])
                     row['person_selector']=person_by_uid[row['uid']]
+                    row['header']=headers.get(row['uid'])
                 records=save._context.player_records()
                 selectors={str(i+1):native[uid]for i,uid in zip(records.pindexes,records.uids)if native.get(uid)is not None}
                 job_error=None
                 try:jobs=[plain(j)for j in save.job_vacancies()if j.club_uid in wanted]
                 except (AttributeError,ValueError,RuntimeError)as error:jobs=[];job_error=str(error)
+                nations={str(n.nation_id):n.database_id for n in save.nations()}
                 sections={}
                 for name in (('tactics_man','manager_manager')if include_manager_section else('tactics_man',)):
                     if name not in save.info.section_schemas:continue
@@ -69,7 +72,7 @@ def export(source,folder,include_manager_section=False):
                     'clubs':[c for c in clubs if c['uid']in wanted],
                     'players':[plain(p)for p in players],'staff':staff,'player_selectors':selectors,
                     'fixtures':[f for f in fixtures if f.get('home_club_uid')in wanted and f.get('away_club_uid')in wanted],
-                    'job_vacancies':jobs,'job_reader_error':job_error,'sections':sections,
+                    'job_vacancies':jobs,'job_reader_error':job_error,'sections':sections,'nations':nations,
                     'source_first_team_counts':{str(c):first_counts.get(str(c),0)for c in wanted},
                     'admitted_to_simulator':False,'unresolved':['tactical_responsibility_references','native_marshalling','complete_match_context']}
     finally:reader._read_ability_block=original_read;reader._PersonObject=original_person

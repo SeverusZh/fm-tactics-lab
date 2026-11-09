@@ -27,8 +27,10 @@ import fm27_setpieces as setpieces
 import fm27_phase_inputs as phase_inputs
 import fm27_profiles as profiles
 import fm27_fmf
+import fm27_tactic_pool
 import fm27_match_events
 import desktop_generation_protocol
+import desktop_locale
 import desktop_generation_catalog
 import desktop_source_plans
 from desktop_storage import require_space
@@ -44,6 +46,7 @@ import desktop_engine
 ENGINE_COMPATIBILITY = desktop_engine.initialize(ROOT)
 ENGINE_DLL_SHA256 = ENGINE_COMPATIBILITY['actual_dll_sha256']
 EXECUTION_EXPERIMENT_DLL = '252ff8fb5b7a4a5a5464db6ba632e309eef9b6e65ffa992ae20575a189e66c6a'
+EXECUTION_COMPONENTS = ('understanding', 'buy_in', 'opposition', 'ability')
 CATALOG = json.loads((WEB/'catalog.json').read_text(encoding='utf8'))
 phase_inputs.annotate(CATALOG)
 CATALOG['setpieces']=setpieces.CATALOG
@@ -58,7 +61,7 @@ PIS = {g['id']:g for g in CATALOG['player_instructions']}
 TAKER_KEYS=['penalties']+[f'{kind}_{direction}_{"foot"if kind in ("corners","wide_free_kicks")else "side"}'for kind in ('corners','direct_free_kicks','wide_free_kicks','deep_free_kicks','throw_ins')for direction in ('left','right')]
 POLICY_VERSION='1a080000'
 APP_VERSION='1108.5'
-STATIC_FILES={'/team-bulk.js':'team-bulk.js','/desktop-workspace.js':'desktop-workspace.js','/match-events.js':'match-events.js','/desktop.js':'desktop.js','/desktop.css':'desktop.css','/':'index.html','/app.js':'app.js','/advanced.js':'advanced.js','/setpieces.js':'setpieces.js','/batch.js':'batch.js','/style.css':'style.css','/save-mode.js':'save-mode.js','/save-mode.css':'save-mode.css','/engine-settings.js':'engine-settings.js','/squad-editor.js':'squad-editor.js'}
+STATIC_FILES={'/team-bulk.js':'team-bulk.js','/desktop-workspace.js':'desktop-workspace.js','/match-events.js':'match-events.js','/desktop.js':'desktop.js','/desktop.css':'desktop.css','/':'index.html','/app.js':'app.js','/advanced.js':'advanced.js','/setpieces.js':'setpieces.js','/batch.js':'batch.js','/style.css':'style.css','/save-mode.js':'save-mode.js','/save-mode.css':'save-mode.css','/engine-settings.js':'engine-settings.js','/squad-editor.js':'squad-editor.js','/tactic-pool.js':'tactic-pool.js','/tactic-library.js':'tactic-library.js','/i18n.js':'i18n.js','/i18n-en.js':'i18n-en.js'}
 AGENT_TOKEN=None
 AGENT_ROUTER=None
 AGENT_SERVER=None
@@ -257,15 +260,34 @@ def validate_scenario(data):
             raise ValueError('请分别设置两队的实验执行力')
         if ENGINE_DLL_SHA256 != EXECUTION_EXPERIMENT_DLL:
             raise ValueError('当前 FM27 引擎版本尚未验证实验执行力')
-        normalized['experimental_execution'] = [
-            integer(value, 0, 100, '实验执行力') for value in values
-        ]
+        execution = []
+        for value in values:
+            if isinstance(value, dict):
+                if set(value) not in (set(EXECUTION_COMPONENTS[:3]), set(EXECUTION_COMPONENTS)):
+                    raise ValueError('请填写战术理解、教练认可和对手情报')
+                value = {key: integer(value[key], 0, 100, '实验执行力分项')
+                         for key in EXECUTION_COMPONENTS if key in value}
+            else:
+                value = integer(value, 0, 100, '实验执行力')
+            execution.append(value)
+        normalized['experimental_execution'] = execution
+    if data.get('away_tactic_pool')is not None:
+        normalized['away_tactic_pool']=fm27_tactic_pool.normalize(data['away_tactic_pool'])
     return normalized
+
+def enabled_pool(scenario):
+    if not isinstance(scenario,dict):return None
+    value=scenario.get('away_tactic_pool')
+    return value if isinstance(value,dict)and value.get('enabled')else None
 
 def encode_scenario(data,absolute=False):
     data=validate_scenario(data);records=[]
     for side, value in enumerate(data.get('experimental_execution', [])):
-        records.append((61, side, 0, 0, value))
+        if isinstance(value, dict):
+            records.extend((61, side, index, 0, value[key])
+                           for index, key in enumerate(EXECUTION_COMPONENTS, 1) if key in value)
+        else:
+            records.append((61, side, 0, 0, value))
     for side,t in enumerate(data['teams']):
         base=DEFAULT['teams'][side];records.append((10,side,0,0,1))
         if 'roster_size'in t:records.append((17,side,0,0,t['roster_size']))
@@ -351,6 +373,11 @@ import desktop_save_mode
 import sys
 SAVE_LIBRARY=desktop_save_mode.SaveLibrary(sys.modules[__name__])
 
+def require_league_idle(label):
+    if SAVE_LIBRARY.active:raise ValueError('请等待存档及历史输入解析完成')
+    with LOCK:
+        if any(j['status']in ('queued','running')for j in JOBS.values()):raise ValueError('请等待比赛结束后再'+label)
+
 def experiment_name(value, fallback):
     if value is None: return fallback
     if not isinstance(value,str) or not 1<=len(value.strip())<=100 or any(ord(c)<32 for c in value):
@@ -362,6 +389,7 @@ def create_save_job(data):
     if SAVE_LIBRARY.active: raise ValueError('请等待存档／对手解析完成')
     scenario=validate_scenario(data['scenario'])
     reference=validate_scenario(data['reference']) if data.get('reference') else None
+    if enabled_pool(scenario)or enabled_pool(reference):raise ValueError('随机客队战术池仅支持自由推演，存档对战不可用')
     own=integer(data.get('club_uid'),0,0xffffffff,'己方球队')
     selected=data.get('opponents')
     if not isinstance(selected,list) or not 1<=len(selected)<=40 or len({v['key'] for v in selected})!=len(selected):
@@ -523,7 +551,7 @@ def import_fmf(data):
         for g,i,v in routine['backups']:
             if g>=8 or i>=len(backups[g]):raise ValueError('定位球备用任务越界')
             backups[g][i]=v
-        variants[variant]={'name':bytes.fromhex(decoded['name_utf8_hex']).decode('utf8')[:48],'frequency':routine['frequency'],'strategy':routine['strategy'],'swing':routine['swing'],'groups':routine['groups'],'backups':backups,'priority':routine['priority'],'opaque_flags':routine['opaque_flags']}
+        variants[variant]={'name':bytes.fromhex(decoded['name_utf8_hex']).decode('utf8')[:64],'frequency':routine['frequency'],'strategy':routine['strategy'],'swing':routine['swing'],'groups':routine['groups'],'backups':backups,'priority':routine['priority'],'opaque_flags':routine['opaque_flags']}
         scenario=validate_scenario(scenario);report={'setpiece_type':kind,'notice':'已通过原版解析器导入'+setpieces.TYPE_NAMES[kind]+'套路；包含任务、备用任务、分配顺序、发球策略和频率。','native_roundtrip_verified':True}
         (directory/'import_report.json').write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding='utf8');return {'scenario':scenario,'report':report}
     if result.returncode or not parsed or not decoded or not parsed['accepted']or parsed['stream_error']:raise ValueError('原版解析器未完整接受此 FM27 战术，未改动当前配置')
@@ -533,6 +561,19 @@ def import_fmf(data):
     repaired={'scenario':validate_scenario(scenario),'changes':[]}
     report={'source_sha256':hashlib.sha256(payload).hexdigest(),'tactic_name':team['tactic_name'],'core_bytes_consumed':parsed['consumed'],'decoded_bytes':parsed['size'],'preserved_extra_native_bits':[i for i in range(128)if int(team['native_extra_team_bits'])>>i&1],'normalization':repaired['changes'],'retained_sections':['球员与属性','定位球套路','针对性指令','主罚与队长名单'],'notice':'已导入当前球队的双阶段阵型、角色、指令及心态。球员、定位球、针对性指令和主罚名单保留当前配置。'}
     (directory/'import_report.json').write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding='utf8');return {'scenario':repaired['scenario'],'report':report}
+
+def import_pool_fmf(data):
+    scenario=validate_scenario(data['scenario'])
+    imported=import_fmf({'side':1,'scenario':scenario,'file_base64':data['file_base64']})
+    entry=fm27_tactic_pool.entry_from_team(imported['scenario']['teams'][1],data.get('name'))
+    pool=scenario.get('away_tactic_pool')or fm27_tactic_pool.defaults();entries=list(pool['entries'])
+    if len(entries)>=fm27_tactic_pool.MAX_ENTRIES:raise ValueError(f'客队战术池最多保存 {fm27_tactic_pool.MAX_ENTRIES} 套战术')
+    entries.append(entry)
+    scenario['away_tactic_pool']=fm27_tactic_pool.normalize({**pool,'entries':entries})
+    scenario=validate_scenario(scenario)
+    report=dict(imported['report']);report['tactic_name']=entry['name'];report['sha256']=report.get('source_sha256')
+    return {'scenario':scenario,'entry':entry,'report':report,'pool':fm27_tactic_pool.summary(scenario['away_tactic_pool'])}
+
 def export_setpiece(data):
     side=integer(data['side'],0,1,'球队');scenario=validate_scenario(data['scenario']);kind=integer(data['type'],0,9,'定位球类型');variant=integer(data['variant'],0,2,'套路序号');rows=scenario['teams'][side]['setpieces']['routines'][str(kind)]
     if variant>=len(rows):raise ValueError('套路不存在')
@@ -555,6 +596,11 @@ def episode_metrics(runs,side):
     return {'generated':len(runs),'n':n,'unavailable':len(runs)-n,'goals_for':sum(r['result']['score'][side]for r in valid),'goals_against':sum(r['result']['score'][1-side]for r in valid),'goals_per_100':sum(r['result']['score'][side]for r in valid)*100/n if n else None,'conceded_per_100':sum(r['result']['score'][1-side]for r in valid)*100/n if n else None,'shots_per_100':sum(r['statistics']['teams'][side]['shots']for r in valid)*100/n if n else None,'xg_per_100':sum(r['statistics']['teams'][side]['xg']for r in valid)*100/n if n else None}
 
 def update_metrics(job,scenarios):
+    if job.get('tactic_pool'):
+        entries=job['tactic_pool'].get('entries',[])
+        counts=fm27_tactic_pool.completed_draw_counts(job['runs'],len(entries))
+        total=len(job['_pool_draws']) if '_pool_draws' in job else job['tactic_pool'].get('draws',{}).get('total',sum(counts.values()))
+        job['tactic_pool']['draws']={'total':total,'counts':counts}
     if job.get('experiment_type')=='save_opponents':
         def oriented(run):
             result=copy.deepcopy(run)
@@ -595,17 +641,34 @@ def execute(job,scenarios,seeds):
     execution_settings = {label:s['experimental_execution'] for label,s in scenarios if 'experimental_execution' in s}
     if execution_settings:
         runner.jobs_per_session = 1
-        job.update(runtime_mode='isolated_execution_experiment', jobs_per_native_session=1,
+        job.update(runtime_mode='isolated_pool_execution_experiment' if job.get('_pool_variants') else 'isolated_execution_experiment', jobs_per_native_session=1,
                    experimental_execution=execution_settings)
     with LOCK:
         job['_runner']=runner;job['status']='running';job['started']=time.time()
         if job.get('_cancel'):runner.cancel()
     try:
         completed={(r['variant'],r['seed'])for r in job['runs']}
-        tasks=[{'key':f'{label}:{seed}','variant':label,'seed':seed,'scenario':next(s for v,s in scenarios if v==label),'position_names':{p['mask']:p['id']for p in POSITIONS.values()},'episode':job.get('episode_settings'),'config':job['_dir']/f'{label}.bin','path':job['_dir']/f'{index:04d}_{label}_seed_{seed}.jsonl'}for index,seed in enumerate(seeds)for label,_ in scenarios if(label,seed)not in completed]
+        pool_variants=job.get('_pool_variants')or{}
+        tasks=[]
+        for index,seed in enumerate(seeds):
+            for label,_ in scenarios:
+                if(label,seed)in completed:continue
+                if pool_variants:
+                    entry_index=job['_pool_draws'][str(seed)];scenario=pool_variants[label][entry_index];config=job['_dir']/f'{label}_pool{entry_index}.bin'
+                else:
+                    scenario=next(s for v,s in scenarios if v==label);config=job['_dir']/f'{label}.bin'
+                task={'key':f'{label}:{seed}','variant':label,'seed':seed,'scenario':scenario,
+                    'position_names':{p['mask']:p['id']for p in POSITIONS.values()},'episode':job.get('episode_settings'),
+                    'config':config,'path':job['_dir']/f'{index:04d}_{label}_seed_{seed}.jsonl'}
+                if pool_variants:
+                    task['tactic_pool_entry']=entry_index;task['tactic_pool_name']=job['tactic_pool']['entries'][entry_index]['name']
+                tasks.append(task)
         for task in tasks:task['event_details']=job.get('event_details',True)
         def result(run):
             with LOCK:
+                if pool_variants:
+                    entry_index=job['_pool_draws'][str(run['seed'])];entry=job['tactic_pool']['entries'][entry_index]
+                    run['tactic_pool_entry']={'index':entry_index,'name':entry['name'],'weight':entry['weight'],'probability':entry['probability']}
                 if run.get('failed'):job['failures'].append(run)
                 else:
                     run['log_sha256']=hashlib.sha256((job['_dir']/run['log']).read_bytes()).hexdigest()
@@ -630,6 +693,7 @@ def execute(job,scenarios,seeds):
         with LOCK:
             if hasattr(runner,'session_diagnostics'):job['session_diagnostics']=runner.session_diagnostics
             job.pop('_runner',None);job['finished']=time.time();job['current']=None;job['active']=[];job['elapsed_seconds']=round(previous+time.perf_counter()-began,3)
+            job.pop('_pool_variants',None);job.pop('_pool_draws',None)
             if job['status']=='complete':job['eta_seconds']=0
             persist(job)
 
@@ -648,10 +712,44 @@ def resume_job(job,workers):
         scenario=json.loads((job['_dir']/f'{label}.json').read_text(encoding='utf8'))
         if encode_scenario(scenario)!=config.read_bytes():raise ValueError('方案与已保存的比赛输入不一致')
         scenarios.append((label,scenario))
+    pool=provenance.get('pool')
+    if pool:
+        configs=provenance.get('configs')
+        if not isinstance(configs,list)or not configs:raise ValueError('该实验缺少客队战术池展开方案，无法续跑')
+        entries=pool.get('entries')
+        if not isinstance(entries,list)or not entries:raise ValueError('该实验的客队战术池条目记录不完整')
+        if str(pool.get('salt'))!=str(job['id']):raise ValueError('客队战术池随机抽取来源与任务不符')
+        groups={}
+        for item in configs:
+            config=job['_dir']/item['config_file'];document=job['_dir']/item['scenario_file']
+            if hashlib.sha256(config.read_bytes()).hexdigest()!=item['config_sha256']:raise ValueError('保存的客队战术池输入已改变')
+            if hashlib.sha256(document.read_bytes()).hexdigest()!=item['scenario_sha256']:raise ValueError('保存的客队战术池方案已改变')
+            scenario=json.loads(document.read_text(encoding='utf8'))
+            if encode_scenario(scenario)!=config.read_bytes():raise ValueError('客队战术池方案与已保存的比赛输入不一致')
+            groups.setdefault(item['label'],{})[item['entry']]=scenario
+        if set(groups)!={label for label,_ in scenarios}:raise ValueError('客队战术池展开方案与实验方案不符')
+        for label,items in groups.items():
+            if sorted(items)!=list(range(len(entries))):raise ValueError('客队战术池展开方案序号不连续')
+            groups[label]=[items[index]for index in range(len(entries))]
+        draws=pool.get('draws')
+        if not isinstance(draws,dict)or set(draws)!={str(seed)for seed in provenance['seeds']}:raise ValueError('客队战术池随机抽取记录不完整')
+        for index in draws.values():
+            if type(index)is not int or not 0<=index<len(entries):raise ValueError('客队战术池随机抽取记录越界')
+        job['_pool_variants']=groups;job['_pool_draws']={seed:index for seed,index in draws.items()}
+        if not isinstance(job.get('tactic_pool'),dict):
+            job['tactic_pool']={'profile':str(pool.get('profile')or fm27_tactic_pool.PROFILE),'enabled':True,'salt':str(pool['salt']),
+                'uniform':copy.deepcopy(pool.get('uniform',fm27_tactic_pool.defaults()['uniform'])),'entries':copy.deepcopy(entries),
+                'draws':{'total':len(draws),'counts':{str(index):0 for index in range(len(entries))}}}
     for run in job['runs']:
+        expected=dict(scenarios)[run['variant']]
+        if pool:
+            index=job['_pool_draws'][str(run['seed'])]
+            if run.get('tactic_pool_entry',{}).get('index')!=index:
+                raise ValueError('已完成比赛的客队战术与原抽签不符')
+            expected=job['_pool_variants'][run['variant']][index]
         path=job['_dir']/run['log']
         if hashlib.sha256(path.read_bytes()).hexdigest()!=run['log_sha256']:raise ValueError('已完成比赛日志已改变')
-        if inspect_saved_run(job['_dir'],run)['result']!=run['result']:raise ValueError('已完成比赛结果校验失败')
+        if inspect_saved_run(job['_dir'],run,expected)['result']!=run['result']:raise ValueError('已完成比赛结果校验失败')
     if job['completed']>=job['total']:raise ValueError('该实验已经完成')
     if job.get('failures'):job.setdefault('failure_history',[]).extend(copy.deepcopy(job['failures']))
     job.update(status='queued',workers=workers,failures=[],error=None,_cancel=False)
@@ -788,6 +886,7 @@ class Handler(BaseHTTPRequestHandler):
         if path==agent_contract.PREFIX or path.startswith(agent_contract.PREFIX+'/'):
             return self.agent_get(path)
         if path=='/api/desktop-presence':return self.send(DESKTOP_PRESENCE.status())
+        if path=='/api/locale':return self.send(desktop_locale.system_language())
         if path=='/api/catalog':return self.send(CATALOG)
         if path=='/api/defaults':return self.send(DEFAULT)
         if path=='/api/phase-defaults':return self.send(phase_inputs.pack(DEFAULT,CATALOG))
@@ -795,6 +894,10 @@ class Handler(BaseHTTPRequestHandler):
         if path=='/api/save/status':
             query=parse_qs(urlparse(self.path).query)
             try: return self.send(SAVE_LIBRARY.status(query.get('id',[None])[0]))
+            except (ValueError,OSError) as error: return self.send({'error':str(error)},400)
+        if path=='/api/save/leagues':
+            query=parse_qs(urlparse(self.path).query)
+            try: return self.send(SAVE_LIBRARY.league_catalog(query.get('id',[None])[0]))
             except (ValueError,OSError) as error: return self.send({'error':str(error)},400)
         if path=='/api/jobs':
             with LOCK:return self.send([{k:v for k,v in j.items()if not k.startswith('_')and(k!='runs'or parse_qs(urlparse(self.path).query).get('brief')!=['1'])}for j in sorted(JOBS.values(),key=lambda j:j.get('created',0))])
@@ -835,7 +938,8 @@ class Handler(BaseHTTPRequestHandler):
             if length==0 and (path==agent_contract.PREFIX or path.startswith(agent_contract.PREFIX+'/')):
                 data={}
             else:
-                if not 0<length<=(6000000 if path in ('/api/import-fmf',agent_contract.PREFIX+'/fmf/import')else 1500000):raise ValueError('请求大小无效')
+                limit=8000000 if path in ('/api/import-fmf','/api/pool/import-fmf','/api/save/league-pool') else (6000000 if path==agent_contract.PREFIX+'/fmf/import' else 1500000)
+                if not 0<length<=limit:raise ValueError('请求大小无效')
                 data=json.loads(self.rfile.read(length))
             if path==agent_contract.PREFIX or path.startswith(agent_contract.PREFIX+'/'):return self.agent_post(path,data)
             if path=='/api/jobs/rename':
@@ -864,6 +968,24 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send({'id':job['id']})
             if path.startswith('/api/save/'):
                 if path=='/api/save/pick': return self.send({'path':desktop_save_mode.choose_save_file()})
+                if path=='/api/save/pick-folder': return self.send({'path':desktop_save_mode.choose_folder()})
+                if path=='/api/save/leagues':
+                    return self.send(SAVE_LIBRARY.league_catalog(data['id']))
+                if path=='/api/save/league-library':
+                    return self.send(SAVE_LIBRARY.league_library(data['id'],data['league']))
+                if path=='/api/save/league-export':
+                    require_league_idle('导出存档战术')
+                    return self.send(SAVE_LIBRARY.export_league_tactics(data['id'],data['league'],data['directory']))
+                if path=='/api/save/real-generation-status':
+                    return self.send(SAVE_LIBRARY.real_generation_status(data['id'],data['league']))
+                if path=='/api/save/real-generation':
+                    require_league_idle('生成真实AI战术')
+                    if data.get('club_uid') is not None:
+                        return self.send(SAVE_LIBRARY.generate_real_team(data['id'],data['league'],data['club_uid'],bool(data.get('force'))))
+                    return self.send(SAVE_LIBRARY.start_real_generation(data['id'],data['league'],data.get('clubs'),bool(data.get('force'))))
+                if path=='/api/save/league-pool':
+                    require_league_idle('导入客队战术池')
+                    return self.send(SAVE_LIBRARY.import_league_tactics_pool(data['id'],data['league'],data['scenario']))
                 if path=='/api/save/import': return self.send(SAVE_LIBRARY.start(data['path']),202)
                 if path=='/api/save/club': return self.send(SAVE_LIBRARY.club(data['id'],data['club_uid']))
                 if path=='/api/save/load':
@@ -900,9 +1022,10 @@ class Handler(BaseHTTPRequestHandler):
                     ENGINE_DLL_SHA256=ENGINE_COMPATIBILITY['actual_dll_sha256']
                     (RUNS.parent/'game-root.txt').write_text(selected,encoding='utf-8-sig')
                     return self.send(ENGINE_COMPATIBILITY)
-            if path in ('/api/import-fmf','/api/export-fmf','/api/export-setpiece'):
+            if path in ('/api/import-fmf','/api/pool/import-fmf','/api/export-fmf','/api/export-setpiece'):
                 desktop_engine.require_available(ENGINE_COMPATIBILITY)
             if path=='/api/import-fmf':return self.send(import_fmf(data))
+            if path=='/api/pool/import-fmf':return self.send(import_pool_fmf(data))
             if path=='/api/export-fmf':return self.send(export_fmf(data))
             if path=='/api/export-setpiece':return self.send(export_setpiece(data))
             if path=='/api/validate':return self.send({'scenario':validate_scenario(data),'records':(len(encode_scenario(data))-12)//20})
@@ -914,6 +1037,8 @@ class Handler(BaseHTTPRequestHandler):
                 if type(event_details)is not bool:raise ValueError('事件明细开关必须为布尔值')
                 if path=='/api/run-episodes'and not event_details:raise ValueError('定位球片段需要事件明细；快速模式仅适用于整场比赛')
                 scenario=validate_scenario(data['scenario']);reference=validate_scenario(data['reference']) if data.get('reference')else None
+                if path=='/api/run-episodes'and(enabled_pool(scenario)or enabled_pool(reference)):
+                    raise ValueError('随机客队战术池不支持定位球片段')
                 episode=None
                 if path=='/api/run-episodes':
                     if any('experimental_execution' in item for item in (scenario, reference) if item is not None):
@@ -928,16 +1053,38 @@ class Handler(BaseHTTPRequestHandler):
                 if not isinstance(seeds,list)or not 1<=len(seeds)<=10000 or len(set(seeds))!=len(seeds):raise ValueError('需要1–10000个不重复种子')
                 seeds=[integer(s,0,0xffffffff,'随机种子')for s in seeds]
                 workers=integer(data.get('workers',BATCH_LIMITS['recommended']),1,BATCH_LIMITS['maximum'],'并行数')
+                variants=[('A',reference),('B',scenario)]if reference else[('B',scenario)]
+                pool=scenario.get('away_tactic_pool')if isinstance(scenario.get('away_tactic_pool'),dict)else None
+                if pool is None and reference:pool=reference.get('away_tactic_pool')if isinstance(reference.get('away_tactic_pool'),dict)else None
+                if not(pool and pool.get('enabled')):pool=None
+                expanded={}
+                if pool:
+                    if any('native_generation' in item for _,item in variants):
+                        raise ValueError('随机客队战术池不能与电脑生成战术同时使用')
+                    expanded={label:[validate_scenario(fm27_tactic_pool.expand({**item,'away_tactic_pool':pool},index))for index in range(len(pool['entries']))]for label,item in variants}
                 with LOCK:
                     desktop_engine.require_available(ENGINE_COMPATIBILITY)
                     if any(j['status']in ('queued','running')for j in JOBS.values()):return self.send({'error':'已有比赛运行中，请等待或取消'},409)
                     key=secrets.token_hex(6);directory=RUNS/f'{datetime.now():%Y%m%d_%H%M%S}_{key}';directory.mkdir(parents=True)
-                    variants=[('A',reference),('B',scenario)]if reference else [('B',scenario)]
-                    for label,s in variants:
-                        (directory/f'{label}.json').write_text(json.dumps(s,ensure_ascii=False,indent=2),encoding='utf8');(directory/f'{label}.bin').write_bytes(encode_scenario(s))
-                        (directory/f'{label}.phases.json').write_text(json.dumps(phase_inputs.pack(s,CATALOG),ensure_ascii=False,indent=2),encoding='utf8')
+                    for label,item in variants:
+                        (directory/f'{label}.json').write_text(json.dumps(item,ensure_ascii=False,indent=2),encoding='utf8');(directory/f'{label}.bin').write_bytes(encode_scenario(item))
+                        (directory/f'{label}.phases.json').write_text(json.dumps(phase_inputs.pack(item,CATALOG),ensure_ascii=False,indent=2),encoding='utf8')
+                    pool_summary=pool_draws=None;configs=[]
+                    if pool:
+                        pool_summary=fm27_tactic_pool.summary(pool,key);pool_draws=fm27_tactic_pool.draws(pool,seeds,key)
+                        for label,items in expanded.items():
+                            for entry_index,item in enumerate(items):
+                                document=json.dumps(item,ensure_ascii=False,indent=2).encode('utf8');payload=encode_scenario(item)
+                                (directory/f'{label}_pool{entry_index}.json').write_bytes(document);(directory/f'{label}_pool{entry_index}.bin').write_bytes(payload)
+                                configs.append({'label':label,'entry':entry_index,'entry_name':pool['entries'][entry_index]['name'],
+                                    'config_file':f'{label}_pool{entry_index}.bin','config_sha256':hashlib.sha256(payload).hexdigest(),
+                                    'scenario_file':f'{label}_pool{entry_index}.json','scenario_sha256':hashlib.sha256(document).hexdigest()})
                     provenance={'host_sha256':hashlib.sha256((NATIVE/'FM27Simulator.exe').read_bytes()).hexdigest(),'fixture_sha256':hashlib.sha256((NATIVE/'fixtures/match.pkm').read_bytes()).hexdigest(),'native_dll_sha256':ENGINE_DLL_SHA256,'engine_compatibility':copy.deepcopy(ENGINE_COMPATIBILITY),'engine_resource_fingerprint':ENGINE_COMPATIBILITY['resource_fingerprint'],'seeds':seeds,'fixture_me_version':'26.8.0.0','config_hashes':{label:hashlib.sha256((directory/f'{label}.bin').read_bytes()).hexdigest()for label,_ in variants}}
                     provenance['event_details']=event_details
+                    if pool:
+                        provenance['pool']={'profile':pool_summary['profile'],'enabled':True,'salt':key,'uniform':copy.deepcopy(pool_summary['uniform']),
+                            'entries':copy.deepcopy(pool_summary['entries']),'draws':{str(seed):index for seed,index in pool_draws.items()}}
+                        provenance['configs']=copy.deepcopy(configs)
                     (directory/'provenance.json').write_text(json.dumps(provenance,indent=2),encoding='utf8')
                     job={'batch_schema':1,'workers':workers,'failures':[],'active':[],'id':key,'status':'queued','completed':0,'total':len(seeds)*len(variants),'runs':[],'metrics':{},'created':time.time(),'output_dir':str(directory),'_dir':directory}
                     job['name']=experiment_name(data.get('name'),f"{scenario['teams'][0]['name']} · {scenario['teams'][0].get('tactic_name') or '战术实验'} · {len(seeds)}场")
@@ -946,9 +1093,12 @@ class Handler(BaseHTTPRequestHandler):
                     job['runtime_mode']='isolated_native_episode'if episode else'reused_native_worker'
                     job['jobs_per_native_session']=1 if episode else 64
                     job['initial_state_policy']={'id':'controlled-start-v3','player_values':copy.deepcopy(profiles.CONTROLLED_START),'morale_verified':True,'cohesion_verified':True}
-                    job['mode']='comparison'if reference else'single';job['variant_names']={label:s['teams'][0].get('tactic_name','')for label,s in variants}
-                    job['team_names']={label:[t['name']for t in s['teams']]for label,s in variants}
+                    job['mode']='comparison'if reference else'single';job['variant_names']={label:item['teams'][0].get('tactic_name','')for label,item in variants}
+                    job['team_names']={label:[t['name']for t in item['teams']]for label,item in variants}
                     if episode:job.update(experiment_type='setpiece_episode',episode_settings=episode)
+                    elif pool:
+                        job['tactic_pool']={**pool_summary,'draws':{'total':len(pool_draws),'counts':{str(index):0 for index in range(len(pool['entries']))}}}
+                        job['_pool_variants']=expanded;job['_pool_draws']={str(seed):index for seed,index in pool_draws.items()}
                     JOBS[key]=job;persist(job);POOL.submit(execute,job,variants,seeds)
                     return self.send({'id':key},202)
             if path=='/api/resume':

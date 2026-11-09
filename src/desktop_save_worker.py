@@ -36,6 +36,78 @@ def write(path, value):
             time.sleep(.025)
 
 
+LEAGUE_MIN_MEMBERS=6
+LEAGUE_MAX_MEMBERS=60
+
+
+def _value(row,name):
+    return row.get(name) if isinstance(row,dict) else getattr(row,name,None)
+
+
+def _day_number(value):
+    return int(value.replace('-',''))if value else 0
+
+
+def _league_priority(entry,save_date):
+    """Rank a stage/season group for the one league entry a competition keeps."""
+    first=entry.get('first_date')or''
+    last=entry.get('last_date')or''
+    date=save_date or ''
+    active=bool(date and first and last and first<=date<=last)
+    upcoming=bool(date and first and first>date)
+    window=0 if active else 1 if upcoming else 2
+    if upcoming:
+        recency=_day_number(first)
+    elif window==2:
+        recency=-_day_number(last)
+    else:
+        recency=0
+    return (window,recency,-entry['fixture_count'],-len(entry['club_uids']),entry['key'])
+
+
+def league_catalog(fixtures,clubs,competitions=(),save_date=None):
+    """One entry per competition, using the active or nearest schedule."""
+    database_ids={}
+    for competition in competitions:
+        competition_id=_value(competition,'id')
+        if type(competition_id)is int:database_ids[competition_id]=_value(competition,'database_id')
+    groups=defaultdict(list)
+    for fixture in fixtures:
+        if _value(fixture,'home_team_slot')!=0 or _value(fixture,'away_team_slot')!=0:continue
+        home,away=_value(fixture,'home_club_uid'),_value(fixture,'away_club_uid')
+        competition_id,stage_id=_value(fixture,'competition_id'),_value(fixture,'stage_id')
+        if type(home)is not int or type(away)is not int or home==away:continue
+        if type(competition_id)is not int or type(stage_id)is not int:continue
+        groups[(competition_id,stage_id,_value(fixture,'season_start_year'))].append(fixture)
+    registry={_value(club,'uid'):club for club in clubs}
+    candidates=defaultdict(list)
+    for (competition_id,stage_id,season),rows in groups.items():
+        club_uids={_value(row,'home_club_uid')for row in rows}|{_value(row,'away_club_uid')for row in rows}
+        count=len(club_uids)
+        if not LEAGUE_MIN_MEMBERS<=count<=LEAGUE_MAX_MEMBERS:continue
+        pairs={(_value(row,'home_club_uid'),_value(row,'away_club_uid'))for row in rows}
+        if len(pairs)!=count*(count-1):continue
+        if len(rows)>count*(count-1)*2:continue
+        dates=sorted(str(_value(row,'date'))[:10]for row in rows if _value(row,'date')is not None)
+        candidates[competition_id].append({'key':f'{competition_id}:{stage_id}:{season}',
+            'competition_id':competition_id,'stage_id':stage_id,'season':season,
+            'club_uids':sorted(club_uids),'fixture_count':len(rows),
+            'first_date':dates[0]if dates else None,'last_date':dates[-1]if dates else None,'complete':True})
+    leagues=[min(entries,key=lambda entry:_league_priority(entry,save_date))for entries in candidates.values()]
+    leagues.sort(key=lambda entry:entry['key'])
+    members=set()
+    for entry in leagues:members.update(entry['club_uids'])
+    league_clubs={}
+    for uid in sorted(members):
+        club=registry.get(uid)
+        if club is None:continue
+        first_team=next((_value(team,'team_id')for team in _value(club,'teams')or ()if _value(team,'slot')==0),None)
+        league_clubs[str(uid)]={'name':_value(club,'name'),'short_name':_value(club,'short_name'),
+            'nation_id':_value(club,'nation_id'),'first_team_id':first_team,'club_unique_id':_value(club,'unique_id')}
+    return {'leagues':leagues,'league_clubs':league_clubs,
+        'competitions':{str(entry['competition_id']):database_ids.get(entry['competition_id'])for entry in leagues}}
+
+
 def extract_match_inputs(save,folder):
     from fmsave._container import match_file_entries,read_directory_entry
     caches=[];seen=set();warnings=[]
@@ -67,9 +139,7 @@ def read_recovery_source(source,folder,request):
     import desktop_save_compat
     desktop_save_compat.install()
     import fmsave
-    from fmsave import _version
     wanted=json.loads(request.read_text(encoding='utf8'))
-    _version.FM27_FRAME_DECOMPRESSED_CAP=384*1024**2;_version.FM27_TOTAL_DECOMPRESSED_CAP=768*1024**2
     before=source.stat()
     with source.open('rb') as stream:digest=hashlib.file_digest(stream,'sha256').hexdigest()
     with fmsave.open(source) as save:
@@ -92,10 +162,8 @@ def read_ai_source(source,folder):
     import desktop_save_compat
     desktop_save_compat.install()
     import fmsave
-    from fmsave import _version
     from fmsave._container import read_section
     from desktop_save_players import selected_players
-    _version.FM27_FRAME_DECOMPRESSED_CAP=384*1024**2;_version.FM27_TOTAL_DECOMPRESSED_CAP=768*1024**2
     before=source.stat()
     with source.open('rb') as stream:digest=hashlib.file_digest(stream,'sha256').hexdigest()
     if digest!=json.loads((folder/'dataset.json').read_text(encoding='utf8'))['source_sha256']:raise ValueError('存档已更新，请重新导入')
@@ -118,11 +186,8 @@ def main(source, folder):
     import desktop_save_compat
     desktop_save_compat.install()
     import fmsave
-    from fmsave import _version
     from fmsave._container import match_file_entries, read_directory_entry, read_section
     from fmsave.readers.tactics import find_tactics_layout, _read_tactic_record, _read_slot_block, _read_text
-    _version.FM27_FRAME_DECOMPRESSED_CAP = 384 * 1024**2
-    _version.FM27_TOTAL_DECOMPRESSED_CAP = 768 * 1024**2
     before = source.stat()
     def progress(stage):
         write(folder/'progress.json', {'status': 'reading', 'stage': stage})
@@ -132,7 +197,7 @@ def main(source, folder):
     with fmsave.open(source) as save:
         info = save.info
         managed = [plain(v) for v in save.managed_clubs()]
-        clubs = [{**{k:getattr(v,k) for k in ['uid','unique_id','name','short_name']},'teams':plain(v.teams)} for v in save.clubs()]
+        clubs = [{**{k:getattr(v,k) for k in ['uid','unique_id','name','short_name','nation_id']},'teams':plain(v.teams)} for v in save.clubs()]
         progress('读取人类经理球队属性与球员身份索引')
         from desktop_save_players import selected_players
         from fmsave.table import Table
@@ -152,6 +217,7 @@ def main(source, folder):
         write(folder/'player_index.json',uid_clubs)
         del decoded,squads
         warnings = []
+        calendar = []
         try:
             progress('识别当前同联赛与本队赛事，不读取历史比赛缓存')
             calendar=save.fixtures()
@@ -160,6 +226,14 @@ def main(source, folder):
         except Exception as error:
             fixtures = []
             warnings.append('赛程读取失败：'+str(error))
+        try:
+            catalog = league_catalog(calendar, clubs, save.competitions(), str(info.game_date))
+        except Exception:
+            catalog = {'leagues': [], 'league_clubs': {}, 'competitions': {}}
+        try:
+            nations = {str(n.nation_id): n.database_id for n in save.nations()}
+        except Exception:
+            nations = {}
         try:
             tactics = [plain(v) for v in save.tactics()]
             selections = [plain(v) for v in save.selections()]
@@ -171,6 +245,20 @@ def main(source, folder):
         progress('提取存储战术原始数据')
         section = read_section(save._container_index, 'tactics_man')
         layout = find_tactics_layout(info.section_schemas.get('tactics_man'), info.build)
+        from desktop_save_setpieces import read_team_routines
+        from fmsave.readers.tactics import ReaderCheckError, UnsupportedGameError, _stored_block_starts
+        setpieces = {}
+        stored_starts = _stored_block_starts(section, layout, source.name)
+        for club in clubs:
+            if club['uid'] not in wanted or not club['teams']:
+                continue
+            team_id = club['teams'][0]['team_id']
+            try:
+                routines = read_team_routines(section, team_id, layout, source.name, stored_starts)
+                if routines:
+                    setpieces[str(team_id)] = routines
+            except (ValueError, ReaderCheckError, UnsupportedGameError) as error:
+                warnings.append(f"{club['name']} 的定位球套路读取失败：{error}")
         signatures = set([layout.user_signature, layout.alternate_signature, layout.preset_signature])
         offsets = sorted({i for sig in signatures for i in find_all(section, sig)})
         raw_plans = []
@@ -213,11 +301,13 @@ def main(source, folder):
         retained_keys={str(c) for c in retained_clubs}
         counts={k:v for k,v in counts.items()if k in retained_keys}
         first_counts={k:v for k,v in first_counts.items()if k in retained_keys}
-        result = {'schema':2, 'player_loading':'managed-first-selective-v2','opponent_loading':'same-league-coach-only-v2', 'reader_compatibility_profile':desktop_save_compat.PROFILE,
+        result = {'schema':4, 'player_loading':'managed-first-selective-v2','opponent_loading':'same-league-coach-only-v2', 'reader_compatibility_profile':desktop_save_compat.PROFILE,
                   'source':str(source), 'source_sha256':digest,
                   'date':str(info.game_date), 'build':info.build,
                   'managed':managed, 'clubs':clubs, 'player_counts':counts,'first_team_counts':first_counts,
-                  'fixtures':fixtures, 'tactics':tactics, 'selections':selections,
+                  'fixtures':fixtures, 'tactics':tactics, 'selections':selections, 'setpieces':setpieces,
+                  'leagues':catalog['leagues'], 'league_clubs':catalog['league_clubs'],
+                  'competitions':catalog['competitions'], 'nations':nations,
                   'caches':caches, 'warnings':warnings}
     after = source.stat()
     if (before.st_size, before.st_mtime_ns) != (after.st_size, after.st_mtime_ns):
@@ -240,9 +330,6 @@ def club_registry(source, folder):
     import desktop_save_compat
     desktop_save_compat.install()
     import fmsave
-    from fmsave import _version
-    _version.FM27_FRAME_DECOMPRESSED_CAP=384*1024**2
-    _version.FM27_TOTAL_DECOMPRESSED_CAP=768*1024**2
     before=source.stat()
     with source.open('rb')as stream:digest=hashlib.file_digest(stream,'sha256').hexdigest()
     with fmsave.open(source)as save:
@@ -257,11 +344,8 @@ def read_compact_index(source, folder):
     import desktop_save_compat
     desktop_save_compat.install()
     import fmsave
-    from fmsave import _version
     from fmsave._container import read_section
     from desktop_save_compact import find_table
-    _version.FM27_FRAME_DECOMPRESSED_CAP=384*1024**2
-    _version.FM27_TOTAL_DECOMPRESSED_CAP=768*1024**2
     before=source.stat()
     with source.open('rb')as stream:digest=hashlib.file_digest(stream,'sha256').hexdigest()
     with fmsave.open(source)as save:
@@ -290,11 +374,8 @@ def read_saved_tactics_source(source, folder):
     import desktop_save_compat
     desktop_save_compat.install()
     import fmsave
-    from fmsave import _version
     from fmsave._container import read_section
     from desktop_save_players import selected_players
-    _version.FM27_FRAME_DECOMPRESSED_CAP=384*1024**2
-    _version.FM27_TOTAL_DECOMPRESSED_CAP=768*1024**2
     before=source.stat()
     with source.open('rb')as stream:digest=hashlib.file_digest(stream,'sha256').hexdigest()
     if digest!=json.loads((folder/'dataset.json').read_text(encoding='utf8'))['source_sha256']:
@@ -325,10 +406,7 @@ def read_rosters(source, folder, request):
     import desktop_save_compat
     desktop_save_compat.install()
     import fmsave
-    from fmsave import _version
     from desktop_save_players import selected_players
-    _version.FM27_FRAME_DECOMPRESSED_CAP=384*1024**2
-    _version.FM27_TOTAL_DECOMPRESSED_CAP=768*1024**2
     wanted=json.loads(request.read_text(encoding='utf8'))
     before=source.stat()
     with source.open('rb')as stream:digest=hashlib.file_digest(stream,'sha256').hexdigest()
@@ -354,6 +432,10 @@ if __name__ == '__main__':
         elif len(sys.argv)>4 and sys.argv[3]=='--recovery-source':read_recovery_source(Path(sys.argv[1]),folder,Path(sys.argv[4]))
         else:main(Path(sys.argv[1]), folder)
     except Exception as error:
-        if len(sys.argv)>3 and sys.argv[3]in ('--club-index','--rosters','--compact-index','--saved-tactics','--ai-tactics','--recovery-source'):write(folder/'selective_reader_error.json',{'error':str(error)})
-        else:write(folder/'progress.json', {'status':'error', 'stage':str(error)})
+        message = str(error)
+        if message.endswith('directory entry game_db.dat is larger than the per-frame cap'):
+            from desktop_save_compat import FRAME_DECOMPRESSED_CAP
+            message = f'存档数据库 game_db.dat 解压后超过 {FRAME_DECOMPRESSED_CAP//1024**2} MiB，已停止读取。'
+        if len(sys.argv)>3 and sys.argv[3]in ('--club-index','--rosters','--compact-index','--saved-tactics','--ai-tactics','--recovery-source'):write(folder/'selective_reader_error.json',{'error':message})
+        else:write(folder/'progress.json', {'status':'error', 'stage':message})
         raise
