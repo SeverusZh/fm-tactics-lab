@@ -24,10 +24,10 @@
 
 在仓库根目录执行：
 
-@@@bash
+```bash
 PYTHONPATH=src python3 -m unittest discover -s tests -p 'test_agent_*.py' -v
 python3 -m unittest discover -s tests -v
-@@@
+```
 
 覆盖：
 
@@ -44,9 +44,9 @@ Mock 服务端位于 tests/agent_mock.py，只实现协议形状，不实现业�
 
 当前自动化数量以最新提交为准（210 项）；以下命令必须全绿：
 
-@@@bash
+```bash
 python3 -m unittest discover -s tests
-@@@
+```
 
 ## 4. Windows 端到端验收
 
@@ -119,17 +119,18 @@ python3 -m unittest discover -s tests
 | 关闭 | shutdown 返回 202，进程退出，endpoint.json 删除 |
 | Launcher | 修改后的 Launcher.cs 通过 Windows csc x64 编译 |
 | 未覆盖 | headless 启动只做编译验证；浏览器完整 UI 流程未跑；存档测试只用了一份 FM27 存档 |
+| A16–A18 | 2026-11-10 Windows 实机（agent-runtime，合并后源码 + v1109.3 原生宿主）：lab_status 正常且 server_version=1109.3；36 套池场景经 inline 草案往返与 save_scenario 保留；同 job A/B 8 seeds 同 seed 抽签一致；连续提交两批次第二个 queued/queue_position=2 后串行完成；results_summary 含 tactic_pool.draws、matches 含 tactic_pool_entry、CSV 含抽签列；两条池任务 results_compare 返回 comparable=false；200 场池批次 failures=0 |
 
 说明：源码运行在 WSL 文件系统时，原生宿主若经 UNC 路径读取 match.pkm 会退出 104；本次验收将引擎工作区与数据目录放在 Windows 本地路径下完成。打包版使用 Windows 本地路径，不受影响。存档导入、球队载入、对手扫描与存档批次均在实机完成；导入数据与测试结果保存在 Windows 临时目录，验收后已清理。
 
 ## 8. 已知限制
 
-- A4、A5、A8 已在 Windows 实机完成；A15 的 4/8/16 场完整基线仍未单独测量。
+- A4、A5、A8、A16–A18 已在 Windows 实机完成；A15 的 4/8/16 场完整基线仍未单独测量。
 - 存档读取依赖 fmsave 0.9.0；不同构建或损坏存档仍需按 TROUBLESHOOTING.md 排查。
 - MCP 协议版本支持 2025-06-18 与 2024-11-05；其他版本按客户端协商处理。
 - 定位球片段实验、实验执行力与原生 AI 生成对手暂以完整场景字段提交，不提供独立 MCP 工具。
 - 随机客队战术池只支持自由推演；跨任务比较在抽签不同时会被拒绝，需要同任务 A/B 或同抽签设计。
 - 旧 MCP 客户端（1108.5 及以前）在 token 轮换后不会自动重读 endpoint.json，需要重启 sidecar；1109.3 起自动重试一次。
-- 服务端离线队列与池展开测试在 Linux 上以桩加载执行，未覆盖原生引擎实际调度；Windows 实机仍按 A4/A6/A16/A17 复验。
+- 服务端离线队列与池展开测试在 Linux 上以桩加载执行；A16–A18 已按 Windows 实机复验。
 - 多 Agent 自由模式提交进入串行队列，由引擎逐个执行；引擎切换、存档与控制面操作仍要求空闲。
-- 队列、战术池、MCP 紧凑文本与新增工具已在源码测试集验证；Windows 实机复验需在重新打包后执行。
+- 队列、战术池、MCP 紧凑文本与新增工具已在源码测试集与 Windows 实机验证。实机复验中发现：agent-runtime 实例在较长批次偶发原生 worker session 退出码 86（52-53/64 后退出）并伴随 summary.tmp 原子替换 PermissionError；桌面 v1109.3 实例同批次正常。实验类长批次建议使用桌面实例，agent-runtime 仅做接口验证，该差异需后续排查。
