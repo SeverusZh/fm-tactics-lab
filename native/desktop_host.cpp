@@ -153,7 +153,7 @@ static bool apply_scenario(unsigned char* match,bool tactics_only=false){
         if(edit.side>1)return false;
         auto team=*(unsigned char**)(match+0x15380+8*edit.side);
         if(edit.kind==61){
-            if(edit.a||edit.b||edit.value>100)return false;
+            if(edit.a>4||edit.b||edit.value>100)return false;
         }else if(edit.kind==17){
             if(edit.value<11||edit.value>team[0x72d])return false;
             // Apply eligibility after original preparation initializes all carrier slots.
@@ -264,7 +264,9 @@ static bool apply_scenario(unsigned char* match,bool tactics_only=false){
                 if(edit.b==0){if(edit.value>2)return false;obj[0x14]=(unsigned char)edit.value;}
                 else if(edit.b==1||edit.b==2){
                     auto current=((unsigned char(*)(void*))vt[18+edit.b-1])(obj);
-                    bool recorded_strategy=edit.b==1&&((edit.a/16==5&&edit.value==3)||(edit.a/16==7&&edit.value==6)||(edit.a/16==8&&edit.value==3));
+                    unsigned kind=edit.a/16;
+                    bool recorded_strategy=edit.b==1&&((edit.value==3&&(kind==5||kind==7||kind==8))||
+                        (edit.value==4&&(kind==7||kind==8))||(kind==7&&edit.value==6));
                     if(current==255||(edit.value>(edit.b==2?1u:2u)&&!recorded_strategy))return false;
                     ((void(*)(void*,unsigned char))vt[20+edit.b-1])(obj,(unsigned char)edit.value);
                 }else return false;

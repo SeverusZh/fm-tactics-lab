@@ -152,6 +152,23 @@ def draws(pool,seeds,salt):
     return {seed:draw_index(entries,seed,salt)for seed in seeds}
 
 
+def completed_draw_counts(runs, entry_count):
+    counts = {str(index): 0 for index in range(entry_count)}
+    by_seed = {}
+    for run in runs:
+        entry = run.get('tactic_pool_entry')
+        if entry is None:
+            continue
+        index = _integer(entry['index'], 0, entry_count - 1, '客队战术序号')
+        seed = run['seed']
+        if seed in by_seed and by_seed[seed] != index:
+            raise ValueError('同种子对照的客队战术不一致')
+        by_seed[seed] = index
+    for index in by_seed.values():
+        counts[str(index)] += 1
+    return counts
+
+
 def apply(team,entry,uniform=None):
     if not isinstance(team,dict):raise ValueError('球队格式无效')
     tactic=_entry(entry,0)['tactic']

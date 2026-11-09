@@ -14,6 +14,7 @@ from fm27_batch import BatchRunner, MatchCancellation, own_child_processes
 from fm27_simulator import inspect_log
 import fm27_match_events
 from desktop_storage import require_space
+from desktop_execution import verify_execution_player, execution_receipts
 
 
 def sha(path):
@@ -36,14 +37,16 @@ def merged_rows(receipt,rows):
     return receipt['session_rows']+[row for row in receipt['original_bootstrap_rows']if row['event']not in events]+rows
 
 
-def inspect_saved_run(directory,run):
+def inspect_saved_run(directory,run,scenario=None):
     log=directory/run['log']
     if not run.get('startup_receipt'):return inspect_log(log)
     path=(directory/run['startup_receipt']).resolve()
     if directory.resolve()not in path.parents or sha(path)!=run['startup_receipt_sha256']:
         raise ValueError('复用宿主启动回执已改变，无法接续此实验')
     receipt=json.loads(path.read_text(encoding='utf8'))
-    return inspect_log(log,rows=merged_rows(receipt,read_rows(log)))
+    rows=merged_rows(receipt,read_rows(log))
+    if scenario is not None:execution_receipts(rows,scenario)
+    return inspect_log(log,rows=rows)
 
 
 class DesktopWarmRunner(BatchRunner):
@@ -68,27 +71,7 @@ class DesktopWarmRunner(BatchRunner):
             if task.get('event_details',True)and not any(r.get('event')=='native_player_statistics_identity_verified'and r.get('verified')for r in rows):raise ValueError('球员统计未通过原生身份核对')
         released=next(r for r in rows if r['event']=='original_match_release_completed')
         if not released['tls_context_cleared']:raise ValueError('上一场原生线程上下文未清除')
-        execution = None
-        if 'experimental_execution' in task['scenario']:
-            expected = task['scenario']['experimental_execution']
-            versions = [r for r in rows if r.get('event') == 'experimental_engine_version']
-            execution = sorted((r for r in rows if r.get('event') == 'native_execution_probe'
-                                and r.get('stage') == 'finished'), key=lambda r:r['side'])
-            if len(versions) != 1 or versions[0]['after'] != 0x1b000000 or len(execution) != 2:
-                raise ValueError('缺少原生实验执行力回执')
-            for side, row in enumerate(execution):
-                value = expected[side]
-                if (row['side'] != side or row['policy'] != value or row['build_calls'] <= 0
-                        or row['sample_calls'] <= 0 or not row['players']
-                        or any(bytes.fromhex(p['record_hex'])[:33] != bytes([value])*33 for p in row['players'])):
-                    raise ValueError('实验执行力未通过原生采样或回读核对')
-                players = task['scenario']['teams'][side]['players']
-                for player in row['players']:
-                    if 'input_roster_slot' not in player:
-                        continue
-                    source = players[player['input_roster_slot']].get('native_profile', {})
-                    if 'current_ability' in source and source['current_ability'] != player['input_ca']:
-                        raise ValueError('战术执行力计算收到的球员能力与输入不符')
+        execution = execution_receipts(rows, task['scenario'])
         statistics=next((r for r in rows if r['event']=='native_match_statistics'),None)
         if not statistics or len(statistics['teams'])!=2:raise ValueError('缺少原生球队统计')
         for team in statistics['teams']:
@@ -122,7 +105,7 @@ class DesktopWarmRunner(BatchRunner):
                 'postprocess_seconds':time.perf_counter()-began,'postprocess_queue_seconds':began-queued,
                 'native_elapsed_seconds':timings['total_ms']/1000,'native_elapsed_scope':'job_pipeline_excludes_session_DLL_load_and_activation','engine_compatibility':receipt['compatibility'],
                 'engine_dll_sha256':receipt['dll_sha256'],'collector_sha256':self.host_sha256,
-                'runtime_mode':'reused_native_worker','event_details':event_details,
+                'runtime_mode':'isolated_execution_experiment' if execution is not None else 'reused_native_worker','event_details':event_details,
                 'validation_scope':'native_match_score_team_statistics_and_player_events'if event_details else'native_match_score_and_team_statistics',
                 'worker_pid':ack['pid'],'worker_job_index':ack['index'],
                 'startup_receipt':str(receipt['_path'].relative_to(path.parent)),
@@ -137,7 +120,9 @@ class DesktopWarmRunner(BatchRunner):
         if any(t.get('episode')for t in tasks):raise ValueError('定位球片段须使用独立片段入口')
         messages=queue.Queue(maxsize=6)
         lanes=[tasks[i::self.workers]for i in range(min(self.workers,len(tasks)))]
-        chunks=[lane[offset:offset+self.jobs_per_session]for offset in range(0,max(map(len,lanes)),self.jobs_per_session)for lane in lanes if lane[offset:offset+self.jobs_per_session]]
+        # Execution hooks are process-scoped and must never leak to the next match.
+        session_size = 1 if any('experimental_execution' in task['scenario'] for task in tasks) else self.jobs_per_session
+        chunks=[lane[offset:offset+session_size]for offset in range(0,max(map(len,lanes)),session_size)for lane in lanes if lane[offset:offset+session_size]]
 
         def publish(message):
             while not self._abort:

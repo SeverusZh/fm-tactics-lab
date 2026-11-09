@@ -3,6 +3,8 @@
 // record at MATCH_PLAYER+cba. 41a50 consumes it during action sampling.
 static unsigned char* execution_teams[2]={};
 static int execution_policy[2]={-1,-1};
+enum ExecutionComponent {Understanding, BuyIn, Opposition, Ability, ComponentCount};
+static int execution_components[2][ComponentCount]={{-1,-1,-1,-1},{-1,-1,-1,-1}};
 static unsigned long long execution_builds[2]={},execution_samples[2]={};
 static unsigned short execution_input_ca[2][26]={};
 static bool execution_input_seen[2][26]={};
@@ -15,8 +17,30 @@ static int execution_side(unsigned char* player){
  auto team=*(unsigned char**)(player+0x288);
  return !team?-1:team==execution_teams[0]?0:team==execution_teams[1]?1:-1;
 }
+static int execution_ability(const unsigned char* player,const int* components){
+ if(components[Ability]>=0)return components[Ability];
+ // The original builder derives these two bytes from CA and the IP/OOP role
+ // evaluations. Reuse them and the original float operation order.
+ const float effective=player[0xcd6]*4.0f;
+ const float suitability=(player[0xcd7]*2.0f)/100.0f;
+ return (int)(effective*suitability*100.0f/800.0f+0.5f);
+}
+static int execution_overall(const unsigned char* player,const int* components){
+ return (50*components[Understanding]+25*components[BuyIn]+15*components[Opposition]+10*execution_ability(player,components)+50)/100;
+}
 static void execution_apply(unsigned char* player,int side){
- if(side>=0&&execution_policy[side]>=0)memset(player+0xcba,execution_policy[side],33);
+ if(side<0)return;
+ if(execution_policy[side]>=0){
+  memset(player+0xcba,execution_policy[side],33);
+  return;
+ }
+ const auto components=execution_components[side];
+ if(components[Understanding]<0)return;
+ // Override the four inputs to the overall score. Only buy-in and opposition
+ // information also have their own final fields read by the sampler.
+ player[0xcd8]=(unsigned char)execution_overall(player,components);
+ player[0xcd9]=(unsigned char)components[BuyIn];
+ player[0xcda]=(unsigned char)components[Opposition];
 }
 static void execution_build(void* record,void* plan,void* history,void* exposure,void* attributes,
                             void* opposition,void* training,void* ip,void* oop,unsigned short ca){
@@ -39,6 +63,9 @@ static void execution_sample(void* actor,uintptr_t a,uintptr_t b,void* rng,uintp
   execution_samples[side]++;
   if(execution_policy[side]>=0)for(unsigned i=0;i<33;i++)
    if(player[0xcba+i]!=execution_policy[side])desktop_finish_and_exit(245);
+  const auto components=execution_components[side];
+  if(components[Understanding]>=0&&(player[0xcd8]!=execution_overall(player,components)
+      ||player[0xcd9]!=components[BuyIn]||player[0xcda]!=components[Opposition]))desktop_finish_and_exit(245);
  }
  execution_original_sample(actor,a,b,rng,c);
 }
@@ -66,11 +93,19 @@ static void execution_install(unsigned char* match){
  bool enabled=false;
  for(const auto& edit:scenario_edits){
   if(edit.kind!=61)continue;
-  if(execution_policy[edit.side]>=0)desktop_finish_and_exit(244);
-  execution_policy[edit.side]=(int)edit.value;
+  if(edit.side>1||edit.a>ComponentCount||edit.b||edit.value>100)desktop_finish_and_exit(244);
+  auto& slot=edit.a?execution_components[edit.side][edit.a-1]:execution_policy[edit.side];
+  if(slot>=0)desktop_finish_and_exit(244);
+  slot=(int)edit.value;
   enabled=true;
  }
  if(!enabled)return;
+ for(unsigned side=0;side<2;side++){
+  const auto c=execution_components[side];
+  if(execution_policy[side]>=0){
+   for(int value:execution_components[side])if(value>=0)desktop_finish_and_exit(244);
+  }else if(c[Understanding]<0||c[BuyIn]<0||c[Opposition]<0)desktop_finish_and_exit(244);
+ }
  if(execution_original_sample||strcmp(native_image_sha256,
     "252ff8fb5b7a4a5a5464db6ba632e309eef9b6e65ffa992ae20575a189e66c6a"))desktop_finish_and_exit(244);
  for(unsigned side=0;side<2;side++)execution_teams[side]=*(unsigned char**)(match+0x15380+8*side);
@@ -84,10 +119,20 @@ static void execution_snapshot(unsigned char* match,const char* stage){
  if(!execution_original_sample)return;
  for(unsigned side=0;side<2;side++){
   auto team=*(unsigned char**)(match+0x15380+8*side);
-  fprintf(log_file,"{\"event\":\"native_execution_probe\",\"stage\":\"%s\",\"side\":%u,\"policy\":%d,\"build_calls\":%llu,\"sample_calls\":%llu,\"players\":[",stage,side,execution_policy[side],execution_builds[side],execution_samples[side]);
+  fprintf(log_file,"{\"event\":\"native_execution_probe\",\"stage\":\"%s\",\"side\":%u,\"policy\":",stage,side);
+  if(execution_policy[side]>=0)fprintf(log_file,"%d",execution_policy[side]);
+  else{
+   const auto c=execution_components[side];
+   fprintf(log_file,"{\"understanding\":%d,\"buy_in\":%d,\"opposition\":%d",
+           c[Understanding],c[BuyIn],c[Opposition]);
+   if(c[Ability]>=0)fprintf(log_file,",\"ability\":%d",c[Ability]);
+   fputc('}',log_file);
+  }
+  fprintf(log_file,",\"build_calls\":%llu,\"sample_calls\":%llu,\"players\":[",execution_builds[side],execution_samples[side]);
   for(unsigned i=0;i<team[0x72d];i++){
    auto p=*(unsigned char**)(team+0x138+8*i);
    fprintf(log_file,"%s{\"slot\":%u,\"overall\":%u,\"buy_in\":%u,\"next_match_information\":%u,\"raw_ability_component\":%u,\"role_suitability_component\":%u,",i?",":"",i,p[0xcd8],p[0xcd9],p[0xcda],p[0xcd6],p[0xcd7]);
+   if(execution_policy[side]<0)fprintf(log_file,"\"ability_contribution\":%d,",execution_ability(p,execution_components[side]));
    for(unsigned j=0;j<26;j++)if(original_roster[side][j]==p&&execution_input_seen[side][j]){
     fprintf(log_file,"\"input_roster_slot\":%u,\"input_ca\":%u,\"calculated_overall_before_override\":%u,",
             j,execution_input_ca[side][j],execution_calculated_overall[side][j]);break;

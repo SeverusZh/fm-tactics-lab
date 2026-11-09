@@ -27,7 +27,7 @@ import desktop_coach_presets
 import desktop_source_plans
 import desktop_save_export
 import fm27_tactic_pool
-from desktop_storage import require_space
+from desktop_storage import GIB, SAVE_RESERVE_BYTES, require_space
 from desktop_save_compat import PROFILE as READER_PROFILE
 
 
@@ -108,7 +108,6 @@ class SaveLibrary:
         return dataset(folder/'dataset.json')
 
     def start(self, path):
-        require_space(self.root,additional_bytes=2*1024**3)
         source = Path(path).expanduser().resolve()
         if source.suffix.lower() not in ('.fm', '.fmf') or not source.is_file():
             raise ValueError('请选择真实的 .fm 存档；.fmf 仅在其内容确为存档时可读取')
@@ -125,6 +124,7 @@ class SaveLibrary:
                 desktop_recovery_sources.remember(self,source=source,imported=cached/'dataset.json')
                 self.write(self.root/'latest.json',{'id':cached.name})
                 return {'id':cached.name,'reused':True}
+            require_space(self.root, additional_bytes=2*GIB, reserve_bytes=SAVE_RESERVE_BYTES)
             key = secrets.token_hex(8)
             folder = self.root/key
             folder.mkdir()
@@ -558,6 +558,19 @@ class SaveLibrary:
             raise ValueError('首发必须是该队11名不同的已解析球员')
         team=scenario['teams'][side]
         self.apply_plan(team,self.parsed_plan(key,index))
+        setpiece_count=0
+        setpiece_warnings=[]
+        for kind, rows in data.get('setpieces',{}).get(str(tactic['team_id']),{}).items():
+            label=app.setpieces.TYPE_NAMES[int(kind)]
+            variants=[{**row,'name':row['name'] or f'{label} {i+1}'} for i,row in enumerate(rows)]
+            current=team['setpieces']
+            candidate={**current,'routines':{**current['routines'],kind:variants}}
+            try:
+                team['setpieces']=app.setpieces.normalize(candidate,side,len(team['players']))
+            except ValueError as error:
+                setpiece_warnings.append(f'{label}保留战术板原设置（{error}）')
+            else:
+                setpiece_count+=len(variants)
         team['squad']=[]
         for p in people.values():
             values,profile=self.player_values(p)
@@ -566,9 +579,12 @@ class SaveLibrary:
         c=next(c for c in data['clubs'] if c['uid']==club)
         team['name']=c.get('short_name') or c['name']
         result=self.select_squad(scenario,side,selected,substitutes or [],initial=True)
+        setpiece_notice=f'已载入 {setpiece_count} 套存档定位球套路。' if setpiece_count else '定位球套路沿用战术板设置。'
         return {'scenario':result,'source':{'save_id':key,'club_uid':club,'date':data['date'],
             'tactic_index':index,'tactic_name':tactic['name'],'selected_tactic_confirmed':False,
-            'notice':'战术来自存档保存方案，名单按当前球队和位置补齐，不保证当天首发。属性为存档当天；体能、士气等使用统一开赛条件。定位球及针对性设置保留战术板原值。',
+            'notice':'战术来自存档保存方案，名单按当前球队和位置补齐。属性为存档当天，体能、士气等使用统一开赛条件。'
+                     +setpiece_notice+' '+'。'.join(setpiece_warnings),
+            'setpiece_routine_count':setpiece_count,
             'roster_count':len(people),'match_roster_count':result['teams'][side]['roster_size']}}
 
     def select_squad(self, scenario, side, starters, substitutes, initial=False):
@@ -596,7 +612,7 @@ class SaveLibrary:
         team['setpieces']['role_priorities']={k:[remap[i]for i in values if i in remap]for k,values in team['setpieces']['role_priorities'].items()}
         return app.validate_scenario(scenario)
 
-    OPPONENT_PROFILE='coach-preference-presets-v18'
+    OPPONENT_PROFILE='coach-preference-presets-v19'
 
     def opponent_report(self, path):
         if not path.exists():return None

@@ -204,6 +204,17 @@ class DrawTests(unittest.TestCase):
             pools.draws(value,[1.5],'job-2')
 
 
+class CompletedDrawTests(unittest.TestCase):
+    def test_same_seed_ab_pair_counts_as_one_draw(self):
+        runs=[{'seed':42,'variant':variant,'tactic_pool_entry':{'index':1}}for variant in ('A','B')]
+        runs.append({'seed':43,'variant':'B','tactic_pool_entry':{'index':0}})
+        self.assertEqual(pools.completed_draw_counts(runs,2),{'0':1,'1':1})
+
+    def test_conflicting_opponents_for_one_seed_are_rejected(self):
+        runs=[{'seed':42,'tactic_pool_entry':{'index':index}}for index in (0,1)]
+        with self.assertRaises(ValueError):pools.completed_draw_counts(runs,2)
+
+
 class EntryTests(unittest.TestCase):
     def test_entry_from_imported_team(self):
         source=team('客队甲');source['tactic_name']='导入战术'
@@ -290,6 +301,21 @@ class ApplyTests(unittest.TestCase):
 
 
 class ExpandTests(unittest.TestCase):
+    def test_execution_policy_and_real_player_ca_survive_each_draw(self):
+        source=scenario([entry('甲'),entry('乙')])
+        source['experimental_execution']=[{'understanding':20,'buy_in':35,'opposition':80},
+                                          {'understanding':85,'buy_in':65,'opposition':30}]
+        for i,p in enumerate(source['teams'][1]['players']):
+            p['native_profile']={'current_ability':90+i}
+        before=copy.deepcopy(source)
+        for index in range(2):
+            expanded=pools.expand(source,index)
+            self.assertEqual(expanded['experimental_execution'],source['experimental_execution'])
+            self.assertEqual([p['native_profile']['current_ability']for p in expanded['teams'][1]['players']],
+                             list(range(90,106)))
+            expanded['experimental_execution'][1]['understanding']=0
+        self.assertEqual(source,before)
+
     def test_expand_copies_scenario_and_removes_pool(self):
         source=scenario([entry('甲'),entry('乙')]);snapshot=copy.deepcopy(source)
         expanded=pools.expand(source,1)

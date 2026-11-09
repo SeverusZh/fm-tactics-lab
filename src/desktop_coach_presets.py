@@ -164,6 +164,10 @@ def team(lib,key,candidate):
 def report(lib,key,own):
     import desktop_opponent_scope
     root=lib.folder(key);data=lib.index_data(root);scope=desktop_opponent_scope.identify(data,own)
+    if scope['league'] is None:
+        raise ValueError('当前存档没有唯一可确认的同联赛赛程')
+    if scope['same_league'] - {club['uid'] for club in data['clubs']}:
+        raise ValueError('旧索引缺少本赛季的同联赛球队，请重新导入原 .fm 存档')
     scope['played']&=scope['same_league']
     value=ensure(lib,key);rows=[o for o in opponents(lib,key,own)if o['club_uid']in scope['same_league']];available={r['club_uid']for r in rows}
     names={c['uid']:c.get('short_name')or c['name']for c in data['clubs']}

@@ -12,6 +12,7 @@ using System.Threading;
 using System.Windows.Forms;
 
 internal static class Program {
+    static string L(string zh,string en){return System.Globalization.CultureInfo.CurrentUICulture.TwoLetterISOLanguageName=="zh"?zh:en;}
     static Process server;
     static StreamWriter output,error;
     static string dataRoot,url,gameRoot;
@@ -23,8 +24,8 @@ internal static class Program {
         string configured=Path.Combine(dataRoot,"engine-root.txt");
         string[] candidates={GetArg(args,"--engine-root"),Environment.GetEnvironmentVariable("FM27_ENGINE_ROOT"),Path.Combine(release,"engine"),File.Exists(configured)?File.ReadAllText(configured).Trim():null,Path.GetFullPath(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"..",".."))};
         foreach(string p in candidates)if(IsEngine(p))return Path.GetFullPath(p);
-        if(Has(args,"--self-test"))throw new Exception("找不到完整的本机引擎环境。");
-        using(var dialog=new FolderBrowserDialog()){dialog.Description="请选择已有的 FmEngine 工具目录（包含 fm27_native 文件夹），不是游戏安装目录。";if(dialog.ShowDialog()!=DialogResult.OK||!IsEngine(dialog.SelectedPath))throw new Exception("未选择有效的引擎工具目录。");return dialog.SelectedPath;}
+        if(Has(args,"--self-test"))throw new Exception(L("找不到完整的本机引擎环境。","Cannot find the complete local engine environment."));
+        using(var dialog=new FolderBrowserDialog()){dialog.Description=L("请选择已有的 FmEngine 工具目录（包含 fm27_native 文件夹），不是游戏安装目录。","Select the FmEngine tool folder containing fm27_native.");if(dialog.ShowDialog()!=DialogResult.OK||!IsEngine(dialog.SelectedPath))throw new Exception(L("未选择有效的引擎工具目录。","No valid engine tool folder selected."));return dialog.SelectedPath;}
     }
     static string FindGame(string[] args){
         string saved=Path.Combine(dataRoot,"game-root.txt");var candidates=new System.Collections.Generic.List<string>{GetArg(args,"--game-root"),Environment.GetEnvironmentVariable("FM27_GAME_ROOT"),File.Exists(saved)?File.ReadAllText(saved).Trim():null};
@@ -36,7 +37,7 @@ internal static class Program {
         foreach(var drive in DriveInfo.GetDrives())if(drive.IsReady)candidates.Add(Path.Combine(drive.RootDirectory.FullName,@"SteamLibrary\steamapps\common\Football Manager 27"));
         foreach(string path in candidates)if(!String.IsNullOrEmpty(path)&&File.Exists(Path.Combine(path,@"fm_Data\Plugins\x86_64\game_plugin.dll"))){File.WriteAllText(saved,path,Encoding.UTF8);return path;}
         if(Has(args,"--self-test")||Has(args,"--test-lifecycle"))return "";
-        using(var dialog=new FolderBrowserDialog()){dialog.Description="选择本地 FM27 游戏安装目录；也可取消，进入工具后再设置。";if(dialog.ShowDialog()==DialogResult.OK){File.WriteAllText(saved,dialog.SelectedPath,Encoding.UTF8);return dialog.SelectedPath;}}
+        using(var dialog=new FolderBrowserDialog()){dialog.Description=L("选择本地 FM27 游戏安装目录；也可取消，进入工具后再设置。","Choose the local FM27 installation folder, or cancel to configure it in the tool.");if(dialog.ShowDialog()==DialogResult.OK){File.WriteAllText(saved,dialog.SelectedPath,Encoding.UTF8);return dialog.SelectedPath;}}
         return "";
     }
     static string Unpack(){
@@ -45,7 +46,7 @@ internal static class Program {
         string root=Path.Combine(dataRoot,"releases",hash),ready=Path.Combine(root,".ready");if(File.Exists(ready))return root;
         Directory.CreateDirectory(root);string prefix=Path.GetFullPath(root)+Path.DirectorySeparatorChar;
         using(var memory=new MemoryStream(payload))using(var archive=new ZipArchive(memory,ZipArchiveMode.Read))foreach(var entry in archive.Entries){
-            string dest=Path.GetFullPath(Path.Combine(root,entry.FullName));if(!dest.StartsWith(prefix,StringComparison.OrdinalIgnoreCase))throw new Exception("安装包包含非法路径。");
+            string dest=Path.GetFullPath(Path.Combine(root,entry.FullName));if(!dest.StartsWith(prefix,StringComparison.OrdinalIgnoreCase))throw new Exception(L("安装包包含非法路径。","The package contains an invalid path."));
             if(entry.FullName.EndsWith("/")){Directory.CreateDirectory(dest);continue;}Directory.CreateDirectory(Path.GetDirectoryName(dest));using(var source=entry.Open())using(var target=File.Create(dest))source.CopyTo(target);
         }
         File.WriteAllText(ready,hash);return root;
@@ -58,9 +59,10 @@ internal static class Program {
         info.EnvironmentVariables["FM27_ENGINE_ROOT"]=engine;info.EnvironmentVariables["FM27_DESKTOP_DATA"]=dataRoot;info.EnvironmentVariables["PYTHONUTF8"]="1";info.EnvironmentVariables["PYTHONDONTWRITEBYTECODE"]="1";
         foreach(System.Collections.DictionaryEntry item in Environment.GetEnvironmentVariables())if(((string)item.Key).StartsWith("FM27_")&&(string)item.Key!="FM27_ENGINE_ROOT"&&(string)item.Key!="FM27_DESKTOP_DATA")info.EnvironmentVariables.Remove((string)item.Key);
         info.EnvironmentVariables["FM27_GAME_ROOT"]=gameRoot;
+        info.EnvironmentVariables["FM27_UI_LANGUAGE"]=System.Globalization.CultureInfo.CurrentUICulture.Name;
         server=new Process{StartInfo=info};server.OutputDataReceived+=(s,e)=>{if(e.Data!=null)lock(output)output.WriteLine(e.Data);};server.ErrorDataReceived+=(s,e)=>{if(e.Data!=null)lock(error)error.WriteLine(e.Data);};server.Start();server.BeginOutputReadLine();server.BeginErrorReadLine();url="http://127.0.0.1:"+port;
-        for(int i=0;i<160;i++){if(server.HasExited)throw new Exception("后台启动失败。请查看日志："+Path.Combine(dataRoot,"logs"));try{if(ReadUrl(url+"/api/status").Contains("original_native")){File.WriteAllText(Path.Combine(dataRoot,"url.txt"),url);return;}}catch(WebException){}Thread.Sleep(125);}
-        throw new Exception("后台启动超时。请查看日志："+Path.Combine(dataRoot,"logs"));
+        for(int i=0;i<160;i++){if(server.HasExited)throw new Exception(L("后台启动失败。请查看日志：","Server failed to start. See logs: ")+Path.Combine(dataRoot,"logs"));try{if(ReadUrl(url+"/api/status").Contains("original_native")){File.WriteAllText(Path.Combine(dataRoot,"url.txt"),url);return;}}catch(WebException){}Thread.Sleep(125);}
+        throw new Exception(L("后台启动超时。请查看日志：","Server startup timed out. See logs: ")+Path.Combine(dataRoot,"logs"));
     }
     static void OpenApp(){
         string[] browsers={Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86),@"Microsoft\Edge\Application\msedge.exe"),Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),@"Microsoft\Edge\Application\msedge.exe"),Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),@"Google\Chrome\Application\chrome.exe")};
@@ -74,11 +76,11 @@ internal static class Program {
             if(!acquired){if(File.Exists(Path.Combine(dataRoot,"url.txt"))){url=File.ReadAllText(Path.Combine(dataRoot,"url.txt"));OpenApp();}return 0;}
             try{
                 string release=Unpack();string engine=EngineRoot(args,release);gameRoot=FindGame(args);File.WriteAllText(Path.Combine(dataRoot,"engine-root.txt"),engine,Encoding.UTF8);StartServer(release,engine,ChoosePort(Int32.Parse(GetArg(args,"--port","18765"))));
-                if(selfTest){foreach(string path in new[]{"/api/catalog","/api/defaults","/api/phase-defaults","/desktop.js","/desktop.css","/engine-settings.js","/save-mode.js","/squad-editor.js","/tactic-pool.js","/tactic-library.js"})if(ReadUrl(url+path).Length<10)throw new Exception("Empty endpoint: "+path);File.WriteAllText(Path.Combine(dataRoot,"self-test.json"),"{\"ok\":true,\"bundled_python\":true,\"native_match_executed\":false,\"url\":\""+url+"\"}");Stop();return 0;}
+                if(selfTest){foreach(string path in new[]{"/api/catalog","/api/defaults","/api/phase-defaults","/desktop.js","/desktop.css","/engine-settings.js","/save-mode.js","/squad-editor.js","/tactic-pool.js","/tactic-library.js","/api/locale","/i18n.js","/i18n-en.js"})if(ReadUrl(url+path).Length<10)throw new Exception("Empty endpoint: "+path);File.WriteAllText(Path.Combine(dataRoot,"self-test.json"),"{\"ok\":true,\"bundled_python\":true,\"native_match_executed\":false,\"url\":\""+url+"\"}");Stop();return 0;}
                 Application.EnableVisualStyles();Application.SetCompatibleTextRenderingDefault(false);
                 using(var appIcon=Icon.ExtractAssociatedIcon(Application.ExecutablePath))using(var context=new ApplicationContext())using(var tray=new NotifyIcon())using(var menu=new ContextMenuStrip())using(var timer=new System.Windows.Forms.Timer()){
-                    tray.Text="FM 战术实验室 · v1108.5";tray.Icon=appIcon??SystemIcons.Application;tray.ContextMenuStrip=menu;tray.Visible=!lifecycleTest;
-                    menu.Items.Add("打开战术板",null,(s,e)=>OpenApp());menu.Items.Add("打开结果目录",null,(s,e)=>Process.Start(new ProcessStartInfo(dataRoot){UseShellExecute=true}));menu.Items.Add("退出",null,(s,e)=>context.ExitThread());tray.DoubleClick+=(s,e)=>OpenApp();
+                    tray.Text=L("FM 战术实验室 · v1109.3","FM Tactics Lab \u00b7 v1109.3");tray.Icon=appIcon??SystemIcons.Application;tray.ContextMenuStrip=menu;tray.Visible=!lifecycleTest;
+                    menu.Items.Add(L("打开战术板","Open tactics board"),null,(s,e)=>OpenApp());menu.Items.Add(L("打开结果目录","Open results folder"),null,(s,e)=>Process.Start(new ProcessStartInfo(dataRoot){UseShellExecute=true}));menu.Items.Add(L("退出","Exit"),null,(s,e)=>context.ExitThread());tray.DoubleClick+=(s,e)=>OpenApp();
                     DateTime launched=DateTime.UtcNow;bool seenPage=false;int failedChecks=0;
                     timer.Interval=2000;timer.Tick+=(s,e)=>{
                         if(server.HasExited){timer.Stop();context.ExitThread();return;}
@@ -87,7 +89,7 @@ internal static class Program {
                     };
                     timer.Start();if(!Has(args,"--no-browser"))OpenApp();try{Application.Run(context);}finally{timer.Stop();tray.Visible=false;Stop();}return 0;
                 }
-            }catch(Exception ex){Stop();File.WriteAllText(Path.Combine(dataRoot,"startup-error.txt"),ex.ToString(),Encoding.UTF8);if(!selfTest)MessageBox.Show(ex.Message,"FM 战术实验室 · v1108.5",MessageBoxButtons.OK,MessageBoxIcon.Error);return 1;}
+            }catch(Exception ex){Stop();File.WriteAllText(Path.Combine(dataRoot,"startup-error.txt"),ex.ToString(),Encoding.UTF8);if(!selfTest)MessageBox.Show(ex.Message,L("FM 战术实验室 · v1109.3","FM Tactics Lab \u00b7 v1109.3"),MessageBoxButtons.OK,MessageBoxIcon.Error);return 1;}
         }
     }
 }

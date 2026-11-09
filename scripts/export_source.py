@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 TOP = {'README.md', 'README.en.md', 'LICENSE', 'THIRD_PARTY_NOTICES.md', 'CONTRIBUTING.md',
        'CHANGELOG.md', 'requirements.txt', '.gitignore', '.gitattributes', 'Launcher.cs'}
 TYPES = {'src': {'.py', '.js', '.css', '.html'},
-         'scripts': {'.py'}, 'tests': {'.py'}, 'docs': {'.md'},
+         'scripts': {'.py'}, 'tests': {'.py', '.cjs'}, 'docs': {'.md'},
          'native': {'.cpp', '.h', '.manifest'}}
 NATIVE_JSON = {'native/profile_metadata.json', 'native/adapter_version.json'}
 SCREENSHOTS = {'docs/screenshots/tactics.png', 'docs/screenshots/players.png',
@@ -74,5 +74,5 @@ def export(output, root=ROOT):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--output', type=Path, default=ROOT / 'dist/fm-tactics-lab-v1108.5-source.zip')
+    parser.add_argument('--output', type=Path, default=ROOT / 'dist/fm-tactics-lab-v1109.3-source.zip')
     export(parser.parse_args().output)

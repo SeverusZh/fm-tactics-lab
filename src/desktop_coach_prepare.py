@@ -10,13 +10,10 @@ def prepare(source,folder,index_path):
     import desktop_save_compat;desktop_save_compat.install()
     import fmsave
     import fmsave.readers.staff as reader
-    from fmsave import _version
     from desktop_save_worker import plain
     from desktop_generation_team_table import from_save
     from desktop_opponent_scope import identify
     from desktop_storage import bounded_output
-    _version.FM27_FRAME_DECOMPRESSED_CAP=768*1024**2
-    _version.FM27_TOTAL_DECOMPRESSED_CAP=1536*1024**2
     source=Path(source);folder=Path(folder);bounded_output(folder);folder.mkdir(exist_ok=True)
     index=json.loads(Path(index_path).read_text(encoding='utf8'));started=time.monotonic()
     def progress(text):

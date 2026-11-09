@@ -67,9 +67,7 @@ def read_recovery_source(source,folder,request):
     import desktop_save_compat
     desktop_save_compat.install()
     import fmsave
-    from fmsave import _version
     wanted=json.loads(request.read_text(encoding='utf8'))
-    _version.FM27_FRAME_DECOMPRESSED_CAP=384*1024**2;_version.FM27_TOTAL_DECOMPRESSED_CAP=768*1024**2
     before=source.stat()
     with source.open('rb') as stream:digest=hashlib.file_digest(stream,'sha256').hexdigest()
     with fmsave.open(source) as save:
@@ -92,10 +90,8 @@ def read_ai_source(source,folder):
     import desktop_save_compat
     desktop_save_compat.install()
     import fmsave
-    from fmsave import _version
     from fmsave._container import read_section
     from desktop_save_players import selected_players
-    _version.FM27_FRAME_DECOMPRESSED_CAP=384*1024**2;_version.FM27_TOTAL_DECOMPRESSED_CAP=768*1024**2
     before=source.stat()
     with source.open('rb') as stream:digest=hashlib.file_digest(stream,'sha256').hexdigest()
     if digest!=json.loads((folder/'dataset.json').read_text(encoding='utf8'))['source_sha256']:raise ValueError('存档已更新，请重新导入')
@@ -118,11 +114,8 @@ def main(source, folder):
     import desktop_save_compat
     desktop_save_compat.install()
     import fmsave
-    from fmsave import _version
     from fmsave._container import match_file_entries, read_directory_entry, read_section
     from fmsave.readers.tactics import find_tactics_layout, _read_tactic_record, _read_slot_block, _read_text
-    _version.FM27_FRAME_DECOMPRESSED_CAP = 384 * 1024**2
-    _version.FM27_TOTAL_DECOMPRESSED_CAP = 768 * 1024**2
     before = source.stat()
     def progress(stage):
         write(folder/'progress.json', {'status': 'reading', 'stage': stage})
@@ -171,6 +164,20 @@ def main(source, folder):
         progress('提取存储战术原始数据')
         section = read_section(save._container_index, 'tactics_man')
         layout = find_tactics_layout(info.section_schemas.get('tactics_man'), info.build)
+        from desktop_save_setpieces import read_team_routines
+        from fmsave.readers.tactics import ReaderCheckError, UnsupportedGameError, _stored_block_starts
+        setpieces = {}
+        stored_starts = _stored_block_starts(section, layout, source.name)
+        for club in clubs:
+            if club['uid'] not in wanted or not club['teams']:
+                continue
+            team_id = club['teams'][0]['team_id']
+            try:
+                routines = read_team_routines(section, team_id, layout, source.name, stored_starts)
+                if routines:
+                    setpieces[str(team_id)] = routines
+            except (ValueError, ReaderCheckError, UnsupportedGameError) as error:
+                warnings.append(f"{club['name']} 的定位球套路读取失败：{error}")
         signatures = set([layout.user_signature, layout.alternate_signature, layout.preset_signature])
         offsets = sorted({i for sig in signatures for i in find_all(section, sig)})
         raw_plans = []
@@ -217,7 +224,7 @@ def main(source, folder):
                   'source':str(source), 'source_sha256':digest,
                   'date':str(info.game_date), 'build':info.build,
                   'managed':managed, 'clubs':clubs, 'player_counts':counts,'first_team_counts':first_counts,
-                  'fixtures':fixtures, 'tactics':tactics, 'selections':selections,
+                  'fixtures':fixtures, 'tactics':tactics, 'selections':selections, 'setpieces':setpieces,
                   'caches':caches, 'warnings':warnings}
     after = source.stat()
     if (before.st_size, before.st_mtime_ns) != (after.st_size, after.st_mtime_ns):
@@ -240,9 +247,6 @@ def club_registry(source, folder):
     import desktop_save_compat
     desktop_save_compat.install()
     import fmsave
-    from fmsave import _version
-    _version.FM27_FRAME_DECOMPRESSED_CAP=384*1024**2
-    _version.FM27_TOTAL_DECOMPRESSED_CAP=768*1024**2
     before=source.stat()
     with source.open('rb')as stream:digest=hashlib.file_digest(stream,'sha256').hexdigest()
     with fmsave.open(source)as save:
@@ -257,11 +261,8 @@ def read_compact_index(source, folder):
     import desktop_save_compat
     desktop_save_compat.install()
     import fmsave
-    from fmsave import _version
     from fmsave._container import read_section
     from desktop_save_compact import find_table
-    _version.FM27_FRAME_DECOMPRESSED_CAP=384*1024**2
-    _version.FM27_TOTAL_DECOMPRESSED_CAP=768*1024**2
     before=source.stat()
     with source.open('rb')as stream:digest=hashlib.file_digest(stream,'sha256').hexdigest()
     with fmsave.open(source)as save:
@@ -290,11 +291,8 @@ def read_saved_tactics_source(source, folder):
     import desktop_save_compat
     desktop_save_compat.install()
     import fmsave
-    from fmsave import _version
     from fmsave._container import read_section
     from desktop_save_players import selected_players
-    _version.FM27_FRAME_DECOMPRESSED_CAP=384*1024**2
-    _version.FM27_TOTAL_DECOMPRESSED_CAP=768*1024**2
     before=source.stat()
     with source.open('rb')as stream:digest=hashlib.file_digest(stream,'sha256').hexdigest()
     if digest!=json.loads((folder/'dataset.json').read_text(encoding='utf8'))['source_sha256']:
@@ -325,10 +323,7 @@ def read_rosters(source, folder, request):
     import desktop_save_compat
     desktop_save_compat.install()
     import fmsave
-    from fmsave import _version
     from desktop_save_players import selected_players
-    _version.FM27_FRAME_DECOMPRESSED_CAP=384*1024**2
-    _version.FM27_TOTAL_DECOMPRESSED_CAP=768*1024**2
     wanted=json.loads(request.read_text(encoding='utf8'))
     before=source.stat()
     with source.open('rb')as stream:digest=hashlib.file_digest(stream,'sha256').hexdigest()
@@ -354,6 +349,10 @@ if __name__ == '__main__':
         elif len(sys.argv)>4 and sys.argv[3]=='--recovery-source':read_recovery_source(Path(sys.argv[1]),folder,Path(sys.argv[4]))
         else:main(Path(sys.argv[1]), folder)
     except Exception as error:
-        if len(sys.argv)>3 and sys.argv[3]in ('--club-index','--rosters','--compact-index','--saved-tactics','--ai-tactics','--recovery-source'):write(folder/'selective_reader_error.json',{'error':str(error)})
-        else:write(folder/'progress.json', {'status':'error', 'stage':str(error)})
+        message = str(error)
+        if message.endswith('directory entry game_db.dat is larger than the per-frame cap'):
+            from desktop_save_compat import FRAME_DECOMPRESSED_CAP
+            message = f'存档数据库 game_db.dat 解压后超过 {FRAME_DECOMPRESSED_CAP//1024**2} MiB，已停止读取。'
+        if len(sys.argv)>3 and sys.argv[3]in ('--club-index','--rosters','--compact-index','--saved-tactics','--ai-tactics','--recovery-source'):write(folder/'selective_reader_error.json',{'error':message})
+        else:write(folder/'progress.json', {'status':'error', 'stage':message})
         raise

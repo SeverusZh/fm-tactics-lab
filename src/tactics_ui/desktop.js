@@ -64,7 +64,7 @@ function desktopBindDrag(){
  });
 }
 const desktopBindPrevious=bind;bind=function(){desktopBindPrevious();if(view!=='tactics')return;desktopBindDrag();$('#slot-position').onchange=e=>desktopMove(phase,slot,e.target.value);$$('.instruction-tile').forEach(tile=>{const select=tile.querySelector('select');tile.classList.toggle('tile-locked',!!select?.disabled);if(select?.disabled)tile.setAttribute('aria-label',tile.querySelector('.tile-title').textContent+'，角色锁定');});};
-document.title='FM27 战术推演 · v1108.5';
+document.title='FM27 战术推演 · v1109.3';
 function desktopIsKeeper(index,s=side){const t=state.teams[s],slotIndex=t.lineup.indexOf(index);if(slotIndex>=0)return t.phases[0][slotIndex].position==='GK';const a=t.players[index].attributes;return a[0]>=10&&a[0]>=Math.max(...a.slice(2,15));}
 function desktopAttributeVisible(id,keeper){if(id<15)return keeper?id===0:id!==0;if(GK.has(id))return keeper;if(keeper&&TECH.has(id)&&![22,37,38].includes(id))return false;if(keeper&&id===21)return false;return true;}
 const desktopPlayersPrevious=playersView;playersView=function(){return desktopPlayersPrevious().replace('全部 69 项','全部相关属性');};

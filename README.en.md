@@ -40,7 +40,7 @@ Each batch uses a sequence of random seeds. When comparing a saved reference wit
 
 ## Download and launch
 
-Download **FM27-Tactics-Lab-v1108.5.exe** and exit the previous app from its tray menu before launching the update. [v1108.5 release](https://github.com/lqf0624/fm-tactics-lab/releases/tag/v1108.5)
+The current source version is **v1109.3**. Download published desktop builds from [GitHub Releases](https://github.com/lqf0624/fm-tactics-lab/releases). Exit the previous app from its tray menu before launching an update.
 
 Install FM27, open Steam and sign in to the account that owns the game, then launch the EXE. The tool looks for your installation automatically. You can also select the game root containing `fm_Data` and `shared` in the engine settings at the top.
 
@@ -130,7 +130,9 @@ Both full squads start with condition and match sharpness at 100%, accumulated f
 
 ### Tactical effectiveness experiment
 
-You can set tactical effectiveness for both teams on a 0–100 scale. The native match simulation uses the supplied values. The option is off by default. Career-save effectiveness values are not yet available.
+Set tactical understanding, player buy-in and opposition information separately for each team on a 0–100 scale. The native engine calculates player ability contributions from each player's CA and suitability for both phase roles. The experiment is off by default. Career-save effectiveness values are not yet available.
+
+The random away tactic pool can be combined with experimental tactical execution. Each side retains its three manual scores, while the native engine computes ability contribution from the current roster CA and the drawn tactic's two-phase roles. Execution matches use isolated processes and run more slowly than normal reused sessions. The pool changes tactics and retains the current away squad. Native-generated tactics remain incompatible with the pool.
 
 ## Save and export
 
@@ -142,8 +144,10 @@ You can set tactical effectiveness for both teams on a 0–100 scale. The native
 
 ## Version and project information
 
-This release is **v1108.5**, for Windows x64. The adapter reference build is `27.0.0+2493426`. Tool code is licensed under MIT; the engine and game resources come from your local installation.
+The current source version is **v1109.3**, for Windows x64. The adapter reference build is `27.0.0+2493426`. Tool code is licensed under MIT; the engine and game resources come from your local installation.
 
 Original engine code and a career match's complete conditions are separate considerations. This tool standardizes starting states; inputs, random states and in-match interventions affect results. Evidence and validation scope are described in [Simulation Fidelity](docs/SIMULATION_FIDELITY.md).
 
 For startup, path or version issues, see [Troubleshooting](docs/TROUBLESHOOTING.md). Developers can read the [build guide](docs/DEVELOPMENT.md), [contribution guide](CONTRIBUTING.md) and [third-party notices](THIRD_PARTY_NOTICES.md).
+
+The interface and system tray follow the Windows display language. Simplified Chinese and English are supported, with English as the fallback. Player names, club names, tactic data and raw logs retain their original text.

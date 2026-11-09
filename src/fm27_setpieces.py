@@ -36,13 +36,13 @@ def normalize(value,side,roster_size):
   rows=value['routines'][str(kind)];base=DEFAULTS[side]['routines'][str(kind)][0];result=[]
   if not isinstance(rows,list)or not 1<=len(rows)<=3:raise ValueError('每种定位球保留1–3套套路')
   for row in rows:
-   r={'name':str(row['name'])[:48],'frequency':integer(row['frequency'],0,2)}
+   r={'name':str(row['name'])[:64],'frequency':integer(row['frequency'],0,2)}
    r['opaque_flags']=integer(row.get('opaque_flags',0),0,255)
    for k in ['strategy','swing']:
     if base[k]==255:
      if row[k]!=255:raise ValueError('该类型定位球不使用此发球策略')
      r[k]=255
-    elif k=='strategy' and (kind,row[k]) in ((5,3),(7,6),(8,3)):
+    elif k=='strategy' and (kind,row[k]) in ((5,3),(7,3),(7,4),(7,6),(8,3),(8,4)):
      r[k]=row[k]
     else:r[k]=integer(row[k],0,1 if k=='swing'else 2)
    priority=row['priority']

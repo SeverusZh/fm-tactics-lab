@@ -68,7 +68,7 @@ async function exportLibrary(){
  button.disabled=true;button.textContent='正在导出中…';
  try{
   const result=await api('/api/save/league-export',{id:librarySave.id,club_uid:libraryClub,directory});
-  localStorage.setItem('fm27-export-directory',result.directory||directory);
+  localStorage.setItem('fm27-export-directory',directory);
   libraryExport=result;toast(`已导出 ${result.files?.length||0} 个战术文件`);libraryRefresh();
  }catch(e){toast('导出失败：'+e.message);button.disabled=false;button.textContent='导出全部战术'}
 }

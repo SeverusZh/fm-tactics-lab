@@ -1,7 +1,9 @@
 """Team-first opponent requests, derived from the save's actual fixture calendar."""
 from collections import Counter, defaultdict
+from datetime import date, timedelta
 
-PROFILE='team-first-calendar-v1'
+PROFILE='team-first-calendar-v3'
+PRESEASON_WINDOW = timedelta(days=90)
 
 def identify(data,club):
     played=set();groups=defaultdict(list)
@@ -12,7 +14,8 @@ def identify(data,club):
         if f.get('played') and club in (home,away):played.add(away if home==club else home)
         if f.get('season_start_year') is not None and f.get('round') is None:
             groups[(f.get('competition_id'),f['stage_id'],f['season_start_year'])].append(f)
-    candidates=[]
+    save_date = date.fromisoformat(data['date'])
+    active, preseason, postseason = [], [], []
     for (competition,stage,season),fixtures in groups.items():
         members={f[s+'_club_uid'] for f in fixtures for s in ('home','away')}
         if club not in members or not 4<=len(members)<=40:continue
@@ -22,19 +25,20 @@ def identify(data,club):
         if len(pairs)!=len(members)*(len(members)-1) or set(pairs.values())!={1}:continue
         dates=[f['date'] for f in fixtures if f.get('date')]
         if not dates:continue
-        candidates.append({'competition_id':competition,'stage_id':stage,'season_start_year':season,
-            'club_uids':sorted(members),'fixture_count':len(fixtures),'first_date':min(dates),'last_date':max(dates)})
-    # Prefer the table whose dates contain the save clock. A save read in the
-    # off-season is still inside the season that has just finished or is about
-    # to start, so fall back to the latest season rather than losing the league.
-    current=[item for item in candidates if item['first_date']<=str(data['date'])<=item['last_date']]
-    if not current and candidates:
-        latest=max(item['season_start_year'] for item in candidates)
-        current=[item for item in candidates if item['season_start_year']==latest]
-    # Ambiguous concurrent tables are explicitly unresolved, never guessed.
-    league=current[0] if len(current)==1 else None
+        first, last = min(dates), max(dates)
+        candidate = {'competition_id':competition,'stage_id':stage,'season_start_year':season,
+            'club_uids':sorted(members),'fixture_count':len(fixtures),'first_date':first,'last_date':last}
+        if first <= data['date'] <= last:
+            active.append(candidate)
+        elif timedelta(0) < date.fromisoformat(first) - save_date <= PRESEASON_WINDOW:
+            preseason.append(candidate)
+        elif timedelta(0) < save_date - date.fromisoformat(last) <= PRESEASON_WINDOW:
+            postseason.append(candidate)
+    # Prefer an active or upcoming season before a recently completed table.
+    candidates = active or preseason or postseason
+    league=candidates[0] if len(candidates)==1 else None
     members=set(league['club_uids'])-{club} if league else set()
-    return {'profile':PROFILE,'played':played,'same_league':members,'league':league,'ambiguous_leagues':current if len(current)>1 else []}
+    return {'profile':PROFILE,'played':played,'same_league':members,'league':league,'ambiguous_leagues':candidates if len(candidates)>1 else []}
 
 def annotate(report,data,club,scope):
     available={o['club_uid']:o for o in report['opponents']}

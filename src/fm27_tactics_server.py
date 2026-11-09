@@ -30,6 +30,7 @@ import fm27_fmf
 import fm27_tactic_pool
 import fm27_match_events
 import desktop_generation_protocol
+import desktop_locale
 import desktop_generation_catalog
 import desktop_source_plans
 from desktop_storage import require_space
@@ -43,6 +44,7 @@ import desktop_engine
 ENGINE_COMPATIBILITY = desktop_engine.initialize(ROOT)
 ENGINE_DLL_SHA256 = ENGINE_COMPATIBILITY['actual_dll_sha256']
 EXECUTION_EXPERIMENT_DLL = '252ff8fb5b7a4a5a5464db6ba632e309eef9b6e65ffa992ae20575a189e66c6a'
+EXECUTION_COMPONENTS = ('understanding', 'buy_in', 'opposition', 'ability')
 CATALOG = json.loads((WEB/'catalog.json').read_text(encoding='utf8'))
 phase_inputs.annotate(CATALOG)
 CATALOG['setpieces']=setpieces.CATALOG
@@ -247,9 +249,17 @@ def validate_scenario(data):
             raise ValueError('请分别设置两队的实验执行力')
         if ENGINE_DLL_SHA256 != EXECUTION_EXPERIMENT_DLL:
             raise ValueError('当前 FM27 引擎版本尚未验证实验执行力')
-        normalized['experimental_execution'] = [
-            integer(value, 0, 100, '实验执行力') for value in values
-        ]
+        execution = []
+        for value in values:
+            if isinstance(value, dict):
+                if set(value) not in (set(EXECUTION_COMPONENTS[:3]), set(EXECUTION_COMPONENTS)):
+                    raise ValueError('请填写战术理解、教练认可和对手情报')
+                value = {key: integer(value[key], 0, 100, '实验执行力分项')
+                         for key in EXECUTION_COMPONENTS if key in value}
+            else:
+                value = integer(value, 0, 100, '实验执行力')
+            execution.append(value)
+        normalized['experimental_execution'] = execution
     if data.get('away_tactic_pool')is not None:
         normalized['away_tactic_pool']=fm27_tactic_pool.normalize(data['away_tactic_pool'])
     return normalized
@@ -262,7 +272,11 @@ def enabled_pool(scenario):
 def encode_scenario(data,absolute=False):
     data=validate_scenario(data);records=[]
     for side, value in enumerate(data.get('experimental_execution', [])):
-        records.append((61, side, 0, 0, value))
+        if isinstance(value, dict):
+            records.extend((61, side, index, 0, value[key])
+                           for index, key in enumerate(EXECUTION_COMPONENTS, 1) if key in value)
+        else:
+            records.append((61, side, 0, 0, value))
     for side,t in enumerate(data['teams']):
         base=DEFAULT['teams'][side];records.append((10,side,0,0,1))
         if 'roster_size'in t:records.append((17,side,0,0,t['roster_size']))
@@ -526,7 +540,7 @@ def import_fmf(data):
         for g,i,v in routine['backups']:
             if g>=8 or i>=len(backups[g]):raise ValueError('定位球备用任务越界')
             backups[g][i]=v
-        variants[variant]={'name':bytes.fromhex(decoded['name_utf8_hex']).decode('utf8')[:48],'frequency':routine['frequency'],'strategy':routine['strategy'],'swing':routine['swing'],'groups':routine['groups'],'backups':backups,'priority':routine['priority'],'opaque_flags':routine['opaque_flags']}
+        variants[variant]={'name':bytes.fromhex(decoded['name_utf8_hex']).decode('utf8')[:64],'frequency':routine['frequency'],'strategy':routine['strategy'],'swing':routine['swing'],'groups':routine['groups'],'backups':backups,'priority':routine['priority'],'opaque_flags':routine['opaque_flags']}
         scenario=validate_scenario(scenario);report={'setpiece_type':kind,'notice':'已通过原版解析器导入'+setpieces.TYPE_NAMES[kind]+'套路；包含任务、备用任务、分配顺序、发球策略和频率。','native_roundtrip_verified':True}
         (directory/'import_report.json').write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding='utf8');return {'scenario':scenario,'report':report}
     if result.returncode or not parsed or not decoded or not parsed['accepted']or parsed['stream_error']:raise ValueError('原版解析器未完整接受此 FM27 战术，未改动当前配置')
@@ -573,11 +587,9 @@ def episode_metrics(runs,side):
 def update_metrics(job,scenarios):
     if job.get('tactic_pool'):
         entries=job['tactic_pool'].get('entries',[])
-        counts={str(index):0 for index in range(len(entries))}
-        for run in job['runs']:
-            entry=run.get('tactic_pool_entry')
-            if entry:counts[str(entry['index'])]=counts.get(str(entry['index']),0)+1
-        job['tactic_pool']['draws']={'total':len(job.get('_pool_draws')or{}),'counts':counts}
+        counts=fm27_tactic_pool.completed_draw_counts(job['runs'],len(entries))
+        total=len(job['_pool_draws']) if '_pool_draws' in job else job['tactic_pool'].get('draws',{}).get('total',sum(counts.values()))
+        job['tactic_pool']['draws']={'total':total,'counts':counts}
     if job.get('experiment_type')=='save_opponents':
         def oriented(run):
             result=copy.deepcopy(run)
@@ -618,7 +630,7 @@ def execute(job,scenarios,seeds):
     execution_settings = {label:s['experimental_execution'] for label,s in scenarios if 'experimental_execution' in s}
     if execution_settings:
         runner.jobs_per_session = 1
-        job.update(runtime_mode='isolated_execution_experiment', jobs_per_native_session=1,
+        job.update(runtime_mode='isolated_pool_execution_experiment' if job.get('_pool_variants') else 'isolated_execution_experiment', jobs_per_native_session=1,
                    experimental_execution=execution_settings)
     with LOCK:
         job['_runner']=runner;job['status']='running';job['started']=time.time()
@@ -716,9 +728,15 @@ def resume_job(job,workers):
                 'uniform':copy.deepcopy(pool.get('uniform',fm27_tactic_pool.defaults()['uniform'])),'entries':copy.deepcopy(entries),
                 'draws':{'total':len(draws),'counts':{str(index):0 for index in range(len(entries))}}}
     for run in job['runs']:
+        expected=dict(scenarios)[run['variant']]
+        if pool:
+            index=job['_pool_draws'][str(run['seed'])]
+            if run.get('tactic_pool_entry',{}).get('index')!=index:
+                raise ValueError('已完成比赛的客队战术与原抽签不符')
+            expected=job['_pool_variants'][run['variant']][index]
         path=job['_dir']/run['log']
         if hashlib.sha256(path.read_bytes()).hexdigest()!=run['log_sha256']:raise ValueError('已完成比赛日志已改变')
-        if inspect_saved_run(job['_dir'],run)['result']!=run['result']:raise ValueError('已完成比赛结果校验失败')
+        if inspect_saved_run(job['_dir'],run,expected)['result']!=run['result']:raise ValueError('已完成比赛结果校验失败')
     if job['completed']>=job['total']:raise ValueError('该实验已经完成')
     if job.get('failures'):job.setdefault('failure_history',[]).extend(copy.deepcopy(job['failures']))
     job.update(status='queued',workers=workers,failures=[],error=None,_cancel=False)
@@ -751,6 +769,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         path=urlparse(self.path).path
         if path=='/api/desktop-presence':return self.send(DESKTOP_PRESENCE.status())
+        if path=='/api/locale':return self.send(desktop_locale.system_language())
         if path=='/api/catalog':return self.send(CATALOG)
         if path=='/api/defaults':return self.send(DEFAULT)
         if path=='/api/phase-defaults':return self.send(phase_inputs.pack(DEFAULT,CATALOG))
@@ -788,6 +807,8 @@ class Handler(BaseHTTPRequestHandler):
         known['/squad-editor.js']='squad-editor.js'
         known['/tactic-pool.js']='tactic-pool.js'
         known['/tactic-library.js']='tactic-library.js'
+        known['/i18n.js']='i18n.js'
+        known['/i18n-en.js']='i18n-en.js'
         if path in known:
             name=known[path];kind={'html':'text/html','js':'text/javascript','css':'text/css'}[name.split('.')[-1]]
             return self.send((WEB/name).read_bytes(),kind=kind+'; charset=utf-8')
@@ -907,8 +928,8 @@ class Handler(BaseHTTPRequestHandler):
                 if not(pool and pool.get('enabled')):pool=None
                 expanded={}
                 if pool:
-                    if any('experimental_execution'in item or'native_generation'in item for _,item in variants):
-                        raise ValueError('随机客队战术池不能与实验执行力或电脑生成战术同时使用')
+                    if any('native_generation' in item for _,item in variants):
+                        raise ValueError('随机客队战术池不能与电脑生成战术同时使用')
                     expanded={label:[validate_scenario(fm27_tactic_pool.expand({**item,'away_tactic_pool':pool},index))for index in range(len(pool['entries']))]for label,item in variants}
                 with LOCK:
                     desktop_engine.require_available(ENGINE_COMPATIBILITY)

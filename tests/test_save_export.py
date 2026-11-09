@@ -144,7 +144,8 @@ class ExportWriteTests(unittest.TestCase):
         if not hasattr(Path,'symlink_to'):self.skipTest('当前平台不支持符号链接')
         outside=self.base/'external';outside.mkdir()
         with mock.patch.object(desktop_save_export,'_stamp',return_value='20260101-130000'):
-            (self.base/'FM27存档战术-20260101-130000').symlink_to(outside,target_is_directory=True)
+            try:(self.base/'FM27存档战术-20260101-130000').symlink_to(outside,target_is_directory=True)
+            except OSError:self.skipTest('当前平台不允许创建符号链接')
             try:result=desktop_save_export.write(self.base,SOURCE,[item(1,'甲队','stored:0','控球',archive(1))])
             except OSError:self.skipTest('当前平台不允许创建符号链接')
         self.assertEqual(Path(result['directory']).name,'FM27存档战术-20260101-130000-2')
