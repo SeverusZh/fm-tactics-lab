@@ -1,4761 +1,4784 @@
 {
-  "id": "fm27_desktop_2493426_adapter_v1",
-  "reference_sha256": "252ff8fb5b7a4a5a5464db6ba632e309eef9b6e65ffa992ae20575a189e66c6a",
-  "machine": 34404,
-  "optional_magic": 523,
+  "id": "fm27_desktop_2494687_adapter_v1",
+  "reference_sha256": "f79b0a3413dd0e3f461b0afbc3ff397003f4a26d7525a30717428de6a8b91196",
   "image_base": 6442450944,
-  "entrypoint_rva": 188454112,
-  "minimum_image_size": 392190040,
+  "entrypoint_rva": 295992000,
+  "minimum_image_size": 399216640,
   "sections": [
     {
       "rva": 4096,
       "memory_flags": 1610612736
     },
     {
-      "rva": 78491648,
+      "rva": 79548416,
       "memory_flags": 1073741824
     },
     {
-      "rva": 90640384,
+      "rva": 91799552,
       "memory_flags": 3221225472
     },
     {
-      "rva": 91660288,
+      "rva": 92819456,
       "memory_flags": 1073741824
     },
     {
-      "rva": 93405184,
+      "rva": 94556160,
       "memory_flags": 3221225472
     },
     {
-      "rva": 93458432,
+      "rva": 94609408,
       "memory_flags": 1073741824
     },
     {
-      "rva": 93462528,
+      "rva": 94613504,
       "memory_flags": 1073741824
     },
     {
-      "rva": 93794304,
+      "rva": 94949376,
       "memory_flags": 3758096384
     },
     {
-      "rva": 401473536,
+      "rva": 395849728,
       "memory_flags": 1073741824
     },
     {
-      "rva": 401539072,
+      "rva": 395915264,
       "memory_flags": 3221225472
     },
     {
-      "rva": 401543168,
+      "rva": 395919360,
       "memory_flags": 1073741824
     },
     {
-      "rva": 401563648,
+      "rva": 395939840,
       "memory_flags": 1073741824
     },
     {
-      "rva": 403308544,
+      "rva": 397676544,
       "memory_flags": 1073741824
     }
   ],
   "tls": {
-    "raw_rva": 401473536,
+    "raw_rva": 395849728,
     "raw_size": 59496,
-    "index_rva": 91203512,
+    "index_rva": 92362744,
     "zero_fill": 0
   },
   "tls_callbacks": [
-    152812800,
-    198457040,
-    121177600,
-    130148144,
-    174727120,
-    135199024,
-    342461328,
-    297662240,
-    256919696,
-    322794656,
-    74477264,
-    74477536
+    197881696,
+    360179005,
+    175748032,
+    146279296,
+    196820896,
+    311632736,
+    222405008,
+    364643488,
+    353681440,
+    351420272,
+    341554928,
+    76812496,
+    76812768
   ],
   "imports": [
     {
       "dll": "msvcp140.dll",
       "name": "??0?$basic_streambuf@DU?$char_traits@D@std@@@std@@IEAA@XZ",
-      "rva": 85321120
+      "rva": 86451192
     },
     {
       "dll": "msvcp140.dll",
       "name": "??0_Locinfo@std@@QEAA@PEBD@Z",
-      "rva": 85321128
+      "rva": 86451200
     },
     {
       "dll": "msvcp140.dll",
       "name": "??0_Lockit@std@@QEAA@H@Z",
-      "rva": 85321136
+      "rva": 86451208
     },
     {
       "dll": "msvcp140.dll",
       "name": "??0facet@locale@std@@IEAA@_K@Z",
-      "rva": 85321144
+      "rva": 86451216
     },
     {
       "dll": "msvcp140.dll",
       "name": "??0ios_base@std@@IEAA@XZ",
-      "rva": 85321152
+      "rva": 86451224
     },
     {
       "dll": "msvcp140.dll",
       "name": "??1?$basic_streambuf@DU?$char_traits@D@std@@@std@@UEAA@XZ",
-      "rva": 85321160
+      "rva": 86451232
     },
     {
       "dll": "msvcp140.dll",
       "name": "??1_Locinfo@std@@QEAA@XZ",
-      "rva": 85321168
+      "rva": 86451240
     },
     {
       "dll": "msvcp140.dll",
       "name": "??1_Lockit@std@@QEAA@XZ",
-      "rva": 85321176
+      "rva": 86451248
     },
     {
       "dll": "msvcp140.dll",
       "name": "??1facet@locale@std@@MEAA@XZ",
-      "rva": 85321184
+      "rva": 86451256
     },
     {
       "dll": "msvcp140.dll",
       "name": "??1ios_base@std@@UEAA@XZ",
-      "rva": 85321192
+      "rva": 86451264
     },
     {
       "dll": "msvcp140.dll",
       "name": "??6?$basic_ostream@DU?$char_traits@D@std@@@std@@QEAAAEAV01@_K@Z",
-      "rva": 85321200
+      "rva": 86451272
     },
     {
       "dll": "msvcp140.dll",
       "name": "?_Decref@facet@locale@std@@UEAAPEAV_Facet_base@3@XZ",
-      "rva": 85321208
+      "rva": 86451280
     },
     {
       "dll": "msvcp140.dll",
       "name": "?_Fiopen@std@@YAPEAU_iobuf@@PEBDHH@Z",
-      "rva": 85321216
+      "rva": 86451288
     },
     {
       "dll": "msvcp140.dll",
       "name": "?_Getcat@?$codecvt@DDU_Mbstatet@@@std@@SA_KPEAPEBVfacet@locale@2@PEBV42@@Z",
-      "rva": 85321224
+      "rva": 86451296
     },
     {
       "dll": "msvcp140.dll",
       "name": "?_Getcat@?$ctype@D@std@@SA_KPEAPEBVfacet@locale@2@PEBV42@@Z",
-      "rva": 85321232
+      "rva": 86451304
     },
     {
       "dll": "msvcp140.dll",
       "name": "?_Getcoll@_Locinfo@std@@QEBA?AU_Collvec@@XZ",
-      "rva": 85321240
+      "rva": 86451312
     },
     {
       "dll": "msvcp140.dll",
       "name": "?_Getgloballocale@locale@std@@CAPEAV_Locimp@12@XZ",
-      "rva": 85321248
+      "rva": 86451320
     },
     {
       "dll": "msvcp140.dll",
       "name": "?_Id_cnt@id@locale@std@@0HA",
-      "rva": 85321256
+      "rva": 86451328
     },
     {
       "dll": "msvcp140.dll",
       "name": "?_Incref@facet@locale@std@@UEAAXXZ",
-      "rva": 85321264
+      "rva": 86451336
     },
     {
       "dll": "msvcp140.dll",
       "name": "?_Init@locale@std@@CAPEAV_Locimp@12@_N@Z",
-      "rva": 85321272
+      "rva": 86451344
     },
     {
       "dll": "msvcp140.dll",
       "name": "?_Lock@?$basic_streambuf@DU?$char_traits@D@std@@@std@@UEAAXXZ",
-      "rva": 85321280
+      "rva": 86451352
     },
     {
       "dll": "msvcp140.dll",
       "name": "?_Osfx@?$basic_ostream@DU?$char_traits@D@std@@@std@@QEAAXXZ",
-      "rva": 85321288
+      "rva": 86451360
     },
     {
       "dll": "msvcp140.dll",
       "name": "?_Raise_handler@std@@3P6AXAEBVexception@stdext@@@ZEA",
-      "rva": 85321296
+      "rva": 86451368
     },
     {
       "dll": "msvcp140.dll",
       "name": "?_Random_device@std@@YAIXZ",
-      "rva": 85321304
+      "rva": 86451376
     },
     {
       "dll": "msvcp140.dll",
       "name": "?_Syserror_map@std@@YAPEBDH@Z",
-      "rva": 85321312
+      "rva": 86451384
     },
     {
       "dll": "msvcp140.dll",
       "name": "?_Throw_Cpp_error@std@@YAXH@Z",
-      "rva": 85321320
+      "rva": 86451392
     },
     {
       "dll": "msvcp140.dll",
       "name": "?_Unlock@?$basic_streambuf@DU?$char_traits@D@std@@@std@@UEAAXXZ",
-      "rva": 85321328
+      "rva": 86451400
     },
     {
       "dll": "msvcp140.dll",
       "name": "?_Winerror_map@std@@YAHH@Z",
-      "rva": 85321336
+      "rva": 86451408
     },
     {
       "dll": "msvcp140.dll",
       "name": "?_Xbad_alloc@std@@YAXXZ",
-      "rva": 85321344
+      "rva": 86451416
     },
     {
       "dll": "msvcp140.dll",
       "name": "?_Xbad_function_call@std@@YAXXZ",
-      "rva": 85321352
+      "rva": 86451424
     },
     {
       "dll": "msvcp140.dll",
       "name": "?_Xlength_error@std@@YAXPEBD@Z",
-      "rva": 85321360
+      "rva": 86451432
     },
     {
       "dll": "msvcp140.dll",
       "name": "?_Xout_of_range@std@@YAXPEBD@Z",
-      "rva": 85321368
+      "rva": 86451440
     },
     {
       "dll": "msvcp140.dll",
       "name": "?_Xregex_error@std@@YAXW4error_type@regex_constants@1@@Z",
-      "rva": 85321376
+      "rva": 86451448
     },
     {
       "dll": "msvcp140.dll",
       "name": "?__ExceptionPtrAssign@@YAXPEAXPEBX@Z",
-      "rva": 85321384
+      "rva": 86451456
     },
     {
       "dll": "msvcp140.dll",
       "name": "?__ExceptionPtrCopy@@YAXPEAXPEBX@Z",
-      "rva": 85321392
+      "rva": 86451464
     },
     {
       "dll": "msvcp140.dll",
       "name": "?__ExceptionPtrCopyException@@YAXPEAXPEBX1@Z",
-      "rva": 85321400
+      "rva": 86451472
     },
     {
       "dll": "msvcp140.dll",
       "name": "?__ExceptionPtrCreate@@YAXPEAX@Z",
-      "rva": 85321408
+      "rva": 86451480
     },
     {
       "dll": "msvcp140.dll",
       "name": "?__ExceptionPtrDestroy@@YAXPEAX@Z",
-      "rva": 85321416
+      "rva": 86451488
     },
     {
       "dll": "msvcp140.dll",
       "name": "?__ExceptionPtrRethrow@@YAXPEBX@Z",
-      "rva": 85321424
+      "rva": 86451496
     },
     {
       "dll": "msvcp140.dll",
       "name": "?__ExceptionPtrToBool@@YA_NPEBX@Z",
-      "rva": 85321432
+      "rva": 86451504
     },
     {
       "dll": "msvcp140.dll",
       "name": "?clear@?$basic_ios@DU?$char_traits@D@std@@@std@@QEAAXH_N@Z",
-      "rva": 85321440
+      "rva": 86451512
     },
     {
       "dll": "msvcp140.dll",
       "name": "?fail@ios_base@std@@QEBA_NXZ",
-      "rva": 85321448
+      "rva": 86451520
     },
     {
       "dll": "msvcp140.dll",
       "name": "?flush@?$basic_ostream@DU?$char_traits@D@std@@@std@@QEAAAEAV12@XZ",
-      "rva": 85321456
+      "rva": 86451528
     },
     {
       "dll": "msvcp140.dll",
       "name": "?getloc@?$basic_streambuf@DU?$char_traits@D@std@@@std@@QEBA?AVlocale@2@XZ",
-      "rva": 85321464
+      "rva": 86451536
     },
     {
       "dll": "msvcp140.dll",
       "name": "?good@ios_base@std@@QEBA_NXZ",
-      "rva": 85321472
+      "rva": 86451544
     },
     {
       "dll": "msvcp140.dll",
       "name": "?id@?$codecvt@DDU_Mbstatet@@@std@@2V0locale@2@A",
-      "rva": 85321480
+      "rva": 86451552
     },
     {
       "dll": "msvcp140.dll",
       "name": "?id@?$collate@D@std@@2V0locale@2@A",
-      "rva": 85321488
+      "rva": 86451560
     },
     {
       "dll": "msvcp140.dll",
       "name": "?id@?$ctype@D@std@@2V0locale@2@A",
-      "rva": 85321496
+      "rva": 86451568
     },
     {
       "dll": "msvcp140.dll",
       "name": "?imbue@?$basic_streambuf@DU?$char_traits@D@std@@@std@@MEAAXAEBVlocale@2@@Z",
-      "rva": 85321504
+      "rva": 86451576
     },
     {
       "dll": "msvcp140.dll",
       "name": "?init@?$basic_ios@DU?$char_traits@D@std@@@std@@IEAAXPEAV?$basic_streambuf@DU?$char_traits@D@std@@@2@_N@Z",
-      "rva": 85321512
+      "rva": 86451584
     },
     {
       "dll": "msvcp140.dll",
       "name": "?set_new_handler@std@@YAP6AXXZP6AXXZ@Z",
-      "rva": 85321520
+      "rva": 86451592
     },
     {
       "dll": "msvcp140.dll",
       "name": "?setbuf@?$basic_streambuf@DU?$char_traits@D@std@@@std@@MEAAPEAV12@PEAD_J@Z",
-      "rva": 85321528
+      "rva": 86451600
     },
     {
       "dll": "msvcp140.dll",
       "name": "?showmanyc@?$basic_streambuf@DU?$char_traits@D@std@@@std@@MEAA_JXZ",
-      "rva": 85321536
+      "rva": 86451608
     },
     {
       "dll": "msvcp140.dll",
       "name": "?sputc@?$basic_streambuf@DU?$char_traits@D@std@@@std@@QEAAHD@Z",
-      "rva": 85321544
+      "rva": 86451616
     },
     {
       "dll": "msvcp140.dll",
       "name": "?sync@?$basic_streambuf@DU?$char_traits@D@std@@@std@@MEAAHXZ",
-      "rva": 85321552
+      "rva": 86451624
     },
     {
       "dll": "msvcp140.dll",
       "name": "?uflow@?$basic_streambuf@DU?$char_traits@D@std@@@std@@MEAAHXZ",
-      "rva": 85321560
+      "rva": 86451632
     },
     {
       "dll": "msvcp140.dll",
       "name": "?uncaught_exceptions@std@@YAHXZ",
-      "rva": 85321568
+      "rva": 86451640
     },
     {
       "dll": "msvcp140.dll",
       "name": "?xsgetn@?$basic_streambuf@DU?$char_traits@D@std@@@std@@MEAA_JPEAD_J@Z",
-      "rva": 85321576
+      "rva": 86451648
     },
     {
       "dll": "msvcp140.dll",
       "name": "?xsputn@?$basic_streambuf@DU?$char_traits@D@std@@@std@@MEAA_JPEBD_J@Z",
-      "rva": 85321584
+      "rva": 86451656
     },
     {
       "dll": "msvcp140.dll",
       "name": "_Cnd_broadcast",
-      "rva": 85321592
+      "rva": 86451664
     },
     {
       "dll": "msvcp140.dll",
       "name": "_Cnd_do_broadcast_at_thread_exit",
-      "rva": 85321600
+      "rva": 86451672
     },
     {
       "dll": "msvcp140.dll",
       "name": "_Cnd_register_at_thread_exit",
-      "rva": 85321608
+      "rva": 86451680
     },
     {
       "dll": "msvcp140.dll",
       "name": "_Cnd_unregister_at_thread_exit",
-      "rva": 85321616
+      "rva": 86451688
     },
     {
       "dll": "msvcp140.dll",
       "name": "_Cnd_wait",
-      "rva": 85321624
+      "rva": 86451696
     },
     {
       "dll": "msvcp140.dll",
       "name": "_Mtx_lock",
-      "rva": 85321632
+      "rva": 86451704
     },
     {
       "dll": "msvcp140.dll",
       "name": "_Mtx_unlock",
-      "rva": 85321640
+      "rva": 86451712
     },
     {
       "dll": "msvcp140.dll",
       "name": "_Query_perf_counter",
-      "rva": 85321648
+      "rva": 86451720
     },
     {
       "dll": "msvcp140.dll",
       "name": "_Query_perf_frequency",
-      "rva": 85321656
+      "rva": 86451728
     },
     {
       "dll": "msvcp140.dll",
       "name": "_Strcoll",
-      "rva": 85321664
+      "rva": 86451736
     },
     {
       "dll": "msvcp140.dll",
       "name": "_Strxfrm",
-      "rva": 85321672
+      "rva": 86451744
     },
     {
       "dll": "msvcp140.dll",
       "name": "_Thrd_detach",
-      "rva": 85321680
+      "rva": 86451752
     },
     {
       "dll": "msvcp140.dll",
       "name": "_Thrd_yield",
-      "rva": 85321688
+      "rva": 86451760
     },
     {
       "dll": "msvcp140.dll",
       "name": "__crtLCMapStringA",
-      "rva": 85321696
+      "rva": 86451768
     },
     {
       "dll": "kernel32.dll",
       "name": "AcquireSRWLockExclusive",
-      "rva": 85321712
+      "rva": 86451784
     },
     {
       "dll": "kernel32.dll",
       "name": "AcquireSRWLockShared",
-      "rva": 85321720
+      "rva": 86451792
     },
     {
       "dll": "kernel32.dll",
       "name": "AddVectoredExceptionHandler",
-      "rva": 85321728
+      "rva": 86451800
     },
     {
       "dll": "kernel32.dll",
       "name": "AreFileApisANSI",
-      "rva": 85321736
+      "rva": 86451808
     },
     {
       "dll": "kernel32.dll",
       "name": "CloseHandle",
-      "rva": 85321744
+      "rva": 86451816
     },
     {
       "dll": "kernel32.dll",
       "name": "CopyFileW",
-      "rva": 85321752
+      "rva": 86451824
     },
     {
       "dll": "kernel32.dll",
       "name": "CreateDirectoryW",
-      "rva": 85321760
+      "rva": 86451832
     },
     {
       "dll": "kernel32.dll",
       "name": "CreateEventW",
-      "rva": 85321768
+      "rva": 86451840
     },
     {
       "dll": "kernel32.dll",
       "name": "CreateFile2",
-      "rva": 85321776
+      "rva": 86451848
     },
     {
       "dll": "kernel32.dll",
       "name": "CreateFileMappingA",
-      "rva": 85321784
+      "rva": 86451856
     },
     {
       "dll": "kernel32.dll",
       "name": "CreateFileW",
-      "rva": 85321792
+      "rva": 86451864
     },
     {
       "dll": "kernel32.dll",
       "name": "CreateMutexW",
-      "rva": 85321800
+      "rva": 86451872
     },
     {
       "dll": "kernel32.dll",
       "name": "CreateSemaphoreA",
-      "rva": 85321808
+      "rva": 86451880
     },
     {
       "dll": "kernel32.dll",
       "name": "CreateThread",
-      "rva": 85321816
+      "rva": 86451888
     },
     {
       "dll": "kernel32.dll",
       "name": "DeleteCriticalSection",
-      "rva": 85321824
+      "rva": 86451896
     },
     {
       "dll": "kernel32.dll",
       "name": "DeleteFileW",
-      "rva": 85321832
+      "rva": 86451904
     },
     {
       "dll": "kernel32.dll",
       "name": "DeviceIoControl",
-      "rva": 85321840
+      "rva": 86451912
     },
     {
       "dll": "kernel32.dll",
       "name": "EnterCriticalSection",
-      "rva": 85321848
+      "rva": 86451920
     },
     {
       "dll": "kernel32.dll",
       "name": "FileTimeToLocalFileTime",
-      "rva": 85321856
+      "rva": 86451928
     },
     {
       "dll": "kernel32.dll",
       "name": "FileTimeToSystemTime",
-      "rva": 85321864
+      "rva": 86451936
     },
     {
       "dll": "kernel32.dll",
       "name": "FindClose",
-      "rva": 85321872
+      "rva": 86451944
     },
     {
       "dll": "kernel32.dll",
       "name": "FindFirstFileExW",
-      "rva": 85321880
+      "rva": 86451952
     },
     {
       "dll": "kernel32.dll",
       "name": "FindFirstFileW",
-      "rva": 85321888
+      "rva": 86451960
     },
     {
       "dll": "kernel32.dll",
       "name": "FindNextFileW",
-      "rva": 85321896
+      "rva": 86451968
     },
     {
       "dll": "kernel32.dll",
       "name": "FormatMessageA",
-      "rva": 85321904
+      "rva": 86451976
     },
     {
       "dll": "kernel32.dll",
       "name": "FreeLibrary",
-      "rva": 85321912
+      "rva": 86451984
     },
     {
       "dll": "kernel32.dll",
       "name": "GetACP",
-      "rva": 85321920
+      "rva": 86451992
     },
     {
       "dll": "kernel32.dll",
       "name": "GetComputerNameW",
-      "rva": 85321928
+      "rva": 86452000
     },
     {
       "dll": "kernel32.dll",
       "name": "GetConsoleMode",
-      "rva": 85321936
+      "rva": 86452008
     },
     {
       "dll": "kernel32.dll",
       "name": "GetCurrentProcess",
-      "rva": 85321944
+      "rva": 86452016
     },
     {
       "dll": "kernel32.dll",
       "name": "GetCurrentProcessId",
-      "rva": 85321952
+      "rva": 86452024
     },
     {
       "dll": "kernel32.dll",
       "name": "GetCurrentThread",
-      "rva": 85321960
+      "rva": 86452032
     },
     {
       "dll": "kernel32.dll",
       "name": "GetCurrentThreadId",
-      "rva": 85321968
+      "rva": 86452040
     },
     {
       "dll": "kernel32.dll",
       "name": "GetDiskFreeSpaceExW",
-      "rva": 85321976
+      "rva": 86452048
     },
     {
       "dll": "kernel32.dll",
       "name": "GetDriveTypeW",
-      "rva": 85321984
+      "rva": 86452056
     },
     {
       "dll": "kernel32.dll",
       "name": "GetEnvironmentVariableA",
-      "rva": 85321992
+      "rva": 86452064
     },
     {
       "dll": "kernel32.dll",
       "name": "GetEnvironmentVariableW",
-      "rva": 85322000
+      "rva": 86452072
     },
     {
       "dll": "kernel32.dll",
       "name": "GetExitCodeThread",
-      "rva": 85322008
+      "rva": 86452080
     },
     {
       "dll": "kernel32.dll",
       "name": "GetFileAttributesExW",
-      "rva": 85322016
+      "rva": 86452088
     },
     {
       "dll": "kernel32.dll",
       "name": "GetFileAttributesW",
-      "rva": 85322024
+      "rva": 86452096
     },
     {
       "dll": "kernel32.dll",
       "name": "GetFileSizeEx",
-      "rva": 85322032
+      "rva": 86452104
     },
     {
       "dll": "kernel32.dll",
       "name": "GetFileType",
-      "rva": 85322040
+      "rva": 86452112
     },
     {
       "dll": "kernel32.dll",
       "name": "GetFinalPathNameByHandleW",
-      "rva": 85322048
+      "rva": 86452120
     },
     {
       "dll": "kernel32.dll",
       "name": "GetFirmwareType",
-      "rva": 85322056
+      "rva": 86452128
     },
     {
       "dll": "kernel32.dll",
       "name": "GetFullPathNameW",
-      "rva": 85322064
+      "rva": 86452136
     },
     {
       "dll": "kernel32.dll",
       "name": "GetLastError",
-      "rva": 85322072
+      "rva": 86452144
     },
     {
       "dll": "kernel32.dll",
       "name": "GetLocaleInfoEx",
-      "rva": 85322080
+      "rva": 86452152
     },
     {
       "dll": "kernel32.dll",
       "name": "GetLogicalDrives",
-      "rva": 85322088
+      "rva": 86452160
     },
     {
       "dll": "kernel32.dll",
       "name": "GetLogicalProcessorInformation",
-      "rva": 85322096
+      "rva": 86452168
     },
     {
       "dll": "kernel32.dll",
       "name": "GetLogicalProcessorInformationEx",
-      "rva": 85322104
+      "rva": 86452176
     },
     {
       "dll": "kernel32.dll",
       "name": "GetModuleFileNameA",
-      "rva": 85322112
+      "rva": 86452184
     },
     {
       "dll": "kernel32.dll",
       "name": "GetModuleFileNameW",
-      "rva": 85322120
+      "rva": 86452192
     },
     {
       "dll": "kernel32.dll",
       "name": "GetModuleHandleA",
-      "rva": 85322128
+      "rva": 86452200
     },
     {
       "dll": "kernel32.dll",
       "name": "GetModuleHandleExA",
-      "rva": 85322136
+      "rva": 86452208
     },
     {
       "dll": "kernel32.dll",
       "name": "GetModuleHandleExW",
-      "rva": 85322144
+      "rva": 86452216
     },
     {
       "dll": "kernel32.dll",
       "name": "GetModuleHandleW",
-      "rva": 85322152
+      "rva": 86452224
     },
     {
       "dll": "kernel32.dll",
       "name": "GetPhysicallyInstalledSystemMemory",
-      "rva": 85322160
+      "rva": 86452232
     },
     {
       "dll": "kernel32.dll",
       "name": "GetProcAddress",
-      "rva": 85322168
+      "rva": 86452240
     },
     {
       "dll": "kernel32.dll",
       "name": "GetProductInfo",
-      "rva": 85322176
+      "rva": 86452248
     },
     {
       "dll": "kernel32.dll",
       "name": "GetStdHandle",
-      "rva": 85322184
+      "rva": 86452256
     },
     {
       "dll": "kernel32.dll",
       "name": "GetSystemDirectoryA",
-      "rva": 85322192
+      "rva": 86452264
     },
     {
       "dll": "kernel32.dll",
       "name": "GetSystemInfo",
-      "rva": 85322200
+      "rva": 86452272
     },
     {
       "dll": "kernel32.dll",
       "name": "GetSystemPowerStatus",
-      "rva": 85322208
+      "rva": 86452280
     },
     {
       "dll": "kernel32.dll",
       "name": "GetSystemTime",
-      "rva": 85322216
+      "rva": 86452288
     },
     {
       "dll": "kernel32.dll",
       "name": "GetSystemTimeAsFileTime",
-      "rva": 85322224
+      "rva": 86452296
     },
     {
       "dll": "kernel32.dll",
       "name": "GetVersionExW",
-      "rva": 85322232
+      "rva": 86452304
     },
     {
       "dll": "kernel32.dll",
       "name": "GetVolumeInformationW",
-      "rva": 85322240
+      "rva": 86452312
     },
     {
       "dll": "kernel32.dll",
       "name": "GlobalMemoryStatusEx",
-      "rva": 85322248
+      "rva": 86452320
     },
     {
       "dll": "kernel32.dll",
       "name": "InitializeConditionVariable",
-      "rva": 85322256
+      "rva": 86452328
     },
     {
       "dll": "kernel32.dll",
       "name": "InitializeCriticalSection",
-      "rva": 85322264
+      "rva": 86452336
     },
     {
       "dll": "kernel32.dll",
       "name": "InitializeCriticalSectionEx",
-      "rva": 85322272
+      "rva": 86452344
     },
     {
       "dll": "kernel32.dll",
       "name": "InitializeSListHead",
-      "rva": 85322280
+      "rva": 86452352
     },
     {
       "dll": "kernel32.dll",
       "name": "InitializeSRWLock",
-      "rva": 85322288
+      "rva": 86452360
     },
     {
       "dll": "kernel32.dll",
       "name": "InterlockedPopEntrySList",
-      "rva": 85322296
+      "rva": 86452368
     },
     {
       "dll": "kernel32.dll",
       "name": "InterlockedPushEntrySList",
-      "rva": 85322304
+      "rva": 86452376
     },
     {
       "dll": "kernel32.dll",
       "name": "IsDebuggerPresent",
-      "rva": 85322312
+      "rva": 86452384
     },
     {
       "dll": "kernel32.dll",
       "name": "IsProcessorFeaturePresent",
-      "rva": 85322320
+      "rva": 86452392
     },
     {
       "dll": "kernel32.dll",
       "name": "K32EnumProcessModules",
-      "rva": 85322328
+      "rva": 86452400
     },
     {
       "dll": "kernel32.dll",
       "name": "K32EnumProcesses",
-      "rva": 85322336
+      "rva": 86452408
     },
     {
       "dll": "kernel32.dll",
       "name": "K32GetModuleBaseNameW",
-      "rva": 85322344
+      "rva": 86452416
     },
     {
       "dll": "kernel32.dll",
       "name": "LeaveCriticalSection",
-      "rva": 85322352
+      "rva": 86452424
     },
     {
       "dll": "kernel32.dll",
       "name": "LoadLibraryA",
-      "rva": 85322360
+      "rva": 86452432
     },
     {
       "dll": "kernel32.dll",
       "name": "LoadLibraryW",
-      "rva": 85322368
+      "rva": 86452440
     },
     {
       "dll": "kernel32.dll",
       "name": "LocalFileTimeToFileTime",
-      "rva": 85322376
+      "rva": 86452448
     },
     {
       "dll": "kernel32.dll",
       "name": "LocalFree",
-      "rva": 85322384
+      "rva": 86452456
     },
     {
       "dll": "kernel32.dll",
       "name": "MapViewOfFile",
-      "rva": 85322392
+      "rva": 86452464
     },
     {
       "dll": "kernel32.dll",
       "name": "MoveFileExW",
-      "rva": 85322400
+      "rva": 86452472
     },
     {
       "dll": "kernel32.dll",
       "name": "MoveFileW",
-      "rva": 85322408
+      "rva": 86452480
     },
     {
       "dll": "kernel32.dll",
       "name": "MultiByteToWideChar",
-      "rva": 85322416
+      "rva": 86452488
     },
     {
       "dll": "kernel32.dll",
       "name": "OpenProcess",
-      "rva": 85322424
+      "rva": 86452496
     },
     {
       "dll": "kernel32.dll",
       "name": "OutputDebugStringA",
-      "rva": 85322432
+      "rva": 86452504
     },
     {
       "dll": "kernel32.dll",
       "name": "QueryPerformanceCounter",
-      "rva": 85322440
+      "rva": 86452512
     },
     {
       "dll": "kernel32.dll",
       "name": "QueryPerformanceFrequency",
-      "rva": 85322448
+      "rva": 86452520
     },
     {
       "dll": "kernel32.dll",
       "name": "ReadConsoleA",
-      "rva": 85322456
+      "rva": 86452528
     },
     {
       "dll": "kernel32.dll",
       "name": "ReadConsoleW",
-      "rva": 85322464
+      "rva": 86452536
     },
     {
       "dll": "kernel32.dll",
       "name": "ReadFile",
-      "rva": 85322472
+      "rva": 86452544
     },
     {
       "dll": "kernel32.dll",
       "name": "ReleaseMutex",
-      "rva": 85322480
+      "rva": 86452552
     },
     {
       "dll": "kernel32.dll",
       "name": "ReleaseSRWLockExclusive",
-      "rva": 85322488
+      "rva": 86452560
     },
     {
       "dll": "kernel32.dll",
       "name": "ReleaseSRWLockShared",
-      "rva": 85322496
+      "rva": 86452568
     },
     {
       "dll": "kernel32.dll",
       "name": "ReleaseSemaphore",
-      "rva": 85322504
+      "rva": 86452576
     },
     {
       "dll": "kernel32.dll",
       "name": "RemoveDirectoryW",
-      "rva": 85322512
+      "rva": 86452584
     },
     {
       "dll": "kernel32.dll",
       "name": "RemoveVectoredExceptionHandler",
-      "rva": 85322520
+      "rva": 86452592
     },
     {
       "dll": "kernel32.dll",
       "name": "RtlCaptureContext",
-      "rva": 85322528
+      "rva": 86452600
     },
     {
       "dll": "kernel32.dll",
       "name": "RtlLookupFunctionEntry",
-      "rva": 85322536
+      "rva": 86452608
     },
     {
       "dll": "kernel32.dll",
       "name": "RtlUnwindEx",
-      "rva": 85322544
+      "rva": 86452616
     },
     {
       "dll": "kernel32.dll",
       "name": "RtlVirtualUnwind",
-      "rva": 85322552
+      "rva": 86452624
     },
     {
       "dll": "kernel32.dll",
       "name": "SetConsoleMode",
-      "rva": 85322560
+      "rva": 86452632
     },
     {
       "dll": "kernel32.dll",
       "name": "SetEvent",
-      "rva": 85322568
+      "rva": 86452640
     },
     {
       "dll": "kernel32.dll",
       "name": "SetFileAttributesW",
-      "rva": 85322576
+      "rva": 86452648
     },
     {
       "dll": "kernel32.dll",
       "name": "SetFilePointer",
-      "rva": 85322584
+      "rva": 86452656
     },
     {
       "dll": "kernel32.dll",
       "name": "SetFileTime",
-      "rva": 85322592
+      "rva": 86452664
     },
     {
       "dll": "kernel32.dll",
       "name": "SetLastError",
-      "rva": 85322600
+      "rva": 86452672
     },
     {
       "dll": "kernel32.dll",
       "name": "SetThreadAffinityMask",
-      "rva": 85322608
+      "rva": 86452680
     },
     {
       "dll": "kernel32.dll",
       "name": "SetThreadPriority",
-      "rva": 85322616
+      "rva": 86452688
     },
     {
       "dll": "kernel32.dll",
       "name": "SetUnhandledExceptionFilter",
-      "rva": 85322624
+      "rva": 86452696
     },
     {
       "dll": "kernel32.dll",
       "name": "Sleep",
-      "rva": 85322632
+      "rva": 86452704
     },
     {
       "dll": "kernel32.dll",
       "name": "SleepConditionVariableCS",
-      "rva": 85322640
+      "rva": 86452712
     },
     {
       "dll": "kernel32.dll",
       "name": "SleepConditionVariableSRW",
-      "rva": 85322648
+      "rva": 86452720
     },
     {
       "dll": "kernel32.dll",
       "name": "SleepEx",
-      "rva": 85322656
+      "rva": 86452728
     },
     {
       "dll": "kernel32.dll",
       "name": "SwitchToThread",
-      "rva": 85322664
+      "rva": 86452736
     },
     {
       "dll": "kernel32.dll",
       "name": "SystemTimeToFileTime",
-      "rva": 85322672
+      "rva": 86452744
     },
     {
       "dll": "kernel32.dll",
       "name": "TerminateProcess",
-      "rva": 85322680
+      "rva": 86452752
     },
     {
       "dll": "kernel32.dll",
       "name": "TlsAlloc",
-      "rva": 85322688
+      "rva": 86452760
     },
     {
       "dll": "kernel32.dll",
       "name": "TlsFree",
-      "rva": 85322696
+      "rva": 86452768
     },
     {
       "dll": "kernel32.dll",
       "name": "TlsGetValue",
-      "rva": 85322704
+      "rva": 86452776
     },
     {
       "dll": "kernel32.dll",
       "name": "TlsSetValue",
-      "rva": 85322712
+      "rva": 86452784
     },
     {
       "dll": "kernel32.dll",
       "name": "TryEnterCriticalSection",
-      "rva": 85322720
+      "rva": 86452792
     },
     {
       "dll": "kernel32.dll",
       "name": "UnmapViewOfFile",
-      "rva": 85322728
+      "rva": 86452800
     },
     {
       "dll": "kernel32.dll",
       "name": "VerSetConditionMask",
-      "rva": 85322736
+      "rva": 86452808
     },
     {
       "dll": "kernel32.dll",
       "name": "VerifyVersionInfoW",
-      "rva": 85322744
+      "rva": 86452816
     },
     {
       "dll": "kernel32.dll",
       "name": "VirtualFree",
-      "rva": 85322752
+      "rva": 86452824
     },
     {
       "dll": "kernel32.dll",
       "name": "WaitForSingleObject",
-      "rva": 85322760
+      "rva": 86452832
     },
     {
       "dll": "kernel32.dll",
       "name": "WaitForSingleObjectEx",
-      "rva": 85322768
+      "rva": 86452840
     },
     {
       "dll": "kernel32.dll",
       "name": "WakeAllConditionVariable",
-      "rva": 85322776
+      "rva": 86452848
     },
     {
       "dll": "kernel32.dll",
       "name": "WakeConditionVariable",
-      "rva": 85322784
+      "rva": 86452856
     },
     {
       "dll": "kernel32.dll",
       "name": "WideCharToMultiByte",
-      "rva": 85322792
+      "rva": 86452864
     },
     {
       "dll": "kernel32.dll",
       "name": "WriteConsoleW",
-      "rva": 85322800
+      "rva": 86452872
     },
     {
       "dll": "kernel32.dll",
       "name": "WriteFile",
-      "rva": 85322808
+      "rva": 86452880
     },
     {
       "dll": "winmm.dll",
       "name": "timeBeginPeriod",
-      "rva": 85322824
+      "rva": 86452896
     },
     {
       "dll": "winmm.dll",
       "name": "timeEndPeriod",
-      "rva": 85322832
+      "rva": 86452904
     },
     {
       "dll": "steam_api64.dll",
       "name": "SteamAPI_GetHSteamUser",
-      "rva": 85322848
+      "rva": 86452920
     },
     {
       "dll": "steam_api64.dll",
       "name": "SteamAPI_RegisterCallResult",
-      "rva": 85322856
+      "rva": 86452928
     },
     {
       "dll": "steam_api64.dll",
       "name": "SteamAPI_RegisterCallback",
-      "rva": 85322864
+      "rva": 86452936
     },
     {
       "dll": "steam_api64.dll",
       "name": "SteamAPI_RunCallbacks",
-      "rva": 85322872
+      "rva": 86452944
     },
     {
       "dll": "steam_api64.dll",
       "name": "SteamAPI_Shutdown",
-      "rva": 85322880
+      "rva": 86452952
     },
     {
       "dll": "steam_api64.dll",
       "name": "SteamAPI_UnregisterCallResult",
-      "rva": 85322888
+      "rva": 86452960
     },
     {
       "dll": "steam_api64.dll",
       "name": "SteamAPI_UnregisterCallback",
-      "rva": 85322896
+      "rva": 86452968
     },
     {
       "dll": "steam_api64.dll",
       "name": "SteamInternal_ContextInit",
-      "rva": 85322904
+      "rva": 86452976
     },
     {
       "dll": "steam_api64.dll",
       "name": "SteamInternal_CreateInterface",
-      "rva": 85322912
+      "rva": 86452984
     },
     {
       "dll": "steam_api64.dll",
       "name": "SteamInternal_FindOrCreateUserInterface",
-      "rva": 85322920
+      "rva": 86452992
     },
     {
       "dll": "steam_api64.dll",
       "name": "SteamInternal_SteamAPI_Init",
-      "rva": 85322928
+      "rva": 86453000
     },
     {
       "dll": "advapi32.dll",
       "name": "CryptAcquireContextW",
-      "rva": 85322944
+      "rva": 86453016
     },
     {
       "dll": "advapi32.dll",
       "name": "CryptCreateHash",
-      "rva": 85322952
+      "rva": 86453024
     },
     {
       "dll": "advapi32.dll",
       "name": "CryptDecrypt",
-      "rva": 85322960
+      "rva": 86453032
     },
     {
       "dll": "advapi32.dll",
       "name": "CryptDestroyHash",
-      "rva": 85322968
+      "rva": 86453040
     },
     {
       "dll": "advapi32.dll",
       "name": "CryptDestroyKey",
-      "rva": 85322976
+      "rva": 86453048
     },
     {
       "dll": "advapi32.dll",
       "name": "CryptEnumProvidersW",
-      "rva": 85322984
+      "rva": 86453056
     },
     {
       "dll": "advapi32.dll",
       "name": "CryptExportKey",
-      "rva": 85322992
+      "rva": 86453064
     },
     {
       "dll": "advapi32.dll",
       "name": "CryptGenRandom",
-      "rva": 85323000
+      "rva": 86453072
     },
     {
       "dll": "advapi32.dll",
       "name": "CryptGetHashParam",
-      "rva": 85323008
+      "rva": 86453080
     },
     {
       "dll": "advapi32.dll",
       "name": "CryptGetProvParam",
-      "rva": 85323016
+      "rva": 86453088
     },
     {
       "dll": "advapi32.dll",
       "name": "CryptGetUserKey",
-      "rva": 85323024
+      "rva": 86453096
     },
     {
       "dll": "advapi32.dll",
       "name": "CryptHashData",
-      "rva": 85323032
+      "rva": 86453104
     },
     {
       "dll": "advapi32.dll",
       "name": "CryptReleaseContext",
-      "rva": 85323040
+      "rva": 86453112
     },
     {
       "dll": "advapi32.dll",
       "name": "CryptSetHashParam",
-      "rva": 85323048
+      "rva": 86453120
     },
     {
       "dll": "advapi32.dll",
       "name": "CryptSignHashW",
-      "rva": 85323056
+      "rva": 86453128
     },
     {
       "dll": "advapi32.dll",
       "name": "DeregisterEventSource",
-      "rva": 85323064
+      "rva": 86453136
     },
     {
       "dll": "advapi32.dll",
       "name": "RegCloseKey",
-      "rva": 85323072
+      "rva": 86453144
     },
     {
       "dll": "advapi32.dll",
       "name": "RegOpenKeyExA",
-      "rva": 85323080
+      "rva": 86453152
     },
     {
       "dll": "advapi32.dll",
       "name": "RegOpenKeyExW",
-      "rva": 85323088
+      "rva": 86453160
     },
     {
       "dll": "advapi32.dll",
       "name": "RegQueryValueExA",
-      "rva": 85323096
+      "rva": 86453168
     },
     {
       "dll": "advapi32.dll",
       "name": "RegQueryValueExW",
-      "rva": 85323104
+      "rva": 86453176
     },
     {
       "dll": "advapi32.dll",
       "name": "RegisterEventSourceW",
-      "rva": 85323112
+      "rva": 86453184
     },
     {
       "dll": "advapi32.dll",
       "name": "ReportEventW",
-      "rva": 85323120
+      "rva": 86453192
     },
     {
       "dll": "ntdll.dll",
       "name": "RtlGetDeviceFamilyInfoEnum",
-      "rva": 85323136
+      "rva": 86453208
     },
     {
       "dll": "ws2_32.dll",
       "name": "#116",
-      "rva": 85323152
+      "rva": 86453224
     },
     {
       "dll": "ws2_32.dll",
       "name": "WSACloseEvent",
-      "rva": 85323160
+      "rva": 86453232
     },
     {
       "dll": "ws2_32.dll",
       "name": "WSACreateEvent",
-      "rva": 85323168
+      "rva": 86453240
     },
     {
       "dll": "ws2_32.dll",
       "name": "WSAEnumNetworkEvents",
-      "rva": 85323176
+      "rva": 86453248
     },
     {
       "dll": "ws2_32.dll",
       "name": "WSAEventSelect",
-      "rva": 85323184
+      "rva": 86453256
     },
     {
       "dll": "ws2_32.dll",
       "name": "#111",
-      "rva": 85323192
+      "rva": 86453264
     },
     {
       "dll": "ws2_32.dll",
       "name": "WSAIoctl",
-      "rva": 85323200
+      "rva": 86453272
     },
     {
       "dll": "ws2_32.dll",
       "name": "WSAResetEvent",
-      "rva": 85323208
+      "rva": 86453280
     },
     {
       "dll": "ws2_32.dll",
       "name": "#112",
-      "rva": 85323216
+      "rva": 86453288
     },
     {
       "dll": "ws2_32.dll",
       "name": "#115",
-      "rva": 85323224
+      "rva": 86453296
     },
     {
       "dll": "ws2_32.dll",
       "name": "WSAWaitForMultipleEvents",
-      "rva": 85323232
+      "rva": 86453304
     },
     {
       "dll": "ws2_32.dll",
       "name": "#151",
-      "rva": 85323240
+      "rva": 86453312
     },
     {
       "dll": "ws2_32.dll",
       "name": "#1",
-      "rva": 85323248
+      "rva": 86453320
     },
     {
       "dll": "ws2_32.dll",
       "name": "#2",
-      "rva": 85323256
+      "rva": 86453328
     },
     {
       "dll": "ws2_32.dll",
       "name": "#3",
-      "rva": 85323264
+      "rva": 86453336
     },
     {
       "dll": "ws2_32.dll",
       "name": "#4",
-      "rva": 85323272
+      "rva": 86453344
     },
     {
       "dll": "ws2_32.dll",
       "name": "freeaddrinfo",
-      "rva": 85323280
+      "rva": 86453352
     },
     {
       "dll": "ws2_32.dll",
       "name": "getaddrinfo",
-      "rva": 85323288
+      "rva": 86453360
     },
     {
       "dll": "ws2_32.dll",
       "name": "#51",
-      "rva": 85323296
+      "rva": 86453368
     },
     {
       "dll": "ws2_32.dll",
       "name": "#52",
-      "rva": 85323304
+      "rva": 86453376
     },
     {
       "dll": "ws2_32.dll",
       "name": "#5",
-      "rva": 85323312
+      "rva": 86453384
     },
     {
       "dll": "ws2_32.dll",
       "name": "#55",
-      "rva": 85323320
+      "rva": 86453392
     },
     {
       "dll": "ws2_32.dll",
       "name": "#56",
-      "rva": 85323328
+      "rva": 86453400
     },
     {
       "dll": "ws2_32.dll",
       "name": "#6",
-      "rva": 85323336
+      "rva": 86453408
     },
     {
       "dll": "ws2_32.dll",
       "name": "#7",
-      "rva": 85323344
+      "rva": 86453416
     },
     {
       "dll": "ws2_32.dll",
       "name": "#8",
-      "rva": 85323352
+      "rva": 86453424
     },
     {
       "dll": "ws2_32.dll",
       "name": "#9",
-      "rva": 85323360
+      "rva": 86453432
     },
     {
       "dll": "ws2_32.dll",
       "name": "#11",
-      "rva": 85323368
+      "rva": 86453440
     },
     {
       "dll": "ws2_32.dll",
       "name": "#12",
-      "rva": 85323376
+      "rva": 86453448
     },
     {
       "dll": "ws2_32.dll",
       "name": "#10",
-      "rva": 85323384
+      "rva": 86453456
     },
     {
       "dll": "ws2_32.dll",
       "name": "#15",
-      "rva": 85323392
+      "rva": 86453464
     },
     {
       "dll": "ws2_32.dll",
       "name": "#16",
-      "rva": 85323400
+      "rva": 86453472
     },
     {
       "dll": "ws2_32.dll",
       "name": "#17",
-      "rva": 85323408
+      "rva": 86453480
     },
     {
       "dll": "ws2_32.dll",
       "name": "#18",
-      "rva": 85323416
+      "rva": 86453488
     },
     {
       "dll": "ws2_32.dll",
       "name": "#19",
-      "rva": 85323424
+      "rva": 86453496
     },
     {
       "dll": "ws2_32.dll",
       "name": "#20",
-      "rva": 85323432
+      "rva": 86453504
     },
     {
       "dll": "ws2_32.dll",
       "name": "#21",
-      "rva": 85323440
+      "rva": 86453512
     },
     {
       "dll": "ws2_32.dll",
       "name": "#22",
-      "rva": 85323448
+      "rva": 86453520
     },
     {
       "dll": "ws2_32.dll",
       "name": "#23",
-      "rva": 85323456
+      "rva": 86453528
     },
     {
       "dll": "icuuc65.dll",
       "name": "??0ByteSink@icu_65@@QEAA@XZ",
-      "rva": 85323472
+      "rva": 86453544
     },
     {
       "dll": "icuuc65.dll",
       "name": "??0CheckedArrayByteSink@icu_65@@QEAA@PEADH@Z",
-      "rva": 85323480
+      "rva": 86453552
     },
     {
       "dll": "icuuc65.dll",
       "name": "??0Locale@icu_65@@QEAA@AEBV01@@Z",
-      "rva": 85323488
+      "rva": 86453560
     },
     {
       "dll": "icuuc65.dll",
       "name": "??0Locale@icu_65@@QEAA@PEBD000@Z",
-      "rva": 85323496
+      "rva": 86453568
     },
     {
       "dll": "icuuc65.dll",
       "name": "??0StringPiece@icu_65@@QEAA@PEBD@Z",
-      "rva": 85323504
+      "rva": 86453576
     },
     {
       "dll": "icuuc65.dll",
       "name": "??0StringPiece@icu_65@@QEAA@PEBDH@Z",
-      "rva": 85323512
+      "rva": 86453584
     },
     {
       "dll": "icuuc65.dll",
       "name": "??0UnicodeString@icu_65@@QEAA@CVConstChar16Ptr@1@H@Z",
-      "rva": 85323520
+      "rva": 86453592
     },
     {
       "dll": "icuuc65.dll",
       "name": "??0UnicodeString@icu_65@@QEAA@H@Z",
-      "rva": 85323528
+      "rva": 86453600
     },
     {
       "dll": "icuuc65.dll",
       "name": "??0UnicodeString@icu_65@@QEAA@PEBD@Z",
-      "rva": 85323536
+      "rva": 86453608
     },
     {
       "dll": "icuuc65.dll",
       "name": "??0UnicodeString@icu_65@@QEAA@XZ",
-      "rva": 85323544
+      "rva": 86453616
     },
     {
       "dll": "icuuc65.dll",
       "name": "??1ByteSink@icu_65@@UEAA@XZ",
-      "rva": 85323552
+      "rva": 86453624
     },
     {
       "dll": "icuuc65.dll",
       "name": "??1CheckedArrayByteSink@icu_65@@UEAA@XZ",
-      "rva": 85323560
+      "rva": 86453632
     },
     {
       "dll": "icuuc65.dll",
       "name": "??1Locale@icu_65@@UEAA@XZ",
-      "rva": 85323568
+      "rva": 86453640
     },
     {
       "dll": "icuuc65.dll",
       "name": "??1UnicodeString@icu_65@@UEAA@XZ",
-      "rva": 85323576
+      "rva": 86453648
     },
     {
       "dll": "icuuc65.dll",
       "name": "??2UMemory@icu_65@@SAPEAX_K@Z",
-      "rva": 85323584
+      "rva": 86453656
     },
     {
       "dll": "icuuc65.dll",
       "name": "??3UMemory@icu_65@@SAXPEAX@Z",
-      "rva": 85323592
+      "rva": 86453664
     },
     {
       "dll": "icuuc65.dll",
       "name": "??4Locale@icu_65@@QEAAAEAV01@$$QEAV01@@Z",
-      "rva": 85323600
+      "rva": 86453672
     },
     {
       "dll": "icuuc65.dll",
       "name": "??4Locale@icu_65@@QEAAAEAV01@AEBV01@@Z",
-      "rva": 85323608
+      "rva": 86453680
     },
     {
       "dll": "icuuc65.dll",
       "name": "??4UnicodeString@icu_65@@QEAAAEAV01@$$QEAV01@@Z",
-      "rva": 85323616
+      "rva": 86453688
     },
     {
       "dll": "icuuc65.dll",
       "name": "??8Locale@icu_65@@QEBACAEBV01@@Z",
-      "rva": 85323624
+      "rva": 86453696
     },
     {
       "dll": "icuuc65.dll",
       "name": "?Flush@ByteSink@icu_65@@UEAAXXZ",
-      "rva": 85323632
+      "rva": 86453704
     },
     {
       "dll": "icuuc65.dll",
       "name": "?GetAppendBuffer@ByteSink@icu_65@@UEAAPEADHHPEADHPEAH@Z",
-      "rva": 85323640
+      "rva": 86453712
     },
     {
       "dll": "icuuc65.dll",
       "name": "?char32At@UnicodeString@icu_65@@QEBAHH@Z",
-      "rva": 85323648
+      "rva": 86453720
     },
     {
       "dll": "icuuc65.dll",
       "name": "?countChar32@UnicodeString@icu_65@@QEBAHHH@Z",
-      "rva": 85323656
+      "rva": 86453728
     },
     {
       "dll": "icuuc65.dll",
       "name": "?createWordInstance@BreakIterator@icu_65@@SAPEAV12@AEBVLocale@2@AEAW4UErrorCode@@@Z",
-      "rva": 85323664
+      "rva": 86453736
     },
     {
       "dll": "icuuc65.dll",
       "name": "?doCaseCompare@UnicodeString@icu_65@@AEBACHHPEB_SHHI@Z",
-      "rva": 85323672
+      "rva": 86453744
     },
     {
       "dll": "icuuc65.dll",
       "name": "?doCompare@UnicodeString@icu_65@@AEBACHHPEB_SHH@Z",
-      "rva": 85323680
+      "rva": 86453752
     },
     {
       "dll": "icuuc65.dll",
       "name": "?fromUTF8@UnicodeString@icu_65@@SA?AV12@VStringPiece@2@@Z",
-      "rva": 85323688
+      "rva": 86453760
     },
     {
       "dll": "icuuc65.dll",
       "name": "?getFrench@Locale@icu_65@@SAAEBV12@XZ",
-      "rva": 85323696
+      "rva": 86453768
     },
     {
       "dll": "icuuc65.dll",
       "name": "?getGerman@Locale@icu_65@@SAAEBV12@XZ",
-      "rva": 85323704
+      "rva": 86453776
     },
     {
       "dll": "icuuc65.dll",
       "name": "?getItalian@Locale@icu_65@@SAAEBV12@XZ",
-      "rva": 85323712
+      "rva": 86453784
     },
     {
       "dll": "icuuc65.dll",
       "name": "?getJapanese@Locale@icu_65@@SAAEBV12@XZ",
-      "rva": 85323720
+      "rva": 86453792
     },
     {
       "dll": "icuuc65.dll",
       "name": "?getKorean@Locale@icu_65@@SAAEBV12@XZ",
-      "rva": 85323728
+      "rva": 86453800
     },
     {
       "dll": "icuuc65.dll",
       "name": "?getNFCInstance@Normalizer2@icu_65@@SAPEBV12@AEAW4UErrorCode@@@Z",
-      "rva": 85323736
+      "rva": 86453808
     },
     {
       "dll": "icuuc65.dll",
       "name": "?getRoot@Locale@icu_65@@SAAEBV12@XZ",
-      "rva": 85323744
+      "rva": 86453816
     },
     {
       "dll": "icuuc65.dll",
       "name": "?getSimplifiedChinese@Locale@icu_65@@SAAEBV12@XZ",
-      "rva": 85323752
+      "rva": 86453824
     },
     {
       "dll": "icuuc65.dll",
       "name": "?getTraditionalChinese@Locale@icu_65@@SAAEBV12@XZ",
-      "rva": 85323760
+      "rva": 86453832
     },
     {
       "dll": "icuuc65.dll",
       "name": "?getUK@Locale@icu_65@@SAAEBV12@XZ",
-      "rva": 85323768
+      "rva": 86453840
     },
     {
       "dll": "icuuc65.dll",
       "name": "?getUS@Locale@icu_65@@SAAEBV12@XZ",
-      "rva": 85323776
+      "rva": 86453848
     },
     {
       "dll": "icuuc65.dll",
       "name": "?toLower@UnicodeString@icu_65@@QEAAAEAV12@AEBVLocale@2@@Z",
-      "rva": 85323784
+      "rva": 86453856
     },
     {
       "dll": "icuuc65.dll",
       "name": "?toTitle@UnicodeString@icu_65@@QEAAAEAV12@PEAVBreakIterator@2@AEBVLocale@2@@Z",
-      "rva": 85323792
+      "rva": 86453864
     },
     {
       "dll": "icuuc65.dll",
       "name": "?toUTF8@UnicodeString@icu_65@@QEBAXAEAVByteSink@2@@Z",
-      "rva": 85323800
+      "rva": 86453872
     },
     {
       "dll": "icuuc65.dll",
       "name": "?toUpper@UnicodeString@icu_65@@QEAAAEAV12@AEBVLocale@2@@Z",
-      "rva": 85323808
+      "rva": 86453880
     },
     {
       "dll": "icuuc65.dll",
       "name": "u_charType_65",
-      "rva": 85323816
+      "rva": 86453888
     },
     {
       "dll": "icuuc65.dll",
       "name": "u_cleanup_65",
-      "rva": 85323824
+      "rva": 86453896
     },
     {
       "dll": "icuuc65.dll",
       "name": "u_hasBinaryProperty_65",
-      "rva": 85323832
+      "rva": 86453904
     },
     {
       "dll": "icuuc65.dll",
       "name": "u_init_65",
-      "rva": 85323840
+      "rva": 86453912
     },
     {
       "dll": "icuuc65.dll",
       "name": "u_ispunct_65",
-      "rva": 85323848
+      "rva": 86453920
     },
     {
       "dll": "icuuc65.dll",
       "name": "u_tolower_65",
-      "rva": 85323856
+      "rva": 86453928
     },
     {
       "dll": "icuuc65.dll",
       "name": "u_toupper_65",
-      "rva": 85323864
+      "rva": 86453936
     },
     {
       "dll": "icuuc65.dll",
       "name": "udata_setCommonData_65",
-      "rva": 85323872
+      "rva": 86453944
     },
     {
       "dll": "icuuc65.dll",
       "name": "utf8_back1SafeBody_65",
-      "rva": 85323880
+      "rva": 86453952
     },
     {
       "dll": "icuin65.dll",
       "name": "??0AlphabeticIndex@icu_65@@QEAA@AEBVLocale@1@AEAW4UErrorCode@@@Z",
-      "rva": 85323896
+      "rva": 86453968
     },
     {
       "dll": "icuin65.dll",
       "name": "??1AlphabeticIndex@icu_65@@UEAA@XZ",
-      "rva": 85323904
+      "rva": 86453976
     },
     {
       "dll": "icuin65.dll",
       "name": "?buildImmutableIndex@AlphabeticIndex@icu_65@@QEAAPEAVImmutableIndex@12@AEAW4UErrorCode@@@Z",
-      "rva": 85323912
+      "rva": 86453984
     },
     {
       "dll": "icuin65.dll",
       "name": "?createInstance@Collator@icu_65@@SAPEAV12@AEBVLocale@2@AEAW4UErrorCode@@@Z",
-      "rva": 85323920
+      "rva": 86453992
     },
     {
       "dll": "icuin65.dll",
       "name": "?createInstance@Transliterator@icu_65@@SAPEAV12@AEBVUnicodeString@2@W4UTransDirection@@AEAW4UErrorCode@@@Z",
-      "rva": 85323928
+      "rva": 86454000
     },
     {
       "dll": "icuin65.dll",
       "name": "?getBucket@ImmutableIndex@AlphabeticIndex@icu_65@@QEBAPEBVBucket@23@H@Z",
-      "rva": 85323936
+      "rva": 86454008
     },
     {
       "dll": "icuin65.dll",
       "name": "?getBucketIndex@ImmutableIndex@AlphabeticIndex@icu_65@@QEBAHAEBVUnicodeString@3@AEAW4UErrorCode@@@Z",
-      "rva": 85323944
+      "rva": 86454016
     },
     {
       "dll": "powrprof.dll",
       "name": "PowerDeterminePlatformRoleEx",
-      "rva": 85323960
+      "rva": 86454032
     },
     {
       "dll": "version.dll",
       "name": "GetFileVersionInfoA",
-      "rva": 85323976
+      "rva": 86454048
     },
     {
       "dll": "version.dll",
       "name": "GetFileVersionInfoSizeA",
-      "rva": 85323984
+      "rva": 86454056
     },
     {
       "dll": "version.dll",
       "name": "VerQueryValueA",
-      "rva": 85323992
+      "rva": 86454064
     },
     {
       "dll": "shell32.dll",
       "name": "SHFileOperationW",
-      "rva": 85324008
+      "rva": 86454080
     },
     {
       "dll": "shell32.dll",
       "name": "SHGetKnownFolderPath",
-      "rva": 85324016
+      "rva": 86454088
     },
     {
       "dll": "shell32.dll",
       "name": "ShellExecuteW",
-      "rva": 85324024
+      "rva": 86454096
     },
     {
       "dll": "ole32.dll",
       "name": "CoCreateGuid",
-      "rva": 85324040
+      "rva": 86454112
     },
     {
       "dll": "ole32.dll",
       "name": "CoCreateInstance",
-      "rva": 85324048
+      "rva": 86454120
     },
     {
       "dll": "ole32.dll",
       "name": "CoInitializeEx",
-      "rva": 85324056
+      "rva": 86454128
     },
     {
       "dll": "ole32.dll",
       "name": "CoTaskMemFree",
-      "rva": 85324064
+      "rva": 86454136
     },
     {
       "dll": "ole32.dll",
       "name": "CoUninitialize",
-      "rva": 85324072
+      "rva": 86454144
     },
     {
       "dll": "eossdk-win64-shipping.dll",
       "name": "EOS_Achievements_CopyPlayerAchievementByIndex",
-      "rva": 85324088
+      "rva": 86454160
     },
     {
       "dll": "eossdk-win64-shipping.dll",
       "name": "EOS_Achievements_GetPlayerAchievementCount",
-      "rva": 85324096
+      "rva": 86454168
     },
     {
       "dll": "eossdk-win64-shipping.dll",
       "name": "EOS_Achievements_PlayerAchievement_Release",
-      "rva": 85324104
+      "rva": 86454176
     },
     {
       "dll": "eossdk-win64-shipping.dll",
       "name": "EOS_Achievements_QueryPlayerAchievements",
-      "rva": 85324112
+      "rva": 86454184
     },
     {
       "dll": "eossdk-win64-shipping.dll",
       "name": "EOS_Achievements_UnlockAchievements",
-      "rva": 85324120
+      "rva": 86454192
     },
     {
       "dll": "eossdk-win64-shipping.dll",
       "name": "EOS_Auth_AddNotifyLoginStatusChanged",
-      "rva": 85324128
+      "rva": 86454200
     },
     {
       "dll": "eossdk-win64-shipping.dll",
       "name": "EOS_Auth_CopyIdToken",
-      "rva": 85324136
+      "rva": 86454208
     },
     {
       "dll": "eossdk-win64-shipping.dll",
       "name": "EOS_Auth_CopyUserAuthToken",
-      "rva": 85324144
+      "rva": 86454216
     },
     {
       "dll": "eossdk-win64-shipping.dll",
       "name": "EOS_Auth_GetLoginStatus",
-      "rva": 85324152
+      "rva": 86454224
     },
     {
       "dll": "eossdk-win64-shipping.dll",
       "name": "EOS_Auth_IdToken_Release",
-      "rva": 85324160
+      "rva": 86454232
     },
     {
       "dll": "eossdk-win64-shipping.dll",
       "name": "EOS_Auth_Login",
-      "rva": 85324168
+      "rva": 86454240
     },
     {
       "dll": "eossdk-win64-shipping.dll",
       "name": "EOS_Auth_Logout",
-      "rva": 85324176
+      "rva": 86454248
     },
     {
       "dll": "eossdk-win64-shipping.dll",
       "name": "EOS_Auth_RemoveNotifyLoginStatusChanged",
-      "rva": 85324184
+      "rva": 86454256
     },
     {
       "dll": "eossdk-win64-shipping.dll",
       "name": "EOS_Auth_Token_Release",
-      "rva": 85324192
+      "rva": 86454264
     },
     {
       "dll": "eossdk-win64-shipping.dll",
       "name": "EOS_Connect_AddNotifyAuthExpiration",
-      "rva": 85324200
+      "rva": 86454272
     },
     {
       "dll": "eossdk-win64-shipping.dll",
       "name": "EOS_Connect_CreateUser",
-      "rva": 85324208
+      "rva": 86454280
     },
     {
       "dll": "eossdk-win64-shipping.dll",
       "name": "EOS_Connect_GetExternalAccountMapping",
-      "rva": 85324216
+      "rva": 86454288
     },
     {
       "dll": "eossdk-win64-shipping.dll",
       "name": "EOS_Connect_GetLoginStatus",
-      "rva": 85324224
+      "rva": 86454296
     },
     {
       "dll": "eossdk-win64-shipping.dll",
       "name": "EOS_Connect_Login",
-      "rva": 85324232
+      "rva": 86454304
     },
     {
       "dll": "eossdk-win64-shipping.dll",
       "name": "EOS_Connect_QueryExternalAccountMappings",
-      "rva": 85324240
+      "rva": 86454312
     },
     {
       "dll": "eossdk-win64-shipping.dll",
       "name": "EOS_Connect_RemoveNotifyAuthExpiration",
-      "rva": 85324248
+      "rva": 86454320
     },
     {
       "dll": "eossdk-win64-shipping.dll",
       "name": "EOS_EResult_IsOperationComplete",
-      "rva": 85324256
+      "rva": 86454328
     },
     {
       "dll": "eossdk-win64-shipping.dll",
       "name": "EOS_EResult_ToString",
-      "rva": 85324264
+      "rva": 86454336
     },
     {
       "dll": "eossdk-win64-shipping.dll",
       "name": "EOS_Ecom_CatalogItem_Release",
-      "rva": 85324272
+      "rva": 86454344
     },
     {
       "dll": "eossdk-win64-shipping.dll",
       "name": "EOS_Ecom_CatalogOffer_Release",
-      "rva": 85324280
+      "rva": 86454352
     },
     {
       "dll": "eossdk-win64-shipping.dll",
       "name": "EOS_Ecom_Checkout",
-      "rva": 85324288
+      "rva": 86454360
     },
     {
       "dll": "eossdk-win64-shipping.dll",
       "name": "EOS_Ecom_CopyEntitlementByNameAndIndex",
-      "rva": 85324296
+      "rva": 86454368
     },
     {
       "dll": "eossdk-win64-shipping.dll",
       "name": "EOS_Ecom_CopyItemById",
-      "rva": 85324304
+      "rva": 86454376
     },
     {
       "dll": "eossdk-win64-shipping.dll",
       "name": "EOS_Ecom_CopyOfferByIndex",
-      "rva": 85324312
+      "rva": 86454384
     },
     {
       "dll": "eossdk-win64-shipping.dll",
       "name": "EOS_Ecom_CopyTransactionById",
-      "rva": 85324320
+      "rva": 86454392
     },
     {
       "dll": "eossdk-win64-shipping.dll",
       "name": "EOS_Ecom_Entitlement_Release",
-      "rva": 85324328
+      "rva": 86454400
     },
     {
       "dll": "eossdk-win64-shipping.dll",
       "name": "EOS_Ecom_GetOfferCount",
-      "rva": 85324336
+      "rva": 86454408
     },
     {
       "dll": "eossdk-win64-shipping.dll",
       "name": "EOS_Ecom_QueryOffers",
-      "rva": 85324344
+      "rva": 86454416
     },
     {
       "dll": "eossdk-win64-shipping.dll",
       "name": "EOS_Ecom_QueryOwnership",
-      "rva": 85324352
+      "rva": 86454424
     },
     {
       "dll": "eossdk-win64-shipping.dll",
       "name": "EOS_Ecom_RedeemEntitlements",
-      "rva": 85324360
+      "rva": 86454432
     },
     {
       "dll": "eossdk-win64-shipping.dll",
       "name": "EOS_Ecom_Transaction_CopyEntitlementByIndex",
-      "rva": 85324368
+      "rva": 86454440
     },
     {
       "dll": "eossdk-win64-shipping.dll",
       "name": "EOS_Ecom_Transaction_GetEntitlementsCount",
-      "rva": 85324376
+      "rva": 86454448
     },
     {
       "dll": "eossdk-win64-shipping.dll",
       "name": "EOS_Ecom_Transaction_Release",
-      "rva": 85324384
+      "rva": 86454456
     },
     {
       "dll": "eossdk-win64-shipping.dll",
       "name": "EOS_EpicAccountId_IsValid",
-      "rva": 85324392
+      "rva": 86454464
     },
     {
       "dll": "eossdk-win64-shipping.dll",
       "name": "EOS_EpicAccountId_ToString",
-      "rva": 85324400
+      "rva": 86454472
     },
     {
       "dll": "eossdk-win64-shipping.dll",
       "name": "EOS_Friends_AddNotifyFriendsUpdate",
-      "rva": 85324408
+      "rva": 86454480
     },
     {
       "dll": "eossdk-win64-shipping.dll",
       "name": "EOS_Friends_GetFriendAtIndex",
-      "rva": 85324416
+      "rva": 86454488
     },
     {
       "dll": "eossdk-win64-shipping.dll",
       "name": "EOS_Friends_GetFriendsCount",
-      "rva": 85324424
+      "rva": 86454496
     },
     {
       "dll": "eossdk-win64-shipping.dll",
       "name": "EOS_Friends_GetStatus",
-      "rva": 85324432
+      "rva": 86454504
     },
     {
       "dll": "eossdk-win64-shipping.dll",
       "name": "EOS_Friends_QueryFriends",
-      "rva": 85324440
+      "rva": 86454512
     },
     {
       "dll": "eossdk-win64-shipping.dll",
       "name": "EOS_Friends_RemoveNotifyFriendsUpdate",
-      "rva": 85324448
+      "rva": 86454520
     },
     {
       "dll": "eossdk-win64-shipping.dll",
       "name": "EOS_Initialize",
-      "rva": 85324456
+      "rva": 86454528
     },
     {
       "dll": "eossdk-win64-shipping.dll",
       "name": "EOS_Leaderboards_CopyLeaderboardRecordByIndex",
-      "rva": 85324464
+      "rva": 86454536
     },
     {
       "dll": "eossdk-win64-shipping.dll",
       "name": "EOS_Leaderboards_GetLeaderboardRecordCount",
-      "rva": 85324472
+      "rva": 86454544
     },
     {
       "dll": "eossdk-win64-shipping.dll",
       "name": "EOS_Leaderboards_LeaderboardRecord_Release",
-      "rva": 85324480
+      "rva": 86454552
     },
     {
       "dll": "eossdk-win64-shipping.dll",
       "name": "EOS_Leaderboards_QueryLeaderboardRanks",
-      "rva": 85324488
+      "rva": 86454560
     },
     {
       "dll": "eossdk-win64-shipping.dll",
       "name": "EOS_LobbyDetails_CopyAttributeByIndex",
-      "rva": 85324496
+      "rva": 86454568
     },
     {
       "dll": "eossdk-win64-shipping.dll",
       "name": "EOS_LobbyDetails_CopyInfo",
-      "rva": 85324504
+      "rva": 86454576
     },
     {
       "dll": "eossdk-win64-shipping.dll",
       "name": "EOS_LobbyDetails_GetAttributeCount",
-      "rva": 85324512
+      "rva": 86454584
     },
     {
       "dll": "eossdk-win64-shipping.dll",
       "name": "EOS_LobbyDetails_Info_Release",
-      "rva": 85324520
+      "rva": 86454592
     },
     {
       "dll": "eossdk-win64-shipping.dll",
       "name": "EOS_LobbyDetails_Release",
-      "rva": 85324528
+      "rva": 86454600
     },
     {
       "dll": "eossdk-win64-shipping.dll",
       "name": "EOS_LobbyModification_AddAttribute",
-      "rva": 85324536
+      "rva": 86454608
     },
     {
       "dll": "eossdk-win64-shipping.dll",
       "name": "EOS_LobbyModification_Release",
-      "rva": 85324544
+      "rva": 86454616
     },
     {
       "dll": "eossdk-win64-shipping.dll",
       "name": "EOS_LobbySearch_CopySearchResultByIndex",
-      "rva": 85324552
+      "rva": 86454624
     },
     {
       "dll": "eossdk-win64-shipping.dll",
       "name": "EOS_LobbySearch_Find",
-      "rva": 85324560
+      "rva": 86454632
     },
     {
       "dll": "eossdk-win64-shipping.dll",
       "name": "EOS_LobbySearch_GetSearchResultCount",
-      "rva": 85324568
+      "rva": 86454640
     },
     {
       "dll": "eossdk-win64-shipping.dll",
       "name": "EOS_LobbySearch_Release",
-      "rva": 85324576
+      "rva": 86454648
     },
     {
       "dll": "eossdk-win64-shipping.dll",
       "name": "EOS_LobbySearch_SetLobbyId",
-      "rva": 85324584
+      "rva": 86454656
     },
     {
       "dll": "eossdk-win64-shipping.dll",
       "name": "EOS_Lobby_AddNotifyJoinLobbyAccepted",
-      "rva": 85324592
+      "rva": 86454664
     },
     {
       "dll": "eossdk-win64-shipping.dll",
       "name": "EOS_Lobby_AddNotifyLobbyInviteAccepted",
-      "rva": 85324600
+      "rva": 86454672
     },
     {
       "dll": "eossdk-win64-shipping.dll",
       "name": "EOS_Lobby_AddNotifyLobbyInviteReceived",
-      "rva": 85324608
+      "rva": 86454680
     },
     {
       "dll": "eossdk-win64-shipping.dll",
       "name": "EOS_Lobby_AddNotifyLobbyUpdateReceived",
-      "rva": 85324616
+      "rva": 86454688
     },
     {
       "dll": "eossdk-win64-shipping.dll",
       "name": "EOS_Lobby_Attribute_Release",
-      "rva": 85324624
+      "rva": 86454696
     },
     {
       "dll": "eossdk-win64-shipping.dll",
       "name": "EOS_Lobby_CopyLobbyDetailsHandleByInviteId",
-      "rva": 85324632
+      "rva": 86454704
     },
     {
       "dll": "eossdk-win64-shipping.dll",
       "name": "EOS_Lobby_CopyLobbyDetailsHandleByUiEventId",
-      "rva": 85324640
+      "rva": 86454712
     },
     {
       "dll": "eossdk-win64-shipping.dll",
       "name": "EOS_Lobby_CreateLobby",
-      "rva": 85324648
+      "rva": 86454720
     },
     {
       "dll": "eossdk-win64-shipping.dll",
       "name": "EOS_Lobby_CreateLobbySearch",
-      "rva": 85324656
+      "rva": 86454728
     },
     {
       "dll": "eossdk-win64-shipping.dll",
       "name": "EOS_Lobby_DestroyLobby",
-      "rva": 85324664
+      "rva": 86454736
     },
     {
       "dll": "eossdk-win64-shipping.dll",
       "name": "EOS_Lobby_JoinLobby",
-      "rva": 85324672
+      "rva": 86454744
     },
     {
       "dll": "eossdk-win64-shipping.dll",
       "name": "EOS_Lobby_LeaveLobby",
-      "rva": 85324680
+      "rva": 86454752
     },
     {
       "dll": "eossdk-win64-shipping.dll",
       "name": "EOS_Lobby_RemoveNotifyJoinLobbyAccepted",
-      "rva": 85324688
+      "rva": 86454760
     },
     {
       "dll": "eossdk-win64-shipping.dll",
       "name": "EOS_Lobby_RemoveNotifyLobbyInviteAccepted",
-      "rva": 85324696
+      "rva": 86454768
     },
     {
       "dll": "eossdk-win64-shipping.dll",
       "name": "EOS_Lobby_RemoveNotifyLobbyInviteReceived",
-      "rva": 85324704
+      "rva": 86454776
     },
     {
       "dll": "eossdk-win64-shipping.dll",
       "name": "EOS_Lobby_RemoveNotifyLobbyUpdateReceived",
-      "rva": 85324712
+      "rva": 86454784
     },
     {
       "dll": "eossdk-win64-shipping.dll",
       "name": "EOS_Lobby_SendInvite",
-      "rva": 85324720
+      "rva": 86454792
     },
     {
       "dll": "eossdk-win64-shipping.dll",
       "name": "EOS_Lobby_UpdateLobby",
-      "rva": 85324728
+      "rva": 86454800
     },
     {
       "dll": "eossdk-win64-shipping.dll",
       "name": "EOS_Lobby_UpdateLobbyModification",
-      "rva": 85324736
+      "rva": 86454808
     },
     {
       "dll": "eossdk-win64-shipping.dll",
       "name": "EOS_Logging_SetCallback",
-      "rva": 85324744
+      "rva": 86454816
     },
     {
       "dll": "eossdk-win64-shipping.dll",
       "name": "EOS_Logging_SetLogLevel",
-      "rva": 85324752
+      "rva": 86454824
     },
     {
       "dll": "eossdk-win64-shipping.dll",
       "name": "EOS_Platform_Create",
-      "rva": 85324760
+      "rva": 86454832
     },
     {
       "dll": "eossdk-win64-shipping.dll",
       "name": "EOS_Platform_GetAchievementsInterface",
-      "rva": 85324768
+      "rva": 86454840
     },
     {
       "dll": "eossdk-win64-shipping.dll",
       "name": "EOS_Platform_GetAuthInterface",
-      "rva": 85324776
+      "rva": 86454848
     },
     {
       "dll": "eossdk-win64-shipping.dll",
       "name": "EOS_Platform_GetConnectInterface",
-      "rva": 85324784
+      "rva": 86454856
     },
     {
       "dll": "eossdk-win64-shipping.dll",
       "name": "EOS_Platform_GetEcomInterface",
-      "rva": 85324792
+      "rva": 86454864
     },
     {
       "dll": "eossdk-win64-shipping.dll",
       "name": "EOS_Platform_GetFriendsInterface",
-      "rva": 85324800
+      "rva": 86454872
     },
     {
       "dll": "eossdk-win64-shipping.dll",
       "name": "EOS_Platform_GetLeaderboardsInterface",
-      "rva": 85324808
+      "rva": 86454880
     },
     {
       "dll": "eossdk-win64-shipping.dll",
       "name": "EOS_Platform_GetLobbyInterface",
-      "rva": 85324816
+      "rva": 86454888
     },
     {
       "dll": "eossdk-win64-shipping.dll",
       "name": "EOS_Platform_GetPresenceInterface",
-      "rva": 85324824
+      "rva": 86454896
     },
     {
       "dll": "eossdk-win64-shipping.dll",
       "name": "EOS_Platform_GetReportsInterface",
-      "rva": 85324832
+      "rva": 86454904
     },
     {
       "dll": "eossdk-win64-shipping.dll",
       "name": "EOS_Platform_GetStatsInterface",
-      "rva": 85324840
+      "rva": 86454912
     },
     {
       "dll": "eossdk-win64-shipping.dll",
       "name": "EOS_Platform_GetUserInfoInterface",
-      "rva": 85324848
+      "rva": 86454920
     },
     {
       "dll": "eossdk-win64-shipping.dll",
       "name": "EOS_Platform_Release",
-      "rva": 85324856
+      "rva": 86454928
     },
     {
       "dll": "eossdk-win64-shipping.dll",
       "name": "EOS_Platform_SetNetworkStatus",
-      "rva": 85324864
+      "rva": 86454936
     },
     {
       "dll": "eossdk-win64-shipping.dll",
       "name": "EOS_Platform_Tick",
-      "rva": 85324872
+      "rva": 86454944
     },
     {
       "dll": "eossdk-win64-shipping.dll",
       "name": "EOS_PresenceModification_Release",
-      "rva": 85324880
+      "rva": 86454952
     },
     {
       "dll": "eossdk-win64-shipping.dll",
       "name": "EOS_PresenceModification_SetRawRichText",
-      "rva": 85324888
+      "rva": 86454960
     },
     {
       "dll": "eossdk-win64-shipping.dll",
       "name": "EOS_Presence_CreatePresenceModification",
-      "rva": 85324896
+      "rva": 86454968
     },
     {
       "dll": "eossdk-win64-shipping.dll",
       "name": "EOS_Presence_SetPresence",
-      "rva": 85324904
+      "rva": 86454976
     },
     {
       "dll": "eossdk-win64-shipping.dll",
       "name": "EOS_ProductUserId_ToString",
-      "rva": 85324912
+      "rva": 86454984
     },
     {
       "dll": "eossdk-win64-shipping.dll",
       "name": "EOS_Shutdown",
-      "rva": 85324920
+      "rva": 86454992
     },
     {
       "dll": "eossdk-win64-shipping.dll",
       "name": "EOS_Stats_IngestStat",
-      "rva": 85324928
+      "rva": 86455000
     },
     {
       "dll": "eossdk-win64-shipping.dll",
       "name": "EOS_UserInfo_CopyUserInfo",
-      "rva": 85324936
+      "rva": 86455008
     },
     {
       "dll": "eossdk-win64-shipping.dll",
       "name": "EOS_UserInfo_QueryUserInfo",
-      "rva": 85324944
+      "rva": 86455016
     },
     {
       "dll": "eossdk-win64-shipping.dll",
       "name": "EOS_UserInfo_Release",
-      "rva": 85324952
+      "rva": 86455024
     },
     {
       "dll": "user32.dll",
       "name": "DisplayConfigGetDeviceInfo",
-      "rva": 85324968
+      "rva": 86455040
     },
     {
       "dll": "user32.dll",
       "name": "GetDisplayConfigBufferSizes",
-      "rva": 85324976
+      "rva": 86455048
     },
     {
       "dll": "user32.dll",
       "name": "GetKeyboardLayout",
-      "rva": 85324984
+      "rva": 86455056
     },
     {
       "dll": "user32.dll",
       "name": "GetProcessWindowStation",
-      "rva": 85324992
+      "rva": 86455064
     },
     {
       "dll": "user32.dll",
       "name": "GetUserObjectInformationW",
-      "rva": 85325000
+      "rva": 86455072
     },
     {
       "dll": "user32.dll",
       "name": "MessageBeep",
-      "rva": 85325008
+      "rva": 86455080
     },
     {
       "dll": "user32.dll",
       "name": "MessageBoxW",
-      "rva": 85325016
+      "rva": 86455088
     },
     {
       "dll": "user32.dll",
       "name": "QueryDisplayConfig",
-      "rva": 85325024
+      "rva": 86455096
     },
     {
       "dll": "playfabmultiplayerwin.dll",
       "name": "PFLobbyGetConnectionString",
-      "rva": 85325040
+      "rva": 86455112
     },
     {
       "dll": "playfabmultiplayerwin.dll",
       "name": "PFLobbyGetLobbyId",
-      "rva": 85325048
+      "rva": 86455120
     },
     {
       "dll": "playfabmultiplayerwin.dll",
       "name": "PFLobbyGetLobbyProperty",
-      "rva": 85325056
+      "rva": 86455128
     },
     {
       "dll": "playfabmultiplayerwin.dll",
       "name": "PFLobbyGetLobbyPropertyKeys",
-      "rva": 85325064
+      "rva": 86455136
     },
     {
       "dll": "playfabmultiplayerwin.dll",
       "name": "PFLobbyGetMembers",
-      "rva": 85325072
+      "rva": 86455144
     },
     {
       "dll": "playfabmultiplayerwin.dll",
       "name": "PFLobbyGetOwner",
-      "rva": 85325080
+      "rva": 86455152
     },
     {
       "dll": "playfabmultiplayerwin.dll",
       "name": "PFLobbyGetSearchProperty",
-      "rva": 85325088
+      "rva": 86455160
     },
     {
       "dll": "playfabmultiplayerwin.dll",
       "name": "PFLobbyGetSearchPropertyKeys",
-      "rva": 85325096
+      "rva": 86455168
     },
     {
       "dll": "playfabmultiplayerwin.dll",
       "name": "PFLobbyLeave",
-      "rva": 85325104
+      "rva": 86455176
     },
     {
       "dll": "playfabmultiplayerwin.dll",
       "name": "PFLobbyPostUpdate",
-      "rva": 85325112
+      "rva": 86455184
     },
     {
       "dll": "playfabmultiplayerwin.dll",
       "name": "PFMultiplayerCreateAndJoinLobby",
-      "rva": 85325120
+      "rva": 86455192
     },
     {
       "dll": "playfabmultiplayerwin.dll",
       "name": "PFMultiplayerFindLobbies",
-      "rva": 85325128
+      "rva": 86455200
     },
     {
       "dll": "playfabmultiplayerwin.dll",
       "name": "PFMultiplayerFinishProcessingLobbyStateChanges",
-      "rva": 85325136
+      "rva": 86455208
     },
     {
       "dll": "playfabmultiplayerwin.dll",
       "name": "PFMultiplayerGetErrorMessage",
-      "rva": 85325144
+      "rva": 86455216
     },
     {
       "dll": "playfabmultiplayerwin.dll",
       "name": "PFMultiplayerInitialize",
-      "rva": 85325152
+      "rva": 86455224
     },
     {
       "dll": "playfabmultiplayerwin.dll",
       "name": "PFMultiplayerJoinLobby",
-      "rva": 85325160
+      "rva": 86455232
     },
     {
       "dll": "playfabmultiplayerwin.dll",
       "name": "PFMultiplayerSetEntityToken",
-      "rva": 85325168
+      "rva": 86455240
     },
     {
       "dll": "playfabmultiplayerwin.dll",
       "name": "PFMultiplayerStartProcessingLobbyStateChanges",
-      "rva": 85325176
+      "rva": 86455248
     },
     {
       "dll": "playfabmultiplayerwin.dll",
       "name": "PFMultiplayerUninitialize",
-      "rva": 85325184
+      "rva": 86455256
     },
     {
       "dll": "partywin.dll",
       "name": "PartyCleanup",
-      "rva": 85325200
+      "rva": 86455272
     },
     {
       "dll": "partywin.dll",
       "name": "PartyConnectToNetwork",
-      "rva": 85325208
+      "rva": 86455280
     },
     {
       "dll": "partywin.dll",
       "name": "PartyCreateLocalUser",
-      "rva": 85325216
+      "rva": 86455288
     },
     {
       "dll": "partywin.dll",
       "name": "PartyCreateNewNetwork",
-      "rva": 85325224
+      "rva": 86455296
     },
     {
       "dll": "partywin.dll",
       "name": "PartyDeserializeNetworkDescriptor",
-      "rva": 85325232
+      "rva": 86455304
     },
     {
       "dll": "partywin.dll",
       "name": "PartyDestroyLocalUser",
-      "rva": 85325240
+      "rva": 86455312
     },
     {
       "dll": "partywin.dll",
       "name": "PartyEndpointGetEntityId",
-      "rva": 85325248
+      "rva": 86455320
     },
     {
       "dll": "partywin.dll",
       "name": "PartyEndpointSendMessage",
-      "rva": 85325256
+      "rva": 86455328
     },
     {
       "dll": "partywin.dll",
       "name": "PartyFinishProcessingStateChanges",
-      "rva": 85325264
+      "rva": 86455336
     },
     {
       "dll": "partywin.dll",
       "name": "PartyGetErrorMessage",
-      "rva": 85325272
+      "rva": 86455344
     },
     {
       "dll": "partywin.dll",
       "name": "PartyGetWorkMode",
-      "rva": 85325280
+      "rva": 86455352
     },
     {
       "dll": "partywin.dll",
       "name": "PartyInitialize",
-      "rva": 85325288
+      "rva": 86455360
     },
     {
       "dll": "partywin.dll",
       "name": "PartyLocalUserUpdateEntityToken",
-      "rva": 85325296
+      "rva": 86455368
     },
     {
       "dll": "partywin.dll",
       "name": "PartyNetworkAuthenticateLocalUser",
-      "rva": 85325304
+      "rva": 86455376
     },
     {
       "dll": "partywin.dll",
       "name": "PartyNetworkCreateEndpoint",
-      "rva": 85325312
+      "rva": 86455384
     },
     {
       "dll": "partywin.dll",
       "name": "PartyNetworkGetNetworkDescriptor",
-      "rva": 85325320
+      "rva": 86455392
     },
     {
       "dll": "partywin.dll",
       "name": "PartyNetworkGetNetworkStatistics",
-      "rva": 85325328
+      "rva": 86455400
     },
     {
       "dll": "partywin.dll",
       "name": "PartyNetworkLeaveNetwork",
-      "rva": 85325336
+      "rva": 86455408
     },
     {
       "dll": "partywin.dll",
       "name": "PartySerializeNetworkDescriptor",
-      "rva": 85325344
+      "rva": 86455416
     },
     {
       "dll": "partywin.dll",
       "name": "PartyStartProcessingStateChanges",
-      "rva": 85325352
+      "rva": 86455424
     },
     {
       "dll": "dbghelp.dll",
       "name": "SymGetTypeInfo",
-      "rva": 85325368
+      "rva": 86455440
     },
     {
       "dll": "setupapi.dll",
       "name": "SetupDiCreateDeviceInfoList",
-      "rva": 85325384
+      "rva": 86455456
     },
     {
       "dll": "setupapi.dll",
       "name": "SetupDiDestroyDeviceInfoList",
-      "rva": 85325392
+      "rva": 86455464
     },
     {
       "dll": "setupapi.dll",
       "name": "SetupDiGetDevicePropertyW",
-      "rva": 85325400
+      "rva": 86455472
     },
     {
       "dll": "setupapi.dll",
       "name": "SetupDiOpenDeviceInfoW",
-      "rva": 85325408
+      "rva": 86455480
     },
     {
       "dll": "iphlpapi.dll",
       "name": "if_nametoindex",
-      "rva": 85325424
+      "rva": 86455496
     },
     {
       "dll": "crypt32.dll",
       "name": "CertAddCertificateContextToStore",
-      "rva": 85325440
+      "rva": 86455512
     },
     {
       "dll": "crypt32.dll",
       "name": "CertCloseStore",
-      "rva": 85325448
+      "rva": 86455520
     },
     {
       "dll": "crypt32.dll",
       "name": "CertCreateCertificateChainEngine",
-      "rva": 85325456
+      "rva": 86455528
     },
     {
       "dll": "crypt32.dll",
       "name": "CertDuplicateCertificateContext",
-      "rva": 85325464
+      "rva": 86455536
     },
     {
       "dll": "crypt32.dll",
       "name": "CertEnumCertificatesInStore",
-      "rva": 85325472
+      "rva": 86455544
     },
     {
       "dll": "crypt32.dll",
       "name": "CertFindCertificateInStore",
-      "rva": 85325480
+      "rva": 86455552
     },
     {
       "dll": "crypt32.dll",
       "name": "CertFindExtension",
-      "rva": 85325488
+      "rva": 86455560
     },
     {
       "dll": "crypt32.dll",
       "name": "CertFreeCRLContext",
-      "rva": 85325496
+      "rva": 86455568
     },
     {
       "dll": "crypt32.dll",
       "name": "CertFreeCTLContext",
-      "rva": 85325504
+      "rva": 86455576
     },
     {
       "dll": "crypt32.dll",
       "name": "CertFreeCertificateChain",
-      "rva": 85325512
+      "rva": 86455584
     },
     {
       "dll": "crypt32.dll",
       "name": "CertFreeCertificateChainEngine",
-      "rva": 85325520
+      "rva": 86455592
     },
     {
       "dll": "crypt32.dll",
       "name": "CertFreeCertificateContext",
-      "rva": 85325528
+      "rva": 86455600
     },
     {
       "dll": "crypt32.dll",
       "name": "CertGetCertificateChain",
-      "rva": 85325536
+      "rva": 86455608
     },
     {
       "dll": "crypt32.dll",
       "name": "CertGetCertificateContextProperty",
-      "rva": 85325544
+      "rva": 86455616
     },
     {
       "dll": "crypt32.dll",
       "name": "CertGetNameStringW",
-      "rva": 85325552
+      "rva": 86455624
     },
     {
       "dll": "crypt32.dll",
       "name": "CertOpenStore",
-      "rva": 85325560
+      "rva": 86455632
     },
     {
       "dll": "crypt32.dll",
       "name": "CertOpenSystemStoreW",
-      "rva": 85325568
+      "rva": 86455640
     },
     {
       "dll": "crypt32.dll",
       "name": "CryptDecodeObjectEx",
-      "rva": 85325576
+      "rva": 86455648
     },
     {
       "dll": "crypt32.dll",
       "name": "CryptQueryObject",
-      "rva": 85325584
+      "rva": 86455656
     },
     {
       "dll": "crypt32.dll",
       "name": "CryptStringToBinaryW",
-      "rva": 85325592
+      "rva": 86455664
     },
     {
       "dll": "crypt32.dll",
       "name": "PFXImportCertStore",
-      "rva": 85325600
+      "rva": 86455672
     },
     {
       "dll": "bcrypt.dll",
       "name": "BCryptGenRandom",
-      "rva": 85325616
+      "rva": 86455688
     },
     {
       "dll": "secur32.dll",
       "name": "InitSecurityInterfaceW",
-      "rva": 85325632
+      "rva": 86455704
     },
     {
       "dll": "vcruntime140.dll",
       "name": "_CxxThrowException",
-      "rva": 85325648
+      "rva": 86455720
     },
     {
       "dll": "vcruntime140.dll",
       "name": "__C_specific_handler",
-      "rva": 85325656
+      "rva": 86455728
     },
     {
       "dll": "vcruntime140.dll",
       "name": "__CxxFrameHandler3",
-      "rva": 85325664
+      "rva": 86455736
     },
     {
       "dll": "vcruntime140.dll",
       "name": "__RTDynamicCast",
-      "rva": 85325672
+      "rva": 86455744
     },
     {
       "dll": "vcruntime140.dll",
       "name": "__RTtypeid",
-      "rva": 85325680
+      "rva": 86455752
     },
     {
       "dll": "vcruntime140.dll",
       "name": "__std_exception_copy",
-      "rva": 85325688
+      "rva": 86455760
     },
     {
       "dll": "vcruntime140.dll",
       "name": "__std_exception_destroy",
-      "rva": 85325696
+      "rva": 86455768
     },
     {
       "dll": "vcruntime140.dll",
       "name": "__std_terminate",
-      "rva": 85325704
+      "rva": 86455776
     },
     {
       "dll": "vcruntime140.dll",
       "name": "__std_type_info_compare",
-      "rva": 85325712
+      "rva": 86455784
     },
     {
       "dll": "vcruntime140.dll",
       "name": "__std_type_info_destroy_list",
-      "rva": 85325720
+      "rva": 86455792
     },
     {
       "dll": "vcruntime140.dll",
       "name": "__std_type_info_name",
-      "rva": 85325728
+      "rva": 86455800
     },
     {
       "dll": "vcruntime140.dll",
       "name": "_purecall",
-      "rva": 85325736
+      "rva": 86455808
     },
     {
       "dll": "vcruntime140.dll",
       "name": "memchr",
-      "rva": 85325744
+      "rva": 86455816
     },
     {
       "dll": "vcruntime140.dll",
       "name": "memcmp",
-      "rva": 85325752
+      "rva": 86455824
     },
     {
       "dll": "vcruntime140.dll",
       "name": "memcpy",
-      "rva": 85325760
+      "rva": 86455832
     },
     {
       "dll": "vcruntime140.dll",
       "name": "memmove",
-      "rva": 85325768
+      "rva": 86455840
     },
     {
       "dll": "vcruntime140.dll",
       "name": "memset",
-      "rva": 85325776
+      "rva": 86455848
     },
     {
       "dll": "vcruntime140.dll",
       "name": "strchr",
-      "rva": 85325784
+      "rva": 86455856
     },
     {
       "dll": "vcruntime140.dll",
       "name": "strrchr",
-      "rva": 85325792
+      "rva": 86455864
     },
     {
       "dll": "vcruntime140.dll",
       "name": "strstr",
-      "rva": 85325800
+      "rva": 86455872
     },
     {
       "dll": "vcruntime140.dll",
       "name": "wcschr",
-      "rva": 85325808
+      "rva": 86455880
     },
     {
       "dll": "vcruntime140.dll",
       "name": "wcsstr",
-      "rva": 85325816
+      "rva": 86455888
     },
     {
       "dll": "vcruntime140_1.dll",
       "name": "__CxxFrameHandler4",
-      "rva": 85325832
+      "rva": 86455904
     },
     {
       "dll": "api-ms-win-crt-locale-l1-1-0.dll",
       "name": "___lc_codepage_func",
-      "rva": 85325848
+      "rva": 86455920
     },
     {
       "dll": "api-ms-win-crt-locale-l1-1-0.dll",
       "name": "___lc_collate_cp_func",
-      "rva": 85325856
+      "rva": 86455928
     },
     {
       "dll": "api-ms-win-crt-locale-l1-1-0.dll",
       "name": "___lc_locale_name_func",
-      "rva": 85325864
+      "rva": 86455936
     },
     {
       "dll": "api-ms-win-crt-locale-l1-1-0.dll",
       "name": "setlocale",
-      "rva": 85325872
+      "rva": 86455944
     },
     {
       "dll": "api-ms-win-crt-stdio-l1-1-0.dll",
       "name": "__acrt_iob_func",
-      "rva": 85325888
+      "rva": 86455960
     },
     {
       "dll": "api-ms-win-crt-stdio-l1-1-0.dll",
       "name": "__stdio_common_vfprintf",
-      "rva": 85325896
+      "rva": 86455968
     },
     {
       "dll": "api-ms-win-crt-stdio-l1-1-0.dll",
       "name": "__stdio_common_vsprintf",
-      "rva": 85325904
+      "rva": 86455976
     },
     {
       "dll": "api-ms-win-crt-stdio-l1-1-0.dll",
       "name": "__stdio_common_vsprintf_s",
-      "rva": 85325912
+      "rva": 86455984
     },
     {
       "dll": "api-ms-win-crt-stdio-l1-1-0.dll",
       "name": "__stdio_common_vswprintf",
-      "rva": 85325920
+      "rva": 86455992
     },
     {
       "dll": "api-ms-win-crt-stdio-l1-1-0.dll",
       "name": "__stdio_common_vswprintf_s",
-      "rva": 85325928
+      "rva": 86456000
     },
     {
       "dll": "api-ms-win-crt-stdio-l1-1-0.dll",
       "name": "_close",
-      "rva": 85325936
+      "rva": 86456008
     },
     {
       "dll": "api-ms-win-crt-stdio-l1-1-0.dll",
       "name": "_fileno",
-      "rva": 85325944
+      "rva": 86456016
     },
     {
       "dll": "api-ms-win-crt-stdio-l1-1-0.dll",
       "name": "_fseeki64",
-      "rva": 85325952
+      "rva": 86456024
     },
     {
       "dll": "api-ms-win-crt-stdio-l1-1-0.dll",
       "name": "_ftelli64",
-      "rva": 85325960
+      "rva": 86456032
     },
     {
       "dll": "api-ms-win-crt-stdio-l1-1-0.dll",
       "name": "_get_stream_buffer_pointers",
-      "rva": 85325968
+      "rva": 86456040
     },
     {
       "dll": "api-ms-win-crt-stdio-l1-1-0.dll",
       "name": "_setmode",
-      "rva": 85325976
+      "rva": 86456048
     },
     {
       "dll": "api-ms-win-crt-stdio-l1-1-0.dll",
       "name": "_wfopen",
-      "rva": 85325984
+      "rva": 86456056
     },
     {
       "dll": "api-ms-win-crt-stdio-l1-1-0.dll",
       "name": "_wfsopen",
-      "rva": 85325992
+      "rva": 86456064
     },
     {
       "dll": "api-ms-win-crt-stdio-l1-1-0.dll",
       "name": "_wsopen_s",
-      "rva": 85326000
+      "rva": 86456072
     },
     {
       "dll": "api-ms-win-crt-stdio-l1-1-0.dll",
       "name": "fclose",
-      "rva": 85326008
+      "rva": 86456080
     },
     {
       "dll": "api-ms-win-crt-stdio-l1-1-0.dll",
       "name": "feof",
-      "rva": 85326016
+      "rva": 86456088
     },
     {
       "dll": "api-ms-win-crt-stdio-l1-1-0.dll",
       "name": "ferror",
-      "rva": 85326024
+      "rva": 86456096
     },
     {
       "dll": "api-ms-win-crt-stdio-l1-1-0.dll",
       "name": "fflush",
-      "rva": 85326032
+      "rva": 86456104
     },
     {
       "dll": "api-ms-win-crt-stdio-l1-1-0.dll",
       "name": "fgetc",
-      "rva": 85326040
+      "rva": 86456112
     },
     {
       "dll": "api-ms-win-crt-stdio-l1-1-0.dll",
       "name": "fgetpos",
-      "rva": 85326048
+      "rva": 86456120
     },
     {
       "dll": "api-ms-win-crt-stdio-l1-1-0.dll",
       "name": "fgets",
-      "rva": 85326056
+      "rva": 86456128
     },
     {
       "dll": "api-ms-win-crt-stdio-l1-1-0.dll",
       "name": "fopen",
-      "rva": 85326064
+      "rva": 86456136
     },
     {
       "dll": "api-ms-win-crt-stdio-l1-1-0.dll",
       "name": "fputc",
-      "rva": 85326072
+      "rva": 86456144
     },
     {
       "dll": "api-ms-win-crt-stdio-l1-1-0.dll",
       "name": "fputs",
-      "rva": 85326080
+      "rva": 86456152
     },
     {
       "dll": "api-ms-win-crt-stdio-l1-1-0.dll",
       "name": "fread",
-      "rva": 85326088
+      "rva": 86456160
     },
     {
       "dll": "api-ms-win-crt-stdio-l1-1-0.dll",
       "name": "fseek",
-      "rva": 85326096
+      "rva": 86456168
     },
     {
       "dll": "api-ms-win-crt-stdio-l1-1-0.dll",
       "name": "fsetpos",
-      "rva": 85326104
+      "rva": 86456176
     },
     {
       "dll": "api-ms-win-crt-stdio-l1-1-0.dll",
       "name": "ftell",
-      "rva": 85326112
+      "rva": 86456184
     },
     {
       "dll": "api-ms-win-crt-stdio-l1-1-0.dll",
       "name": "fwrite",
-      "rva": 85326120
+      "rva": 86456192
     },
     {
       "dll": "api-ms-win-crt-stdio-l1-1-0.dll",
       "name": "setvbuf",
-      "rva": 85326128
+      "rva": 86456200
     },
     {
       "dll": "api-ms-win-crt-stdio-l1-1-0.dll",
       "name": "ungetc",
-      "rva": 85326136
+      "rva": 86456208
     },
     {
       "dll": "api-ms-win-crt-heap-l1-1-0.dll",
       "name": "_aligned_free",
-      "rva": 85326152
+      "rva": 86456224
     },
     {
       "dll": "api-ms-win-crt-heap-l1-1-0.dll",
       "name": "_aligned_malloc",
-      "rva": 85326160
+      "rva": 86456232
     },
     {
       "dll": "api-ms-win-crt-heap-l1-1-0.dll",
       "name": "_callnewh",
-      "rva": 85326168
+      "rva": 86456240
     },
     {
       "dll": "api-ms-win-crt-heap-l1-1-0.dll",
       "name": "calloc",
-      "rva": 85326176
+      "rva": 86456248
     },
     {
       "dll": "api-ms-win-crt-heap-l1-1-0.dll",
       "name": "free",
-      "rva": 85326184
+      "rva": 86456256
     },
     {
       "dll": "api-ms-win-crt-heap-l1-1-0.dll",
       "name": "malloc",
-      "rva": 85326192
+      "rva": 86456264
     },
     {
       "dll": "api-ms-win-crt-heap-l1-1-0.dll",
       "name": "realloc",
-      "rva": 85326200
+      "rva": 86456272
     },
     {
       "dll": "api-ms-win-crt-runtime-l1-1-0.dll",
       "name": "_beginthreadex",
-      "rva": 85326216
+      "rva": 86456288
     },
     {
       "dll": "api-ms-win-crt-runtime-l1-1-0.dll",
       "name": "_cexit",
-      "rva": 85326224
+      "rva": 86456296
     },
     {
       "dll": "api-ms-win-crt-runtime-l1-1-0.dll",
       "name": "_configure_narrow_argv",
-      "rva": 85326232
+      "rva": 86456304
     },
     {
       "dll": "api-ms-win-crt-runtime-l1-1-0.dll",
       "name": "_crt_atexit",
-      "rva": 85326240
+      "rva": 86456312
     },
     {
       "dll": "api-ms-win-crt-runtime-l1-1-0.dll",
       "name": "_errno",
-      "rva": 85326248
+      "rva": 86456320
     },
     {
       "dll": "api-ms-win-crt-runtime-l1-1-0.dll",
       "name": "_execute_onexit_table",
-      "rva": 85326256
+      "rva": 86456328
     },
     {
       "dll": "api-ms-win-crt-runtime-l1-1-0.dll",
       "name": "_exit",
-      "rva": 85326264
+      "rva": 86456336
     },
     {
       "dll": "api-ms-win-crt-runtime-l1-1-0.dll",
       "name": "_initialize_narrow_environment",
-      "rva": 85326272
+      "rva": 86456344
     },
     {
       "dll": "api-ms-win-crt-runtime-l1-1-0.dll",
       "name": "_initialize_onexit_table",
-      "rva": 85326280
+      "rva": 86456352
     },
     {
       "dll": "api-ms-win-crt-runtime-l1-1-0.dll",
       "name": "_initterm",
-      "rva": 85326288
+      "rva": 86456360
     },
     {
       "dll": "api-ms-win-crt-runtime-l1-1-0.dll",
       "name": "_initterm_e",
-      "rva": 85326296
+      "rva": 86456368
     },
     {
       "dll": "api-ms-win-crt-runtime-l1-1-0.dll",
       "name": "_invalid_parameter_noinfo",
-      "rva": 85326304
+      "rva": 86456376
     },
     {
       "dll": "api-ms-win-crt-runtime-l1-1-0.dll",
       "name": "_register_onexit_function",
-      "rva": 85326312
+      "rva": 86456384
     },
     {
       "dll": "api-ms-win-crt-runtime-l1-1-0.dll",
       "name": "_seh_filter_dll",
-      "rva": 85326320
+      "rva": 86456392
     },
     {
       "dll": "api-ms-win-crt-runtime-l1-1-0.dll",
       "name": "abort",
-      "rva": 85326328
+      "rva": 86456400
     },
     {
       "dll": "api-ms-win-crt-runtime-l1-1-0.dll",
       "name": "raise",
-      "rva": 85326336
+      "rva": 86456408
     },
     {
       "dll": "api-ms-win-crt-runtime-l1-1-0.dll",
       "name": "signal",
-      "rva": 85326344
+      "rva": 86456416
     },
     {
       "dll": "api-ms-win-crt-runtime-l1-1-0.dll",
       "name": "strerror_s",
-      "rva": 85326352
+      "rva": 86456424
     },
     {
       "dll": "api-ms-win-crt-math-l1-1-0.dll",
       "name": "_fdopen",
-      "rva": 85326368
+      "rva": 86456440
     },
     {
       "dll": "api-ms-win-crt-math-l1-1-0.dll",
       "name": "_fdsign",
-      "rva": 85326376
+      "rva": 86456448
     },
     {
       "dll": "api-ms-win-crt-math-l1-1-0.dll",
       "name": "acosf",
-      "rva": 85326384
+      "rva": 86456456
     },
     {
       "dll": "api-ms-win-crt-math-l1-1-0.dll",
       "name": "asinf",
-      "rva": 85326392
+      "rva": 86456464
     },
     {
       "dll": "api-ms-win-crt-math-l1-1-0.dll",
       "name": "atan2f",
-      "rva": 85326400
+      "rva": 86456472
     },
     {
       "dll": "api-ms-win-crt-math-l1-1-0.dll",
       "name": "cos",
-      "rva": 85326408
+      "rva": 86456480
     },
     {
       "dll": "api-ms-win-crt-math-l1-1-0.dll",
       "name": "cosf",
-      "rva": 85326416
+      "rva": 86456488
     },
     {
       "dll": "api-ms-win-crt-math-l1-1-0.dll",
       "name": "exp",
-      "rva": 85326424
+      "rva": 86456496
     },
     {
       "dll": "api-ms-win-crt-math-l1-1-0.dll",
       "name": "exp2",
-      "rva": 85326432
+      "rva": 86456504
     },
     {
       "dll": "api-ms-win-crt-math-l1-1-0.dll",
       "name": "expf",
-      "rva": 85326440
+      "rva": 86456512
+    },
+    {
+      "dll": "api-ms-win-crt-math-l1-1-0.dll",
+      "name": "fmod",
+      "rva": 86456520
     },
     {
       "dll": "api-ms-win-crt-math-l1-1-0.dll",
       "name": "fmodf",
-      "rva": 85326448
+      "rva": 86456528
     },
     {
       "dll": "api-ms-win-crt-math-l1-1-0.dll",
       "name": "ilogbf",
-      "rva": 85326456
+      "rva": 86456536
     },
     {
       "dll": "api-ms-win-crt-math-l1-1-0.dll",
       "name": "ldexp",
-      "rva": 85326464
+      "rva": 86456544
     },
     {
       "dll": "api-ms-win-crt-math-l1-1-0.dll",
       "name": "lgamma",
-      "rva": 85326472
+      "rva": 86456552
     },
     {
       "dll": "api-ms-win-crt-math-l1-1-0.dll",
       "name": "llround",
-      "rva": 85326480
+      "rva": 86456560
     },
     {
       "dll": "api-ms-win-crt-math-l1-1-0.dll",
       "name": "log",
-      "rva": 85326488
+      "rva": 86456568
     },
     {
       "dll": "api-ms-win-crt-math-l1-1-0.dll",
       "name": "log10",
-      "rva": 85326496
+      "rva": 86456576
     },
     {
       "dll": "api-ms-win-crt-math-l1-1-0.dll",
       "name": "logf",
-      "rva": 85326504
+      "rva": 86456584
     },
     {
       "dll": "api-ms-win-crt-math-l1-1-0.dll",
       "name": "lroundf",
-      "rva": 85326512
+      "rva": 86456592
     },
     {
       "dll": "api-ms-win-crt-math-l1-1-0.dll",
       "name": "modff",
-      "rva": 85326520
+      "rva": 86456600
     },
     {
       "dll": "api-ms-win-crt-math-l1-1-0.dll",
       "name": "pow",
-      "rva": 85326528
+      "rva": 86456608
     },
     {
       "dll": "api-ms-win-crt-math-l1-1-0.dll",
       "name": "powf",
-      "rva": 85326536
+      "rva": 86456616
     },
     {
       "dll": "api-ms-win-crt-math-l1-1-0.dll",
       "name": "scalbnf",
-      "rva": 85326544
+      "rva": 86456624
     },
     {
       "dll": "api-ms-win-crt-math-l1-1-0.dll",
       "name": "sin",
-      "rva": 85326552
+      "rva": 86456632
     },
     {
       "dll": "api-ms-win-crt-math-l1-1-0.dll",
       "name": "sinf",
-      "rva": 85326560
+      "rva": 86456640
     },
     {
       "dll": "api-ms-win-crt-math-l1-1-0.dll",
       "name": "tan",
-      "rva": 85326568
+      "rva": 86456648
     },
     {
       "dll": "api-ms-win-crt-filesystem-l1-1-0.dll",
       "name": "_fstat64",
-      "rva": 85326584
+      "rva": 86456664
     },
     {
       "dll": "api-ms-win-crt-filesystem-l1-1-0.dll",
       "name": "_fullpath",
-      "rva": 85326592
+      "rva": 86456672
     },
     {
       "dll": "api-ms-win-crt-filesystem-l1-1-0.dll",
       "name": "_lock_file",
-      "rva": 85326600
+      "rva": 86456680
     },
     {
       "dll": "api-ms-win-crt-filesystem-l1-1-0.dll",
       "name": "_stat64",
-      "rva": 85326608
+      "rva": 86456688
     },
     {
       "dll": "api-ms-win-crt-filesystem-l1-1-0.dll",
       "name": "_stat64i32",
-      "rva": 85326616
+      "rva": 86456696
     },
     {
       "dll": "api-ms-win-crt-filesystem-l1-1-0.dll",
       "name": "_unlink",
-      "rva": 85326624
+      "rva": 86456704
     },
     {
       "dll": "api-ms-win-crt-filesystem-l1-1-0.dll",
       "name": "_unlock_file",
-      "rva": 85326632
+      "rva": 86456712
     },
     {
       "dll": "api-ms-win-crt-filesystem-l1-1-0.dll",
       "name": "_wsplitpath_s",
-      "rva": 85326640
+      "rva": 86456720
     },
     {
       "dll": "api-ms-win-crt-filesystem-l1-1-0.dll",
       "name": "_wstat64",
-      "rva": 85326648
+      "rva": 86456728
     },
     {
       "dll": "api-ms-win-crt-filesystem-l1-1-0.dll",
       "name": "rename",
-      "rva": 85326656
+      "rva": 86456736
     },
     {
       "dll": "api-ms-win-crt-time-l1-1-0.dll",
       "name": "_gmtime64_s",
-      "rva": 85326672
+      "rva": 86456752
     },
     {
       "dll": "api-ms-win-crt-time-l1-1-0.dll",
       "name": "_localtime64",
-      "rva": 85326680
+      "rva": 86456760
     },
     {
       "dll": "api-ms-win-crt-time-l1-1-0.dll",
       "name": "_time64",
-      "rva": 85326688
+      "rva": 86456768
     },
     {
       "dll": "api-ms-win-crt-time-l1-1-0.dll",
       "name": "strftime",
-      "rva": 85326696
+      "rva": 86456776
     },
     {
       "dll": "api-ms-win-crt-string-l1-1-0.dll",
       "name": "_strdup",
-      "rva": 85326712
+      "rva": 86456792
     },
     {
       "dll": "api-ms-win-crt-string-l1-1-0.dll",
       "name": "isdigit",
-      "rva": 85326720
+      "rva": 86456800
     },
     {
       "dll": "api-ms-win-crt-string-l1-1-0.dll",
       "name": "isspace",
-      "rva": 85326728
+      "rva": 86456808
     },
     {
       "dll": "api-ms-win-crt-string-l1-1-0.dll",
       "name": "strcat_s",
-      "rva": 85326736
+      "rva": 86456816
     },
     {
       "dll": "api-ms-win-crt-string-l1-1-0.dll",
       "name": "strcmp",
-      "rva": 85326744
+      "rva": 86456824
     },
     {
       "dll": "api-ms-win-crt-string-l1-1-0.dll",
       "name": "strcpy",
-      "rva": 85326752
+      "rva": 86456832
     },
     {
       "dll": "api-ms-win-crt-string-l1-1-0.dll",
       "name": "strcpy_s",
-      "rva": 85326760
+      "rva": 86456840
     },
     {
       "dll": "api-ms-win-crt-string-l1-1-0.dll",
       "name": "strcspn",
-      "rva": 85326768
+      "rva": 86456848
     },
     {
       "dll": "api-ms-win-crt-string-l1-1-0.dll",
       "name": "strlen",
-      "rva": 85326776
+      "rva": 86456856
     },
     {
       "dll": "api-ms-win-crt-string-l1-1-0.dll",
       "name": "strncmp",
-      "rva": 85326784
+      "rva": 86456864
     },
     {
       "dll": "api-ms-win-crt-string-l1-1-0.dll",
       "name": "strncpy",
-      "rva": 85326792
+      "rva": 86456872
     },
     {
       "dll": "api-ms-win-crt-string-l1-1-0.dll",
       "name": "strncpy_s",
-      "rva": 85326800
+      "rva": 86456880
     },
     {
       "dll": "api-ms-win-crt-string-l1-1-0.dll",
       "name": "strspn",
-      "rva": 85326808
+      "rva": 86456888
     },
     {
       "dll": "api-ms-win-crt-string-l1-1-0.dll",
       "name": "tolower",
-      "rva": 85326816
+      "rva": 86456896
     },
     {
       "dll": "api-ms-win-crt-string-l1-1-0.dll",
       "name": "wcscmp",
-      "rva": 85326824
+      "rva": 86456904
     },
     {
       "dll": "api-ms-win-crt-string-l1-1-0.dll",
       "name": "wcscpy_s",
-      "rva": 85326832
+      "rva": 86456912
     },
     {
       "dll": "api-ms-win-crt-string-l1-1-0.dll",
       "name": "wcslen",
-      "rva": 85326840
+      "rva": 86456920
     },
     {
       "dll": "api-ms-win-crt-string-l1-1-0.dll",
       "name": "wcsncmp",
-      "rva": 85326848
+      "rva": 86456928
     },
     {
       "dll": "api-ms-win-crt-string-l1-1-0.dll",
       "name": "wcsncpy",
-      "rva": 85326856
+      "rva": 86456936
     },
     {
       "dll": "api-ms-win-crt-string-l1-1-0.dll",
       "name": "wcsncpy_s",
-      "rva": 85326864
+      "rva": 86456944
     },
     {
       "dll": "api-ms-win-crt-environment-l1-1-0.dll",
       "name": "_wgetcwd",
-      "rva": 85326880
+      "rva": 86456960
     },
     {
       "dll": "api-ms-win-crt-environment-l1-1-0.dll",
       "name": "getenv",
-      "rva": 85326888
+      "rva": 86456968
     },
     {
       "dll": "api-ms-win-crt-convert-l1-1-0.dll",
       "name": "atoi",
-      "rva": 85326904
+      "rva": 86456984
     },
     {
       "dll": "api-ms-win-crt-convert-l1-1-0.dll",
       "name": "strtod",
-      "rva": 85326912
+      "rva": 86456992
     },
     {
       "dll": "api-ms-win-crt-convert-l1-1-0.dll",
       "name": "strtol",
-      "rva": 85326920
+      "rva": 86457000
     },
     {
       "dll": "api-ms-win-crt-convert-l1-1-0.dll",
       "name": "strtoll",
-      "rva": 85326928
+      "rva": 86457008
     },
     {
       "dll": "api-ms-win-crt-convert-l1-1-0.dll",
       "name": "strtoul",
-      "rva": 85326936
+      "rva": 86457016
     },
     {
       "dll": "api-ms-win-crt-convert-l1-1-0.dll",
       "name": "strtoull",
-      "rva": 85326944
+      "rva": 86457024
     },
     {
       "dll": "api-ms-win-crt-utility-l1-1-0.dll",
       "name": "bsearch",
-      "rva": 85326960
+      "rva": 86457040
     },
     {
       "dll": "api-ms-win-crt-utility-l1-1-0.dll",
       "name": "div",
-      "rva": 85326968
+      "rva": 86457048
     },
     {
       "dll": "api-ms-win-crt-utility-l1-1-0.dll",
       "name": "qsort",
-      "rva": 85326976
+      "rva": 86457056
     },
     {
       "dll": "api-ms-win-crt-utility-l1-1-0.dll",
       "name": "rand_s",
-      "rva": 85326984
+      "rva": 86457064
     },
     {
       "dll": "advapi32.dll",
       "name": "CryptAcquireContextA",
-      "rva": 401539072
+      "rva": 395915264
     },
     {
       "dll": "advapi32.dll",
       "name": "GetUserNameW",
-      "rva": 401539080
+      "rva": 395915272
     },
     {
       "dll": "gdi32.dll",
       "name": "CreateFontIndirectW",
-      "rva": 401539088
+      "rva": 395915280
     },
     {
       "dll": "gdi32.dll",
       "name": "DeleteObject",
-      "rva": 401539096
+      "rva": 395915288
     },
     {
       "dll": "gdi32.dll",
       "name": "GetObjectW",
-      "rva": 401539104
+      "rva": 395915296
     },
     {
       "dll": "gdi32.dll",
       "name": "GetStockObject",
-      "rva": 401539112
+      "rva": 395915304
     },
     {
       "dll": "gdi32.dll",
       "name": "GetTextExtentPoint32W",
-      "rva": 401539120
+      "rva": 395915312
     },
     {
       "dll": "gdi32.dll",
       "name": "SelectObject",
-      "rva": 401539128
+      "rva": 395915320
     },
     {
       "dll": "gdi32.dll",
       "name": "SetBkMode",
-      "rva": 401539136
+      "rva": 395915328
     },
     {
       "dll": "gdi32.dll",
       "name": "SetTextColor",
-      "rva": 401539144
+      "rva": 395915336
     },
     {
       "dll": "kernel32.dll",
       "name": "CreateToolhelp32Snapshot",
-      "rva": 401539152
+      "rva": 395915344
     },
     {
       "dll": "kernel32.dll",
       "name": "ExitProcess",
-      "rva": 401539160
+      "rva": 395915352
     },
     {
       "dll": "kernel32.dll",
       "name": "ExpandEnvironmentStringsA",
-      "rva": 401539168
+      "rva": 395915360
     },
     {
       "dll": "kernel32.dll",
       "name": "FlushViewOfFile",
-      "rva": 401539176
+      "rva": 395915368
     },
     {
       "dll": "kernel32.dll",
       "name": "FormatMessageW",
-      "rva": 401539184
+      "rva": 395915376
     },
     {
       "dll": "kernel32.dll",
       "name": "FreeEnvironmentStringsA",
-      "rva": 401539192
+      "rva": 395915384
     },
     {
       "dll": "kernel32.dll",
       "name": "FreeEnvironmentStringsW",
-      "rva": 401539200
+      "rva": 395915392
     },
     {
       "dll": "kernel32.dll",
       "name": "GetCommandLineW",
-      "rva": 401539208
+      "rva": 395915400
     },
     {
       "dll": "kernel32.dll",
       "name": "GetEnvironmentStrings",
-      "rva": 401539216
+      "rva": 395915408
     },
     {
       "dll": "kernel32.dll",
       "name": "GetEnvironmentStringsW",
-      "rva": 401539224
+      "rva": 395915416
     },
     {
       "dll": "kernel32.dll",
       "name": "GetFileAttributesA",
-      "rva": 401539232
+      "rva": 395915424
     },
     {
       "dll": "kernel32.dll",
       "name": "GetFileSize",
-      "rva": 401539240
+      "rva": 395915432
     },
     {
       "dll": "kernel32.dll",
       "name": "GetLocalTime",
-      "rva": 401539248
+      "rva": 395915440
     },
     {
       "dll": "kernel32.dll",
       "name": "GetProcessHeap",
-      "rva": 401539256
+      "rva": 395915448
     },
     {
       "dll": "kernel32.dll",
       "name": "GetSystemDirectoryW",
-      "rva": 401539264
+      "rva": 395915456
     },
     {
       "dll": "kernel32.dll",
       "name": "GetUserDefaultUILanguage",
-      "rva": 401539272
+      "rva": 395915464
     },
     {
       "dll": "kernel32.dll",
       "name": "GetUserPreferredUILanguages",
-      "rva": 401539280
+      "rva": 395915472
     },
     {
       "dll": "kernel32.dll",
       "name": "GetWindowsDirectoryW",
-      "rva": 401539288
+      "rva": 395915480
     },
     {
       "dll": "kernel32.dll",
       "name": "GlobalAlloc",
-      "rva": 401539296
+      "rva": 395915488
     },
     {
       "dll": "kernel32.dll",
       "name": "GlobalFree",
-      "rva": 401539304
+      "rva": 395915496
     },
     {
       "dll": "kernel32.dll",
       "name": "GlobalLock",
-      "rva": 401539312
+      "rva": 395915504
     },
     {
       "dll": "kernel32.dll",
       "name": "GlobalUnlock",
-      "rva": 401539320
+      "rva": 395915512
     },
     {
       "dll": "kernel32.dll",
       "name": "HeapAlloc",
-      "rva": 401539328
+      "rva": 395915520
     },
     {
       "dll": "kernel32.dll",
       "name": "HeapFree",
-      "rva": 401539336
+      "rva": 395915528
     },
     {
       "dll": "kernel32.dll",
       "name": "LoadLibraryExW",
-      "rva": 401539344
+      "rva": 395915536
     },
     {
       "dll": "kernel32.dll",
       "name": "LocalAlloc",
-      "rva": 401539352
+      "rva": 395915544
     },
     {
       "dll": "kernel32.dll",
       "name": "OpenThread",
-      "rva": 401539360
+      "rva": 395915552
     },
     {
       "dll": "kernel32.dll",
       "name": "RegCloseKey",
-      "rva": 401539368
+      "rva": 395915560
     },
     {
       "dll": "kernel32.dll",
       "name": "RegOpenKeyExA",
-      "rva": 401539376
+      "rva": 395915568
     },
     {
       "dll": "kernel32.dll",
       "name": "RegQueryValueExA",
-      "rva": 401539384
+      "rva": 395915576
     },
     {
       "dll": "kernel32.dll",
       "name": "Thread32First",
-      "rva": 401539392
+      "rva": 395915584
     },
     {
       "dll": "kernel32.dll",
       "name": "Thread32Next",
-      "rva": 401539400
+      "rva": 395915592
     },
     {
       "dll": "kernel32.dll",
       "name": "WriteConsoleA",
-      "rva": 401539408
+      "rva": 395915600
     },
     {
       "dll": "ntdll.dll",
       "name": "NtClose",
-      "rva": 401539416
+      "rva": 395915608
     },
     {
       "dll": "ntdll.dll",
       "name": "NtCreateSection",
-      "rva": 401539424
-    },
-    {
-      "dll": "ntdll.dll",
-      "name": "NtGetContextThread",
-      "rva": 401539432
+      "rva": 395915616
     },
     {
       "dll": "ntdll.dll",
       "name": "NtMapViewOfSection",
-      "rva": 401539440
+      "rva": 395915624
     },
     {
       "dll": "ntdll.dll",
       "name": "NtProtectVirtualMemory",
-      "rva": 401539448
+      "rva": 395915632
     },
     {
       "dll": "ntdll.dll",
       "name": "NtQueryInformationThread",
-      "rva": 401539456
+      "rva": 395915640
     },
     {
       "dll": "ntdll.dll",
       "name": "NtQuerySystemInformation",
-      "rva": 401539464
+      "rva": 395915648
     },
     {
       "dll": "ntdll.dll",
       "name": "NtQuerySystemInformationEx",
-      "rva": 401539472
-    },
-    {
-      "dll": "ntdll.dll",
-      "name": "NtReadFile",
-      "rva": 401539480
+      "rva": 395915656
     },
     {
       "dll": "ntdll.dll",
       "name": "NtReadVirtualMemory",
-      "rva": 401539488
-    },
-    {
-      "dll": "ntdll.dll",
-      "name": "NtSuspendThread",
-      "rva": 401539496
-    },
-    {
-      "dll": "ntdll.dll",
-      "name": "NtTerminateThread",
-      "rva": 401539504
+      "rva": 395915664
     },
     {
       "dll": "ntdll.dll",
       "name": "NtUnmapViewOfSection",
-      "rva": 401539512
+      "rva": 395915672
     },
     {
       "dll": "shell32.dll",
       "name": "CommandLineToArgvW",
-      "rva": 401539520
+      "rva": 395915680
     },
     {
       "dll": "shell32.dll",
       "name": "SHGetFolderPathW",
-      "rva": 401539528
+      "rva": 395915688
     },
     {
       "dll": "shlwapi.dll",
       "name": "PathFileExistsW",
-      "rva": 401539536
+      "rva": 395915696
     },
     {
       "dll": "tbs.dll",
       "name": "Tbsip_Submit_Command",
-      "rva": 401539544
+      "rva": 395915704
     },
     {
       "dll": "user32.dll",
       "name": "AdjustWindowRectEx",
-      "rva": 401539552
+      "rva": 395915712
     },
     {
       "dll": "user32.dll",
       "name": "AppendMenuW",
-      "rva": 401539560
+      "rva": 395915720
     },
     {
       "dll": "user32.dll",
       "name": "CallWindowProcW",
-      "rva": 401539568
+      "rva": 395915728
     },
     {
       "dll": "user32.dll",
       "name": "ClientToScreen",
-      "rva": 401539576
+      "rva": 395915736
     },
     {
       "dll": "user32.dll",
       "name": "CloseClipboard",
-      "rva": 401539584
+      "rva": 395915744
     },
     {
       "dll": "user32.dll",
       "name": "CreatePopupMenu",
-      "rva": 401539592
+      "rva": 395915752
     },
     {
       "dll": "user32.dll",
       "name": "CreateWindowExW",
-      "rva": 401539600
+      "rva": 395915760
     },
     {
       "dll": "user32.dll",
       "name": "DefWindowProcW",
-      "rva": 401539608
+      "rva": 395915768
     },
     {
       "dll": "user32.dll",
       "name": "DestroyMenu",
-      "rva": 401539616
+      "rva": 395915776
     },
     {
       "dll": "user32.dll",
       "name": "DestroyWindow",
-      "rva": 401539624
+      "rva": 395915784
     },
     {
       "dll": "user32.dll",
       "name": "DispatchMessageW",
-      "rva": 401539632
+      "rva": 395915792
     },
     {
       "dll": "user32.dll",
       "name": "DrawTextW",
-      "rva": 401539640
+      "rva": 395915800
     },
     {
       "dll": "user32.dll",
       "name": "EmptyClipboard",
-      "rva": 401539648
+      "rva": 395915808
     },
     {
       "dll": "user32.dll",
       "name": "EnableWindow",
-      "rva": 401539656
+      "rva": 395915816
     },
     {
       "dll": "user32.dll",
       "name": "GetClassLongPtrW",
-      "rva": 401539664
+      "rva": 395915824
     },
     {
       "dll": "user32.dll",
       "name": "GetClipboardData",
-      "rva": 401539672
+      "rva": 395915832
     },
     {
       "dll": "user32.dll",
       "name": "GetDC",
-      "rva": 401539680
+      "rva": 395915840
     },
     {
       "dll": "user32.dll",
       "name": "GetDesktopWindow",
-      "rva": 401539688
+      "rva": 395915848
     },
     {
       "dll": "user32.dll",
       "name": "GetDlgItem",
-      "rva": 401539696
+      "rva": 395915856
     },
     {
       "dll": "user32.dll",
       "name": "GetMessageW",
-      "rva": 401539704
+      "rva": 395915864
     },
     {
       "dll": "user32.dll",
       "name": "GetSysColorBrush",
-      "rva": 401539712
+      "rva": 395915872
     },
     {
       "dll": "user32.dll",
       "name": "GetWindowLongPtrW",
-      "rva": 401539720
+      "rva": 395915880
     },
     {
       "dll": "user32.dll",
       "name": "GetWindowRect",
-      "rva": 401539728
+      "rva": 395915888
     },
     {
       "dll": "user32.dll",
       "name": "GetWindowTextLengthW",
-      "rva": 401539736
+      "rva": 395915896
     },
     {
       "dll": "user32.dll",
       "name": "GetWindowTextW",
-      "rva": 401539744
+      "rva": 395915904
     },
     {
       "dll": "user32.dll",
       "name": "LoadCursorA",
-      "rva": 401539752
+      "rva": 395915912
     },
     {
       "dll": "user32.dll",
       "name": "LoadIconA",
-      "rva": 401539760
+      "rva": 395915920
     },
     {
       "dll": "user32.dll",
       "name": "MessageBoxA",
-      "rva": 401539768
+      "rva": 395915928
     },
     {
       "dll": "user32.dll",
       "name": "OpenClipboard",
-      "rva": 401539776
+      "rva": 395915936
     },
     {
       "dll": "user32.dll",
       "name": "PostQuitMessage",
-      "rva": 401539784
+      "rva": 395915944
     },
     {
       "dll": "user32.dll",
       "name": "RegisterClassExW",
-      "rva": 401539792
+      "rva": 395915952
     },
     {
       "dll": "user32.dll",
       "name": "ReleaseDC",
-      "rva": 401539800
+      "rva": 395915960
     },
     {
       "dll": "user32.dll",
       "name": "SendMessageW",
-      "rva": 401539808
+      "rva": 395915968
     },
     {
       "dll": "user32.dll",
       "name": "SetClipboardData",
-      "rva": 401539816
+      "rva": 395915976
     },
     {
       "dll": "user32.dll",
       "name": "SetCursor",
-      "rva": 401539824
+      "rva": 395915984
     },
     {
       "dll": "user32.dll",
       "name": "SetWindowLongPtrW",
-      "rva": 401539832
+      "rva": 395915992
     },
     {
       "dll": "user32.dll",
       "name": "SetWindowTextA",
-      "rva": 401539840
+      "rva": 395916000
     },
     {
       "dll": "user32.dll",
       "name": "TrackMouseEvent",
-      "rva": 401539848
+      "rva": 395916008
     },
     {
       "dll": "user32.dll",
       "name": "TrackPopupMenu",
-      "rva": 401539856
+      "rva": 395916016
     },
     {
       "dll": "user32.dll",
       "name": "TranslateMessage",
-      "rva": 401539864
+      "rva": 395916024
     },
     {
       "dll": "user32.dll",
       "name": "UnregisterClassW",
-      "rva": 401539872
+      "rva": 395916032
     },
     {
       "dll": "wininet.dll",
       "name": "HttpOpenRequestA",
-      "rva": 401539880
+      "rva": 395916040
     },
     {
       "dll": "wininet.dll",
       "name": "HttpQueryInfoA",
-      "rva": 401539888
+      "rva": 395916048
     },
     {
       "dll": "wininet.dll",
       "name": "HttpSendRequestA",
-      "rva": 401539896
+      "rva": 395916056
     },
     {
       "dll": "wininet.dll",
       "name": "InternetCloseHandle",
-      "rva": 401539904
+      "rva": 395916064
     },
     {
       "dll": "wininet.dll",
       "name": "InternetConnectA",
-      "rva": 401539912
+      "rva": 395916072
     },
     {
       "dll": "wininet.dll",
       "name": "InternetOpenA",
-      "rva": 401539920
+      "rva": 395916080
     },
     {
       "dll": "wininet.dll",
       "name": "InternetReadFile",
-      "rva": 401539928
+      "rva": 395916088
     },
     {
       "dll": "ws2_32.dll",
       "name": "#115",
-      "rva": 401539936
+      "rva": 395916096
     },
     {
       "dll": "ws2_32.dll",
       "name": "#116",
-      "rva": 401539944
+      "rva": 395916104
     }
   ],
   "ranges": [
     {
-      "rva": 329824,
-      "purpose": "adapter-referenced native code",
-      "size": 15146,
-      "sha256": "0f136f1dd9232186f9f822519cd21a77b0fe1b61dffdba8dc95c8c56bcec57cc"
+      "rva": 19760,
+      "purpose": "formal adapter native interface",
+      "size": 1264,
+      "sha256": "902f83b05d2573b74787d3ca7f26f635e632c97e96a093db5360116ab1ae689a"
     },
     {
-      "rva": 538160,
-      "purpose": "adapter-referenced native code",
-      "size": 1744,
-      "sha256": "1f21e944cd860bf508f62e76d8f7b5e1f76c0171bfcdef8f4474846c936cb061"
+      "rva": 161600,
+      "purpose": "formal adapter native interface",
+      "size": 33,
+      "sha256": "87fb3a57b9d8b967dc2d72ae67d6bc39b67ef9fe47e51ac2e70a82401f375b3f"
     },
     {
-      "rva": 578880,
-      "purpose": "adapter-referenced native code",
-      "size": 64,
-      "sha256": "590ef04e91921095d65f35f33eb19f5750ba119f9784806b024a210ae7670b55"
+      "rva": 288176,
+      "purpose": "formal adapter native interface",
+      "size": 22014,
+      "sha256": "eca994daeede5099bd3c4c0a7abb78ff902fd9719b01079ffef71afc606f451a"
     },
     {
-      "rva": 746544,
-      "purpose": "adapter-referenced native code",
-      "size": 186,
-      "sha256": "0214bcfcf3eecf16e89951e984b6735a23c51b1274e0aabe180c5afd12101d77"
+      "rva": 431392,
+      "purpose": "formal adapter native interface",
+      "size": 253,
+      "sha256": "33ef3b18db14ced800d8aed88bb9515d76dc45444dec3fbf28dd81f2acc7fd3c"
     },
     {
-      "rva": 767408,
-      "purpose": "adapter-referenced native code",
-      "size": 64,
-      "sha256": "f5ea9065745ff7585fc5982d3baa8454b9cefd25193450a8aaf53446d6d6207d"
+      "rva": 435056,
+      "purpose": "formal adapter native interface",
+      "size": 5,
+      "sha256": "b652858e5376e5f6fa0e1652bdf6ac39e08a707670c720f254cebf9ad4ab5f75"
     },
     {
-      "rva": 934880,
-      "purpose": "adapter-referenced native code",
+      "rva": 463728,
+      "purpose": "formal adapter native interface",
+      "size": 1472,
+      "sha256": "852984ef0e8af6be79d9d9fa32f813c5e6238062c9ae4df7458a1a906eef59ac"
+    },
+    {
+      "rva": 555904,
+      "purpose": "formal adapter native interface",
       "size": 736,
-      "sha256": "5dd7a0545a37dfd881a90423739ca38b344b84e82fb47d11d85a8727b5a6b9d1"
+      "sha256": "771873edcb130cff0a77c5e1f2d3d5d8f98d0c73f1683548cc351e708320cb72"
     },
     {
-      "rva": 950512,
-      "purpose": "adapter-referenced native code",
+      "rva": 570672,
+      "purpose": "formal adapter native interface",
       "size": 387,
-      "sha256": "e9513c0e1365856e7d9ef35d0227d2303e03ddabc6acdfcdd48e0815f497ae8d"
+      "sha256": "c113e8d127afc732349adb844b884a26af0884d4eba8c61cc3d40cee8da04fac"
     },
     {
-      "rva": 959888,
-      "purpose": "adapter-referenced native code",
-      "size": 64,
-      "sha256": "af32af5df157ee1989415e6748232a1c972f9d706a75fe4497961d68251b7a10"
+      "rva": 580160,
+      "purpose": "formal adapter native interface",
+      "size": 28,
+      "sha256": "8f20b60245a1f4972db3c06bbd4c58321e4e896c540cd587e9b4a3f758739b85"
     },
     {
-      "rva": 1194960,
-      "purpose": "adapter-referenced native code",
-      "size": 377,
-      "sha256": "27e08b194b74a0f8bf607571721f8eb0c9553154839b967712135a527500976c"
+      "rva": 787408,
+      "purpose": "formal adapter native interface",
+      "size": 186,
+      "sha256": "5d4cec42c6385d84a6be54d88981f08344c6897b25c51d91697a2624d150d5e8"
     },
     {
-      "rva": 1266992,
-      "purpose": "adapter-referenced native code",
-      "size": 430,
-      "sha256": "ac90c981dc74953d28b449554fd13194ae51abbd7772ec0c06e18109ba988803"
+      "rva": 799264,
+      "purpose": "formal adapter native interface",
+      "size": 195,
+      "sha256": "404639f9a9f059bcc2abccbebe310a79c363388a72f0b2d668556f699e2ab668"
     },
     {
-      "rva": 1418112,
-      "purpose": "adapter-referenced native code",
-      "size": 41,
-      "sha256": "accc5f9776ab280eb8a49eddf223b4f495229f2e8d6d57675bb70c1c40b9c71d"
-    },
-    {
-      "rva": 1418160,
-      "purpose": "adapter-referenced native code",
-      "size": 64,
-      "sha256": "298690ab58b6de43ca77f3eeef7b16b066ddbb96db026071ef5177087044a300"
-    },
-    {
-      "rva": 1418816,
-      "purpose": "adapter-referenced native code",
+      "rva": 1190016,
+      "purpose": "formal adapter native interface",
       "size": 178,
-      "sha256": "aa7586125f1fc63ef958187de2eb5d3a963660bbc4d4d6891cf482fc20fc108c"
+      "sha256": "853bd54be6856342029a523be91e6557833f1d641f06caedd8f9a496b5c8f426"
     },
     {
-      "rva": 1441104,
-      "purpose": "adapter-referenced native code",
-      "size": 759,
-      "sha256": "806bcba23e27f5165a821641062d6aa284cb82082a9df810d2fcd84d8ddefd7d"
+      "rva": 1205936,
+      "purpose": "formal adapter native interface",
+      "size": 41,
+      "sha256": "47a494c5074ae7d986a7423990c5d613edf671800e77e312bd32d56494319186"
     },
     {
-      "rva": 1590272,
-      "purpose": "adapter-referenced native code",
+      "rva": 1206784,
+      "purpose": "formal adapter native interface",
+      "size": 5,
+      "sha256": "858c3f24d2a92800608092deda76db1fc83b5ce993c106317275859275a1d9a5"
+    },
+    {
+      "rva": 1212864,
+      "purpose": "formal adapter native interface",
+      "size": 357,
+      "sha256": "015f82e025cb8c237c3dcf53def36c3c881a929e294f2e3b9eb5b1097f291893"
+    },
+    {
+      "rva": 1344736,
+      "purpose": "formal adapter native interface",
+      "size": 744,
+      "sha256": "853915e70ae1c988f03e6ec5bf8d45d7fddc655e4b0517e4f54654dbe293e200"
+    },
+    {
+      "rva": 1429632,
+      "purpose": "formal adapter native interface",
       "size": 1470,
-      "sha256": "3df9ba8f7dfa37303b80029e9f2bbb474c27a8e05ac283ced2b31a5f1abeeaf0"
+      "sha256": "e29f93e3dc739d02caa1b4ccaa8201c2c1f61dd63684e61f172ff8d7bc06b8a2"
     },
     {
-      "rva": 1596000,
-      "purpose": "adapter-referenced native code",
-      "size": 20732,
-      "sha256": "5a04446ba88627753904f9963dbca608694cb759e5b60b658344bb3ae3632321"
+      "rva": 1449248,
+      "purpose": "formal adapter native interface",
+      "size": 1629,
+      "sha256": "d148599918450f8981129b103c989e8df16d985721739bba1ddc1c8d1cf2b3f3"
     },
     {
-      "rva": 6618768,
-      "purpose": "adapter-referenced native code",
-      "size": 64,
-      "sha256": "e39e196c28b95a7819f8eb2cf5b492007cbf4098a4032bec760e86e34b16d4a7"
+      "rva": 1618048,
+      "purpose": "formal adapter native interface",
+      "size": 413,
+      "sha256": "f81e6c3e69b9a87c1e6becb8b689fa41d602bcf32e0a489a476f96c365357911"
     },
     {
-      "rva": 10362240,
-      "purpose": "adapter-referenced native code",
-      "size": 1234,
-      "sha256": "56c34798ade71a47fad45ea4734d21a9cb02a9aafc27c89e9cfa96a4992c2103"
+      "rva": 2018352,
+      "purpose": "formal adapter native interface",
+      "size": 178,
+      "sha256": "d050ecd3fd0c3412c500aadd363c42d4af6e5a8ea237a88a95d59d9ff1df8eb5"
     },
     {
-      "rva": 11031152,
-      "purpose": "adapter-referenced native code",
-      "size": 64,
-      "sha256": "87d75520c8e4893b8963e938988dcc829310de6ef18daae5e2507a4a0a8e55c9"
-    },
-    {
-      "rva": 11264656,
-      "purpose": "adapter-referenced native code",
-      "size": 64,
-      "sha256": "426086f235db96a4ee3ab8a70b3aa8e0fee7282bb39fb84cf6ebfc57228f46bd"
-    },
-    {
-      "rva": 12918368,
-      "purpose": "adapter-referenced native code",
-      "size": 1009,
-      "sha256": "cc092273938e34b20b3332e4ffe6a4d3478ac67d322bce5d1f0001669e83724b"
-    },
-    {
-      "rva": 12923904,
-      "purpose": "adapter-referenced native code",
-      "size": 64,
-      "sha256": "79a9252672315495a5b7f8e26dfd80b2ac49f658e5e100c1b6550f8963c7804c"
-    },
-    {
-      "rva": 12925200,
-      "purpose": "adapter-referenced native code",
-      "size": 109,
-      "sha256": "c9626de1442d948beb0cbcac6ae664411d56f83cfeda0d2f36bcf6d52a912f0c"
-    },
-    {
-      "rva": 12925360,
-      "purpose": "adapter-referenced native code",
-      "size": 2207,
-      "sha256": "910b9110692384ab3e4282734bfed3ccac77b4294c8e9fdce6488aefbbe463de"
-    },
-    {
-      "rva": 12929312,
-      "purpose": "adapter-referenced native code",
-      "size": 519,
-      "sha256": "69ea4535f9371f0af488b477be94bdfb5e60cd22016d0134e6b52ad17435c92e"
-    },
-    {
-      "rva": 12931072,
-      "purpose": "adapter-referenced native code",
-      "size": 64,
-      "sha256": "7ded84f54f00b7602ffd43895fcd57b6ddf85ccfaf84e42b358f4f863fb934a3"
-    },
-    {
-      "rva": 14707552,
-      "purpose": "adapter-referenced native code",
-      "size": 1095,
-      "sha256": "7ed9df5b57ef0a4562330370b2766ecc24cf32eb3303f5f33642eb507bfdf3be"
-    },
-    {
-      "rva": 21128400,
-      "purpose": "adapter-referenced native code",
-      "size": 162,
-      "sha256": "3d894d06a418350e6d7d218395cd085eb08983e99bf4b6ec1ceb2ad777ad9f75"
-    },
-    {
-      "rva": 21336240,
-      "purpose": "adapter-referenced native code",
-      "size": 220,
-      "sha256": "5eb4708b6c429abcbdb40c92b109d58fdb00c507fde3eceb4cfb956f94ec088b"
-    },
-    {
-      "rva": 23952256,
-      "purpose": "adapter-referenced native code",
-      "size": 64,
-      "sha256": "5dff219bf1b9b2cf3f20c43c121d6bfebb27c343a2178844a3e9779b20c01f52"
-    },
-    {
-      "rva": 39890624,
-      "purpose": "adapter-referenced native code",
-      "size": 64,
-      "sha256": "34b7c1740d2d51948cd34596ddfcac464e7dfa2c651debfe12cc9300402aa320"
-    },
-    {
-      "rva": 54394048,
-      "purpose": "adapter-referenced native code",
-      "size": 1483,
-      "sha256": "365a6b42dc378b3df57a78aefcc90c8de3bb84eeb2194cddbd5268bd32d331f3"
-    },
-    {
-      "rva": 59013040,
-      "purpose": "adapter-referenced native code",
-      "size": 1182,
-      "sha256": "2966957e0546873059c7ad8418ddff2b4d49a2d653c8a0fc24b3fd7fe36f5887"
-    },
-    {
-      "rva": 72485840,
-      "purpose": "adapter-referenced native code",
-      "size": 1310,
-      "sha256": "3c96a7adf5ace515f07bd6415f0b8218a2819ac757f6b29b6cd4d7f656e3a50f"
-    },
-    {
-      "rva": 74190816,
-      "purpose": "adapter-referenced native code",
-      "size": 5630,
-      "sha256": "078e30652260c84a09ef1d36eca804028d1437acd9dc8cbc3d429cacc4502bfd"
-    },
-    {
-      "rva": 74439632,
-      "purpose": "adapter-referenced native code",
-      "size": 120,
-      "sha256": "960970abd588df93d43cfc523cad9d13df1e34a629e07a8bcbc72e4fe4585bb4"
-    },
-    {
-      "rva": 74476832,
-      "purpose": "adapter-referenced native code",
-      "size": 68,
-      "sha256": "d181c7434b8e8b2a02ce50bd75b21fb41b40c497b2ff06583834e96c04b7a33f"
-    },
-    {
-      "rva": 74477264,
-      "purpose": "adapter-referenced native code",
-      "size": 102,
-      "sha256": "ea9466e66f2dd6b9af0d33791d9c3b3c54ecd647a98b5c9509e229faf2801b26"
-    },
-    {
-      "rva": 74477376,
-      "purpose": "adapter-referenced native code",
+      "rva": 6719440,
+      "purpose": "formal adapter native interface",
       "size": 98,
-      "sha256": "e33e10aba65150b53a4489fbc50dc5a2bd133e91eb10b858a815de615f8cecf9"
+      "sha256": "b6158c56e3966dcdc556660078ec1ed8bf1378aa5504b58536d8c2bbe6076b89"
     },
     {
-      "rva": 74477536,
-      "purpose": "adapter-referenced native code",
-      "size": 32,
-      "sha256": "384ffc6e77aefc5af134d9c7dfafe8516b53c531a0eb583003757d694f58e3a0"
+      "rva": 8114768,
+      "purpose": "formal adapter native interface",
+      "size": 291,
+      "sha256": "b3728403c240440a1f4530be309ee68b9ffdb2a372a1af4810da8b0ec43af3a4"
     },
     {
-      "rva": 76946880,
-      "purpose": "adapter-referenced native code",
-      "size": 276,
-      "sha256": "ce62088431f8c1c558c015962c0017c113704a95073e22004cefd446437bf9f5"
+      "rva": 10309440,
+      "purpose": "formal adapter native interface",
+      "size": 219,
+      "sha256": "14e181d92c80db2e8bf8f204e9f092cbc4de61f0ddf971d37acbd2a4a024e4b2"
     },
     {
-      "rva": 76949088,
-      "purpose": "adapter-referenced native code",
-      "size": 64,
-      "sha256": "dcb422276f57afc094d853c46dbc92304cbde1c31e09a61ccc80aa57143649c0"
+      "rva": 10463504,
+      "purpose": "formal adapter native interface",
+      "size": 1234,
+      "sha256": "3a7d20ffb5399e2ce9cf218a050a2ced7e5411aa56dd8913e2293175002035f9"
     },
     {
-      "rva": 76974112,
-      "purpose": "adapter-referenced native code",
-      "size": 554,
-      "sha256": "a999f39e91076b66a7c4dcd087784a9243198d3d9a1b4b0aa372909d0be44181"
-    },
-    {
-      "rva": 76979696,
-      "purpose": "adapter-referenced native code",
-      "size": 205,
-      "sha256": "c87c8ed55679b857cc0d34269976cfdf282a7281f8ee3e9d2354c0ac5e2bcaca"
-    },
-    {
-      "rva": 76982832,
-      "purpose": "adapter-referenced native code",
-      "size": 64,
-      "sha256": "3df9c01b474a222e2fd9b42f61f6c18571eebe11c2bfd249cbefb5505ed4c0af"
-    },
-    {
-      "rva": 77019440,
-      "purpose": "adapter-referenced native code",
-      "size": 889,
-      "sha256": "92069079264371e1a78e06c4aa12eed88a0a32ec9d82e4e67c2a2df305d7808d"
-    },
-    {
-      "rva": 77053968,
-      "purpose": "adapter-referenced native code",
-      "size": 376,
-      "sha256": "40fed647cbb57f8814771ddf949f4d06a507f11b13f0e47da2be2e950bdff17e"
-    },
-    {
-      "rva": 77099216,
-      "purpose": "adapter-referenced native code",
-      "size": 64,
-      "sha256": "9077fcc1967dc247bf86886965a01b445aa712e07d06b023165d0e20ff828c65"
-    },
-    {
-      "rva": 77186704,
-      "purpose": "adapter-referenced native code",
-      "size": 760,
-      "sha256": "b98a43ec538e76a89baa5bc2f35e637dd602094e2240b3b78a234585c7cdbaf1"
-    },
-    {
-      "rva": 77190080,
-      "purpose": "adapter-referenced native code",
-      "size": 934,
-      "sha256": "e8fa25a31e021ecdf4fdcea592e6f1fab128e56dba662b160f3503d62601a02d"
-    },
-    {
-      "rva": 77196496,
-      "purpose": "adapter-referenced native code",
-      "size": 94,
-      "sha256": "fe6c4cbeed9b232b9c9a99a74185f7c382c813079f50d835480e0be942b13f8c"
-    },
-    {
-      "rva": 77196592,
-      "purpose": "adapter-referenced native code",
-      "size": 1013,
-      "sha256": "d06995f83c8a884788853354aee8ae04f218cb568bf7c3782f9cad5e6bc8591f"
-    },
-    {
-      "rva": 77301344,
-      "purpose": "adapter-referenced native code",
-      "size": 64,
-      "sha256": "8696abfb3356c2a755d2a931f2fb37609fd347c1947e22135d9e8be1a4f6354c"
-    },
-    {
-      "rva": 77718064,
-      "purpose": "adapter-referenced native code",
-      "size": 347,
-      "sha256": "559cfdb8ccb718a18a8e47791aa1ead6e0e843c36a1ee384c190f78247c52de7"
-    },
-    {
-      "rva": 77726960,
-      "purpose": "adapter-referenced native code",
-      "size": 64,
-      "sha256": "808d7e4f2743bbab5d2535ec43e4902d6e31123b3b2628ccf31991b0c5e44afe"
-    },
-    {
-      "rva": 77737392,
-      "purpose": "adapter-referenced native code",
-      "size": 325,
-      "sha256": "71856805e1972f3387f28ad1220e5985ea03fa546aa6562424a998984df93e76"
-    },
-    {
-      "rva": 77828944,
-      "purpose": "adapter-referenced native code",
-      "size": 151,
-      "sha256": "9da5940400c8ff202904d11c0f367b800f584b938dc66310f518be8b38d59e83"
-    },
-    {
-      "rva": 77854656,
-      "purpose": "adapter-referenced native code",
-      "size": 82,
-      "sha256": "26d42a095ad71011c1ae0cb0f85d542c1ebc6e4b1ed442b8cd4e1e7e8cbac5de"
-    },
-    {
-      "rva": 78076512,
-      "purpose": "adapter-referenced native code",
-      "size": 64,
-      "sha256": "6064073254d355b986fe3a6cbfb12f4f481c375a8842e2100e7cb9faea6f1409"
-    },
-    {
-      "rva": 78076736,
-      "purpose": "adapter-referenced native code",
-      "size": 64,
-      "sha256": "b671dd15a06cd3b81ea3446f6fccbc5800683cdc04254ef63607144a80dce983"
-    },
-    {
-      "rva": 78077008,
-      "purpose": "adapter-referenced native code",
-      "size": 64,
-      "sha256": "a026a137becbbef2f44a4694cbf291b69758df752fc41d617efd05f6227fb544"
-    },
-    {
-      "rva": 121177600,
-      "purpose": "adapter-referenced native code",
-      "size": 64,
-      "sha256": "af6925adade993c11882064b708aff117ae719f92d3afe1bee2db9f04ae885c3"
-    },
-    {
-      "rva": 130148144,
-      "purpose": "adapter-referenced native code",
-      "size": 64,
-      "sha256": "eda63d5f0923a57a2d0c8144e52d718948212e7c5285b34598bc305fa9addcff"
-    },
-    {
-      "rva": 135199024,
-      "purpose": "adapter-referenced native code",
-      "size": 64,
-      "sha256": "6c1db761f089221fcff4a484f81a199cdf5bb66fc3ff55b97d92c480793b05e3"
-    },
-    {
-      "rva": 152812800,
-      "purpose": "adapter-referenced native code",
-      "size": 64,
-      "sha256": "de8887e718c9718ae4d92df745acf37beab89045642becc79f69292898155d60"
-    },
-    {
-      "rva": 174727120,
-      "purpose": "adapter-referenced native code",
-      "size": 64,
-      "sha256": "1eabcc6e37b3699f74f85597a26dd89b11d57ec6fa1a0038285c378283d0c632"
-    },
-    {
-      "rva": 188454112,
-      "purpose": "adapter-referenced native code",
-      "size": 64,
-      "sha256": "829e93d42b371d47d9b40e5315abdb66c33216f92927fab6b6da219fe7996627"
-    },
-    {
-      "rva": 198457040,
-      "purpose": "adapter-referenced native code",
-      "size": 64,
-      "sha256": "9f0b0f101b5a51735c8a6da9c986ab85126f0ea983915e628ad1e4ce1a966e94"
-    },
-    {
-      "rva": 256919696,
-      "purpose": "adapter-referenced native code",
-      "size": 64,
-      "sha256": "afa09750ff3b158353760da332a39248a07bfc2cfd74846cb3936ace233a97ae"
-    },
-    {
-      "rva": 297662240,
-      "purpose": "adapter-referenced native code",
-      "size": 64,
-      "sha256": "3354032a03273292b0fd0f7b431e745a5b76942d55041adb47fced6f93a72366"
-    },
-    {
-      "rva": 322794656,
-      "purpose": "adapter-referenced native code",
-      "size": 64,
-      "sha256": "5d8dd50c308461b20d561740a243fec1346e71cc28a7a279366461eb42cb21d1"
-    },
-    {
-      "rva": 342461328,
-      "purpose": "adapter-referenced native code",
-      "size": 64,
-      "sha256": "f997184a2aa6cc8526a11ecda2d0d37bd77ac7ae58c56db1f0f7ed5c3ad542c3"
-    },
-    {
-      "rva": 392189976,
-      "purpose": "adapter-referenced native code",
-      "size": 64,
-      "sha256": "9f0aee009109ca52212d5a420572d428de563b48c6e6f727b6d4b8c2e9847fd2"
-    },
-    {
-      "rva": 80267384,
-      "purpose": "match/interface vtable layout",
-      "size": 64,
-      "sha256": "30f0c5edaa53e2c63272ac96bdb81a9b43b9ff79ee6f174ea91552f23ea69ec3"
-    },
-    {
-      "rva": 82900504,
-      "purpose": "match/interface vtable layout",
-      "size": 64,
-      "sha256": "26f0c46af09b28bf266511c7cfe1568318fe23b5b291575b2d817c0796f0eade"
-    },
-    {
-      "rva": 1506464,
-      "purpose": "desktop tactical plan serializer",
-      "size": 1442,
-      "sha256": "5f6ab5de61aad073f02484d927464379df9f6f51089283aa2e30ee332e426972"
-    },
-    {
-      "rva": 77241008,
-      "purpose": "desktop tactical plan serializer",
-      "size": 1349,
-      "sha256": "198fb76b10037df3edbcf0003066b0d862280a7c5f4ffe6f718d7e397dd21128"
-    },
-    {
-      "rva": 77067232,
-      "purpose": "saved fixture original reader/factory",
-      "size": 130,
-      "sha256": "b780a9c95a677ef9d6ffef672a94efd637236c7e6e9c4ccd35fbcbf135b77963"
-    },
-    {
-      "rva": 77375376,
-      "purpose": "saved fixture original reader/factory",
-      "size": 2400,
-      "sha256": "a116f2bdd718d012592282c839db015c810ab8ffea667a83b34004dd5ecdfe9f"
-    },
-    {
-      "rva": 58132064,
-      "purpose": "saved fixture original reader/factory",
-      "size": 1166,
-      "sha256": "21a29447048fa8122b73cb9a2dcb3ab07271d5c5c4143cb6c90d9e543d7d9863"
-    },
-    {
-      "rva": 14645472,
-      "purpose": "saved fixture factory jump",
+      "rva": 11141104,
+      "purpose": "formal adapter native interface",
       "size": 5,
-      "sha256": "a17a861131cab8046c28b8b56e3eb8bd696fc96f720627b0658a00ddbe1717d1"
+      "sha256": "0c7ed84660288021400000ddda3c5b95c6736f18f4371554e8724c36209f6801"
     },
     {
-      "rva": 158890256,
-      "purpose": "saved fixture original reader/factory",
-      "size": 45,
-      "sha256": "d682c1dc889feb7ac33c7f51c6db49f8d9b5ee52d1ebdd0ffb3d169e3636fb76"
+      "rva": 11375504,
+      "purpose": "formal adapter native interface",
+      "size": 5,
+      "sha256": "6fe01c96e864241f20e3257aefaf5c43328b3b2ec787bfd2dbe51aecb40a80a1"
     },
     {
-      "rva": 14645792,
-      "purpose": "saved fixture original reader/factory",
+      "rva": 13017744,
+      "purpose": "formal adapter native interface",
+      "size": 5,
+      "sha256": "194c73b6bca54eafd59c5758349c8c2439a39cd724c9c7e9c03baf2f1d09d564"
+    },
+    {
+      "rva": 13043984,
+      "purpose": "formal adapter native interface",
+      "size": 1009,
+      "sha256": "936f7a968503f30359bd3368ceaf31f6f9ca60d10c44a504c40f8a95b604c9cb"
+    },
+    {
+      "rva": 13049520,
+      "purpose": "formal adapter native interface",
+      "size": 5,
+      "sha256": "aaeee945384d1a6677b77819a2adbdade1a3a4f2eb2fe2ecb677051f8a6ba5e1"
+    },
+    {
+      "rva": 13050816,
+      "purpose": "formal adapter native interface",
+      "size": 109,
+      "sha256": "af4df953f5e5a74da38e5219487df25971c88c8f9880031eef304166aee0ff97"
+    },
+    {
+      "rva": 13050976,
+      "purpose": "formal adapter native interface",
+      "size": 2207,
+      "sha256": "6c41a4fb16a2a82d4ad2b4f70dc9054766283302b68d829876faeb2ecfc45fe5"
+    },
+    {
+      "rva": 13054928,
+      "purpose": "formal adapter native interface",
+      "size": 519,
+      "sha256": "04bdfefb00ae68a3e7c83de506e11eb7901e463c4b07c1cf97cc4a33d4f8f467"
+    },
+    {
+      "rva": 13056688,
+      "purpose": "formal adapter native interface",
+      "size": 5,
+      "sha256": "46a79acb6059a3e3bb652a7a8849f43651830391aa7bc9772d9b75f6b7c8c2e1"
+    },
+    {
+      "rva": 14770464,
+      "purpose": "formal adapter native interface",
+      "size": 5,
+      "sha256": "50bdcdb29159c2768a1dc0e5243c8936b738f7408cf0224ab4ab7487098d3c08"
+    },
+    {
+      "rva": 14770784,
+      "purpose": "formal adapter native interface",
       "size": 293,
-      "sha256": "ea5c6604949817a4602471f54bc90db6887d25b63aa5ce12ac8763eabebbcc2f"
+      "sha256": "6d49b904b0556948b8921e8f27ccd8a2c74028dc2e90e2404cef4e136a9fd558"
     },
     {
-      "rva": 14646944,
-      "purpose": "saved fixture original reader/factory",
-      "size": 731,
-      "sha256": "02e92ffcfd5b669c68342cb7f0969625601baa8dbf9ccf3e069dc8d3ef103b5c"
+      "rva": 14834528,
+      "purpose": "formal adapter native interface",
+      "size": 1095,
+      "sha256": "5c5ce6d2fa1c29e24471850238ce4897eb54d66796a9887a542f3bd95ba43b89"
     },
     {
-      "rva": 77399920,
-      "purpose": "saved fixture original reader/factory",
-      "size": 3019,
-      "sha256": "875603414521d871ec1c1d5a3cb2e4c45b4569b3f1c62c8640827a59b043da24"
+      "rva": 15081296,
+      "purpose": "formal adapter native interface",
+      "size": 6999,
+      "sha256": "1bc2b6dd6bee05be93471090edc25f9f1f1d61f8508e327eda7fdc649d23ba0c"
     },
     {
-      "rva": 55128512,
-      "purpose": "saved fixture original reader/factory",
+      "rva": 21296416,
+      "purpose": "formal adapter native interface",
+      "size": 162,
+      "sha256": "dc4f9533a536f8c7786f6984e6d947c7b2756a5e15e651417f6c5735c73625e0"
+    },
+    {
+      "rva": 21543616,
+      "purpose": "formal adapter native interface",
+      "size": 220,
+      "sha256": "9c0fb23b9accba4c331d8cdcda1ee25d67ba57d0c7fe7904664dcb1a7c893b69"
+    },
+    {
+      "rva": 24189520,
+      "purpose": "formal adapter native interface",
+      "size": 105,
+      "sha256": "54f06e3d31acb097d19638760882308287622a8a0a1b7f46ead9e2a64648a6c6"
+    },
+    {
+      "rva": 25219120,
+      "purpose": "formal adapter native interface",
+      "size": 6865,
+      "sha256": "08a982ac58fc6ee2d341fffd00d4b22a9696677201a5855ad0867afae159b757"
+    },
+    {
+      "rva": 28800768,
+      "purpose": "formal adapter native interface",
+      "size": 406,
+      "sha256": "ca721cc5314ef8dd2fe40dddaab18382ee5b16a6726e51114b8e557fff746033"
+    },
+    {
+      "rva": 28884928,
+      "purpose": "formal adapter native interface",
+      "size": 1412,
+      "sha256": "f8800f97109c8fbce822241abbc811217c0b0de6475290e88884ab5c356411d3"
+    },
+    {
+      "rva": 28977712,
+      "purpose": "formal adapter native interface",
+      "size": 33,
+      "sha256": "f11ba52227b90ebf17e1be1be494a466311428cd2114b9e9aec2aec8247cfdb9"
+    },
+    {
+      "rva": 34946864,
+      "purpose": "formal adapter native interface",
+      "size": 1038,
+      "sha256": "d37e49e61b8154370359ca7a6d502232eb6e301bd4de812629234bc92f7bf94a"
+    },
+    {
+      "rva": 40053152,
+      "purpose": "formal adapter native interface",
+      "size": 4672,
+      "sha256": "c72d8fae2f9c73b6f3ad293c05b779c0b5c0725240403876dcc918397431b69c"
+    },
+    {
+      "rva": 40569856,
+      "purpose": "formal adapter native interface",
+      "size": 28,
+      "sha256": "b95434cba0e761f44128f15a796dcbbfcc6ca8acde67dab6ac5537977d32e782"
+    },
+    {
+      "rva": 50795712,
+      "purpose": "formal adapter native interface",
+      "size": 29,
+      "sha256": "c0646776bfa7622e8326e387c8e3daa5ffaa74810f99470039f429f1e102bc69"
+    },
+    {
+      "rva": 52176848,
+      "purpose": "formal adapter native interface",
+      "size": 38,
+      "sha256": "45bb8af1ee8affb1158dd415c27867b7b3c6e1f1bf5ba9ce72005a9fa0806af1"
+    },
+    {
+      "rva": 53346272,
+      "purpose": "formal adapter native interface",
+      "size": 2382,
+      "sha256": "674cdf0fd995e2ab67fa0f1892c86588a6dcf61b50dd7b1a88c1a115cd82c01c"
+    },
+    {
+      "rva": 53363584,
+      "purpose": "formal adapter native interface",
+      "size": 89,
+      "sha256": "f941d3f773a8c4bdd32264b86e3266e37c8f6c807b2b2f31d345a7fa728a737d"
+    },
+    {
+      "rva": 55924944,
+      "purpose": "formal adapter native interface",
+      "size": 1483,
+      "sha256": "73c61d49e1ed86a57877e8cf16d7c17288a712ba33b65217503f4db8d4825bdc"
+    },
+    {
+      "rva": 56838656,
+      "purpose": "formal adapter native interface",
       "size": 901,
-      "sha256": "3bee7672cb663acb1860a9a0fe726af6e9c5c65ad050186893fab79f61b7866d"
+      "sha256": "c1d83c7e9491772c447c1e0fa0146a764ad2b03eb586d65b98d3af5679480273"
     },
     {
-      "rva": 16459136,
-      "purpose": "saved fixture original reader/factory",
-      "size": 1478,
-      "sha256": "407c468f3164634e0f3f2946d09be43081bdb2bc895be039d41192f6c8b16cb4"
+      "rva": 59874064,
+      "purpose": "formal adapter native interface",
+      "size": 1166,
+      "sha256": "6a4d0511cbe57e590d5577e0807e5dc49ea5bcbb1f73f449876cc0a0a231996a"
     },
     {
-      "rva": 16457744,
-      "purpose": "saved fixture factory jump",
-      "size": 5,
-      "sha256": "367dc50416c7a514599d6be1b179ce70ba6c6f485ed1d41c3e7efc2d09f49fd7"
+      "rva": 60781216,
+      "purpose": "formal adapter native interface",
+      "size": 1182,
+      "sha256": "068727d95f1c909923b2589baf0db6f44aa309846f740fed703e68d46720a425"
     },
     {
-      "rva": 168287232,
-      "purpose": "saved fixture original reader/factory",
-      "size": 410,
-      "sha256": "c098987fbbfd4f100b1f6b8f6e76db3ec1baf3293f254829ab939c8c795e1f25"
+      "rva": 61041216,
+      "purpose": "formal adapter native interface",
+      "size": 37,
+      "sha256": "0375c58d3a900d987b43d5429ac11e89662db1d7b12464ca958b163b19429367"
     },
     {
-      "rva": 28518160,
-      "purpose": "saved fixture original reader/factory",
-      "size": 616,
-      "sha256": "a066be171c04965e51d29e9f51421f0aa2247514024405ee402a5a10f95f4734"
-    },
-    {
-      "rva": 78103888,
-      "purpose": "saved fixture original reader/factory",
-      "size": 290,
-      "sha256": "acefac0e04dce340097f9ae7cdd00a2d3f404aa2baf3ce31495405ad00acad97"
-    },
-    {
-      "rva": 66800384,
-      "purpose": "saved fixture original reader/factory",
+      "rva": 68711168,
+      "purpose": "formal adapter native interface",
       "size": 3092,
-      "sha256": "ae031b5deee32f2da227bc7530585bba5ddf4e5b8abf86430dc5bf2f4b1b27cd"
+      "sha256": "9c2bd801eb3cce78206a225158f1c5474686bd6d0b4907e1966aaa895720bc09"
     },
     {
-      "rva": 77319280,
-      "purpose": "saved fixture factory jump",
+      "rva": 74861248,
+      "purpose": "formal adapter native interface",
+      "size": 1391,
+      "sha256": "8c087826fbff7e5cd8436015d03c47def2c423c6d0161ade363ddc58389b96e4"
+    },
+    {
+      "rva": 75494416,
+      "purpose": "formal adapter native interface",
+      "size": 5638,
+      "sha256": "5e2f1360ed809a0d1227dc00943ce5d6eb6f162932dd99392c6c170e0ac84ab3"
+    },
+    {
+      "rva": 76784256,
+      "purpose": "formal adapter native interface",
+      "size": 57,
+      "sha256": "ae8dc2ab6fb745bf8df44b132cc620b98a592b5f9acce64ad4db61c210dd6167"
+    },
+    {
+      "rva": 76811680,
+      "purpose": "formal adapter native interface",
+      "size": 68,
+      "sha256": "535338dab9cb8b839c0f375e90e34a1ef251c381b73ffe34004c4c4e5985c1ff"
+    },
+    {
+      "rva": 76812496,
+      "purpose": "formal adapter native interface",
+      "size": 102,
+      "sha256": "9d122df32a97720a5589b042a87b66d9f4e99fffa55b9b341f978da40492bdc0"
+    },
+    {
+      "rva": 76812608,
+      "purpose": "formal adapter native interface",
+      "size": 98,
+      "sha256": "b70ae1ba2676b45b1bfab0f1bb8ced76be2b6d616f2a98d4d970968109eef170"
+    },
+    {
+      "rva": 76812768,
+      "purpose": "formal adapter native interface",
+      "size": 32,
+      "sha256": "3a13b7a6f3313e70b6541864935c149432003553fc9089b53426153f5b1fae95"
+    },
+    {
+      "rva": 79269712,
+      "purpose": "formal adapter native interface",
       "size": 5,
-      "sha256": "482ec328bd4e0b82a3e9d4a2d4f245ca5b9448449dbdf336af255ab7f3a503f6"
+      "sha256": "060610b7e2be5c420e52563dd86659a7d433d0839ab51f4538750eefb42e2d9d"
     },
     {
-      "rva": 383229456,
-      "purpose": "saved fixture original reader/factory",
-      "size": 56,
-      "sha256": "29a6071186a76d09fa1efc7053b28e5cc7318568905b5a99f817a058de683995"
+      "rva": 79304096,
+      "purpose": "formal adapter native interface",
+      "size": 205,
+      "sha256": "2cc3dd5564e77b92742c36e23c49f54508c793bb3fa20cd73630f3f43b521d49"
     },
     {
-      "rva": 51913760,
-      "purpose": "saved fixture original reader/factory",
-      "size": 2387,
-      "sha256": "df2c1e2a15d383532204b3280bd15db0aad45dae344a5f0b1980b1325b912505"
+      "rva": 79307216,
+      "purpose": "formal adapter native interface",
+      "size": 5,
+      "sha256": "93a776c5c0c9910b38bbc7c8d7466036323f4c2912a558c121fa56ec769673ed"
+    },
+    {
+      "rva": 79325184,
+      "purpose": "formal adapter native interface",
+      "size": 610,
+      "sha256": "ffddf8cc73649d5d70effe71bb0ed396b25cb396d09864c454debb76a1b42a42"
+    },
+    {
+      "rva": 79333440,
+      "purpose": "formal adapter native interface",
+      "size": 130,
+      "sha256": "cd273899aa3746ef396deb8ba413593c79eabb01677fd557cf018c0f9bf7d59a"
+    },
+    {
+      "rva": 79344928,
+      "purpose": "formal adapter native interface",
+      "size": 889,
+      "sha256": "bd3ae7d804ccab1c86fafef2c6e546aa0fe47bf9b4c1b11702d262ae85736f0d"
+    },
+    {
+      "rva": 79378656,
+      "purpose": "formal adapter native interface",
+      "size": 376,
+      "sha256": "e936be38a8076771925c1b7db2cc91138001f73e63ed8c9b56b7ce35a927ca9e"
+    },
+    {
+      "rva": 79414384,
+      "purpose": "formal adapter native interface",
+      "size": 276,
+      "sha256": "923e2c880d9ff594058106b7abd8f714eff846083bc827c57be368122717a663"
+    },
+    {
+      "rva": 79495120,
+      "purpose": "formal adapter native interface",
+      "size": 347,
+      "sha256": "fe8bacb259f9666423852450e1a65745f27611cf3d44ed0c5fb7af9455262645"
+    },
+    {
+      "rva": 79499968,
+      "purpose": "formal adapter native interface",
+      "size": 325,
+      "sha256": "bb9223041e3e39199cca6a35a3243407a005b99c833b252d44dabbabe61f671e"
+    },
+    {
+      "rva": 146279296,
+      "purpose": "formal adapter native interface",
+      "size": 288,
+      "sha256": "ae003ef16669fc44dd706a276e853cae0d74da9974b6d4bfa90edec9691f39af"
+    },
+    {
+      "rva": 175748032,
+      "purpose": "formal adapter native interface",
+      "size": 184,
+      "sha256": "daa12c3c7fe40ac59403c78c2a6fcbdbe8ff76dd9f8abb8983498f0e15150ab9"
+    },
+    {
+      "rva": 196820896,
+      "purpose": "formal adapter native interface",
+      "size": 954,
+      "sha256": "21028b20164379576369466546b8c04e8551fbc1d791ba90f7c5cef90639386d"
+    },
+    {
+      "rva": 197881696,
+      "purpose": "formal adapter native interface",
+      "size": 828,
+      "sha256": "9832793c40048b93965875529a61c5b47ec8f31b5055f8b9c7287b4a92bfbc59"
+    },
+    {
+      "rva": 222405008,
+      "purpose": "formal adapter native interface",
+      "size": 1110,
+      "sha256": "874ed6bd00b01250ae9e7ae6636d4812a5a62272c0870724ab9010b3743c1308"
+    },
+    {
+      "rva": 295992000,
+      "purpose": "formal adapter native interface",
+      "size": 1409,
+      "sha256": "08d576e56a18eb5354227022cdee55cdb359ba252db6adfc92c3832b10c86cff"
+    },
+    {
+      "rva": 311632736,
+      "purpose": "formal adapter native interface",
+      "size": 1073,
+      "sha256": "3434738768024da74282f7c0bd89831e0518467050f59fce555c559c4954d81d"
+    },
+    {
+      "rva": 341554928,
+      "purpose": "formal adapter native interface",
+      "size": 336,
+      "sha256": "7b5aa7839ff737389ba345788d20d72fbdd385487104cfe739a6611ee9dda5ed"
+    },
+    {
+      "rva": 351420272,
+      "purpose": "formal adapter native interface",
+      "size": 855,
+      "sha256": "5cedbeedf47f549a76e9f350e654fc9f10b3e9daffad200e4c8738ef401af5e9"
+    },
+    {
+      "rva": 353681440,
+      "purpose": "formal adapter native interface",
+      "size": 872,
+      "sha256": "5429d93a104b506af877238bdc67fec437f78239b891292f0b674a959506bc93"
+    },
+    {
+      "rva": 360179005,
+      "purpose": "formal adapter native interface",
+      "size": 9,
+      "sha256": "b955e21ee77a52fe91a9d2567300bd30a09132b4cd04f1fad8e601302dbf89be"
+    },
+    {
+      "rva": 364643488,
+      "purpose": "formal adapter native interface",
+      "size": 1071,
+      "sha256": "870c81cf8dd1996771437399e85367010f9edf9eab4a2bbf8f6013922d002060"
+    },
+    {
+      "rva": 387512344,
+      "purpose": "formal adapter native interface",
+      "size": 32,
+      "sha256": "28f1d2ace9204462ef31a2f5f58d69126758756f80cdecff0f23267aba95a133"
+    },
+    {
+      "rva": 81324168,
+      "purpose": "formal native vtable identity",
+      "size": 64,
+      "sha256": "b3f3e908e450267aa77635ac490b522bde7e761ebc2112fedf5700da8aded088"
+    },
+    {
+      "rva": 82380872,
+      "purpose": "formal native vtable identity",
+      "size": 64,
+      "sha256": "75ae18812e81948d89e115d2e3223e206c8dc0d365f6e9d186598d2b3b283d1a"
+    },
+    {
+      "rva": 82380904,
+      "purpose": "formal native vtable identity",
+      "size": 64,
+      "sha256": "02c6a6552056abe300ff4521921325c7d83f1297eb9aa9a721b7310fe5322a7a"
+    },
+    {
+      "rva": 82380984,
+      "purpose": "formal native vtable identity",
+      "size": 64,
+      "sha256": "9b8100b8a83a2fbd415a2fa61b99de28c846854ed9fdd6043d3aa3a3a28df657"
     }
   ],
   "data_addresses": [
     {
-      "rva": 80267384,
+      "rva": 79697369,
       "size": 8
     },
     {
-      "rva": 82021008,
+      "rva": 81324168,
       "size": 8
     },
     {
-      "rva": 91175680,
+      "rva": 82380872,
       "size": 8
     },
     {
-      "rva": 91175976,
+      "rva": 82380904,
       "size": 8
     },
     {
-      "rva": 91229936,
+      "rva": 82380984,
       "size": 8
     },
     {
-      "rva": 91232880,
+      "rva": 83113968,
       "size": 8
     },
     {
-      "rva": 91240032,
+      "rva": 86456256,
       "size": 8
     },
     {
-      "rva": 91251952,
+      "rva": 92334832,
       "size": 8
     },
     {
-      "rva": 91252088,
+      "rva": 92334904,
       "size": 8
     },
     {
-      "rva": 91266128,
+      "rva": 92334912,
       "size": 8
     },
     {
-      "rva": 91270064,
+      "rva": 92335096,
       "size": 8
     },
     {
-      "rva": 91317544,
+      "rva": 92335208,
       "size": 8
     },
     {
-      "rva": 91318568,
+      "rva": 92389168,
       "size": 8
     },
     {
-      "rva": 91328664,
+      "rva": 92392000,
+      "size": 8
+    },
+    {
+      "rva": 92392008,
+      "size": 8
+    },
+    {
+      "rva": 92392112,
+      "size": 8
+    },
+    {
+      "rva": 92399264,
+      "size": 8
+    },
+    {
+      "rva": 92407004,
+      "size": 8
+    },
+    {
+      "rva": 92409442,
+      "size": 8
+    },
+    {
+      "rva": 92409443,
+      "size": 8
+    },
+    {
+      "rva": 92411184,
+      "size": 8
+    },
+    {
+      "rva": 92411320,
+      "size": 8
+    },
+    {
+      "rva": 92425360,
+      "size": 8
+    },
+    {
+      "rva": 92462456,
+      "size": 8
+    },
+    {
+      "rva": 92476776,
+      "size": 8
+    },
+    {
+      "rva": 92477800,
+      "size": 8
+    },
+    {
+      "rva": 92477984,
+      "size": 8
+    },
+    {
+      "rva": 92486848,
+      "size": 8
+    },
+    {
+      "rva": 92486856,
+      "size": 8
+    },
+    {
+      "rva": 92487880,
       "size": 8
     }
-  ],
-  "scope": "Desktop adapter compatibility, not whole engine behavior equivalence."
+  ]
 }

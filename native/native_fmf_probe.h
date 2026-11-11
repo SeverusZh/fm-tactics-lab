@@ -6,8 +6,8 @@ static int desktop_fmf_routine_type=-1;
 static unsigned desktop_fmf_stream_revision=0;
 static int desktop_probe_fmf(void* resources){
     wchar_t path[32768]={};if(!GetEnvironmentVariableW(L"FM27_IMPORT_FMF",path,32768))return -1;desktop_fmf_requested=true;
-    auto utf=fs::path(path).generic_u8string();uintptr_t name[4]={};((void*(*)(void*,const char*,int))at(0x15a640))(name,utf.c_str(),-1);void* file=nullptr;void* folder=nullptr;
-    ((void*(*)(void*,void*,void*))at(0x38477b0))(&file,name,(unsigned char*)resources+0xc0);((void*(*)(void*,void*,uintptr_t))at(0x14590b0))(&folder,&file,*(uintptr_t*)at(0x5709c50));
+    auto utf=fs::path(path).generic_u8string();uintptr_t name[4]={};((void*(*)(void*,const char*,int))at(0x122880))(name,utf.c_str(),-1);void* file=nullptr;void* folder=nullptr;
+    ((void*(*)(void*,void*,void*))at(0x39f72a0))(&file,name,(unsigned char*)resources+0xc0);((void*(*)(void*,void*,uintptr_t))at(0x148bac0))(&folder,&file,*(uintptr_t*)at(0x5824c90));
     if(folder){auto dirs=*(uintptr_t**)((unsigned char*)folder+0x30);if(dirs){auto first=(unsigned char**)dirs[0],last=(unsigned char**)dirs[1];for(auto d=first;d<last&&d-first<16;d++){auto files=*(uintptr_t**)(*d+0x38);if(!files)continue;auto fbegin=(unsigned char**)files[0],fend=(unsigned char**)files[1];for(auto f=fbegin;f<fend&&f-fbegin<16;f++){auto title=*(unsigned**)(*f+0x18);if(!title||*title!=7||memcmp(title+1,"details",7))continue;auto size=*(uint64_t*)(*f+0x38);if(size<12||size>65536)continue;void* raw=nullptr;((void*(*)(void*,void**,void*))(*(void***)*f)[21])(*f,&raw,nullptr);if(!raw)continue;std::vector<unsigned char> bytes(size);((void*(*)(void*,void*,size_t))(*(void***)raw)[5])(raw,bytes.data(),size);unsigned n=*(unsigned*)(bytes.data()+8);if(n>100||n>size-12)continue;std::string handler((char*)bytes.data()+12,n);const char* handlers[]={"DEFEND_CORNER_ROUTINE_TYPE_HANDLER","DEFEND_FREE_KICK_ROUTINE_TYPE_HANDLER","DEFEND_ID_WIDE_FREE_KICK_ROUTINE_TYPE_HANDLER","DEFEND_ID_DEEP_FREE_KICK_ROUTINE_TYPE_HANDLER","DEFEND_LONG_THROW_IN_ROUTINE_TYPE_HANDLER","ATTACK_CORNER_ROUTINE_TYPE_HANDLER","ATTACK_FREE_KICK_ROUTINE_TYPE_HANDLER","ATTACK_ID_WIDE_FREE_KICK_ROUTINE_TYPE_HANDLER","ATTACK_ID_DEEP_FREE_KICK_ROUTINE_TYPE_HANDLER","THROW_IN_ROUTINE_TYPE_HANDLER"};for(unsigned j=0;j<10;j++)if(handler==handlers[j])desktop_fmf_routine_type=j;}}}}
     if(GetEnvironmentVariableW(L"FM27_FMF_AUDIT",nullptr,0))fprintf(log_file,"{\"event\":\"native_fmf_archive_open\",\"folder\":%s}\n",folder?"true":"false");
     if(folder){
@@ -17,14 +17,21 @@ static int desktop_probe_fmf(void* resources){
             auto node=(unsigned char*)*item;uint64_t size=*(uint64_t*)(node+0x38);if(GetEnvironmentVariableW(L"FM27_FMF_AUDIT",nullptr,0))fprintf(log_file,"{\"event\":\"native_fmf_entry_size\",\"size\":%llu}\n",(unsigned long long)size);if(size<8||size>1024*1024)continue;
             wchar_t raw_path[32768]={};if(GetEnvironmentVariableW(L"FM27_FMF_RAW_ENTRY",raw_path,32768)){auto title=*(unsigned**)(node+0x18);if(title&&(*title!=5||memcmp(title+1,"image",5))){void* raw=nullptr;((void*(*)(void*,void**,void*))(*(void***)node)[21])(node,&raw,nullptr);if(raw){std::vector<unsigned char> out(size);((void*(*)(void*,void*,size_t))(*(void***)raw)[5])(raw,out.data(),out.size());std::ofstream file(fs::path(raw_path),std::ios::binary);file.write((char*)out.data(),out.size());}}}
             if(GetEnvironmentVariableW(L"FM27_FMF_AUDIT",nullptr,0)){void* raw=nullptr;((void*(*)(void*,void**,void*))(*(void***)node)[21])(node,&raw,nullptr);if(raw){unsigned char peek[24]={};((void*(*)(void*,void*,size_t))(*(void***)raw)[5])(raw,peek,24);fputs("{\"event\":\"native_fmf_raw_prefix\",\"hex\":\"",log_file);for(auto c:peek)fprintf(log_file,"%02x",c);fputs("\"}\n",log_file);}else fputs("{\"event\":\"native_fmf_raw_prefix\",\"missing\":true}\n",log_file);}
-            void* entry_file=node;void* stream=nullptr;void* extra=nullptr;uint64_t options[2]={0x80100004e554c4c,0};((void*(*)(void*,void*,void*,uintptr_t,void*))at(0x14264d0))(options,&stream,&entry_file,0,&extra);if(!stream)continue;
+            void* entry_file=node;void* stream=nullptr;void* extra=nullptr;uint64_t options[2]={0x80100004e554c4c,0};((void*(*)(void*,void*,void*,uintptr_t,void*))at(0x144f520))(options,&stream,&entry_file,0,&extra);if(!stream)continue;
             // The native adapter has consumed the eight-byte standalone TAC
             // stream header. Do not read beyond the remaining archive entry.
             std::vector<unsigned char> bytes((size_t)size-8);if(bytes.size()<8)continue;((void*(*)(void*,void*,size_t))(*(void***)stream)[5])(stream,bytes.data(),bytes.size());
             if(desktop_fmf_routine_type>=0){auto title=*(unsigned**)(node+0x18);if(!title||(*title==5&&!memcmp(title+1,"image",5)))continue;void* raw=nullptr;((void*(*)(void*,void**,void*))(*(void***)node)[21])(node,&raw,nullptr);unsigned char header[8]={};if(!raw)continue;((void*(*)(void*,void*,size_t))(*(void***)raw)[5])(raw,header,8);desktop_fmf_stream_revision=*(unsigned short*)(header+6);if(desktop_fmf_stream_revision!=60)continue;desktop_fmf_tactic_name.assign((char*)(title+1),*title);desktop_fmf_payload=std::move(bytes);break;}
-            // TAC plan marker, supported plan revision, FM27 engine major.
+            // Identify a standalone TAC by its native stream type. The installed
+            // game's bounded plan reader decides which plan revisions/majors it
+            // can import; older compatible plans must not be rejected here.
+            void* typed_raw=nullptr;((void*(*)(void*,void**,void*))(*(void***)node)[21])(node,&typed_raw,nullptr);
+            if(!typed_raw)continue;unsigned char type_header[8]={};
+            ((void*(*)(void*,void*,size_t))(*(void***)typed_raw)[5])(typed_raw,type_header,8);
+            if(type_header[0]!=3||type_header[1]!=1||memcmp(type_header+2,"cat.",4))continue;
             if(GetEnvironmentVariableW(L"FM27_FMF_AUDIT",nullptr,0))fprintf(log_file,"{\"event\":\"native_fmf_entry\",\"size\":%llu,\"prefix\":\"%02x%02x%02x%02x\"}\n",(unsigned long long)size,bytes[0],bytes[1],bytes[2],bytes[3]);
-            if(bytes[0]!=0x22||*(unsigned short*)(bytes.data()+1)<60||*(unsigned short*)(bytes.data()+1)>68||bytes[3]!=27)continue;
+            if(bytes[0]!=0x22)continue;
+            fprintf(log_file,"{\"event\":\"native_fmf_tactic_format\",\"stream_revision\":%u,\"plan_revision\":%u,\"source_major\":%u,\"version_validation\":\"original_game_reader\"}\n",*(unsigned short*)(type_header+6),*(unsigned short*)(bytes.data()+1),bytes[3]);
             if(!desktop_fmf_payload.empty()){fputs("{\"event\":\"native_fmf_error\",\"reason\":\"multiple_tactic_entries\"}\n",log_file);fflush(log_file);TerminateProcess(GetCurrentProcess(),171);}
             auto title=*(unsigned**)(node+0x18);if(title&&*title<4096)desktop_fmf_tactic_name.assign((char*)(title+1),*title);desktop_fmf_payload=std::move(bytes);
         }}

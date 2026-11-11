@@ -24,16 +24,16 @@ static void source_generation_install(unsigned char* match){
         manager[0x1748]=0;
         for(unsigned id=1;id<=11;id++)if(auto list=priority_list(manager,id))*(void**)(list+8)=*(void**)list;
         auto fresh=(unsigned char*)calloc(1,0x7a8);
-        ((void*(*)(void*,void*,unsigned char))at(0x160930))(fresh,at(0x4aff5b9),1);
-        ((void*(*)(void*,void*))at(0x14b390))(manager+0x1818,fresh);
-        ((void(*)(void*))at(0xd0340))(fresh);free(fresh);
+        ((void*(*)(void*,void*,unsigned char))at(0x18b080))(fresh,at(0x4c015d9),1);
+        ((void*(*)(void*,void*))at(0x1484e0))(manager+0x1818,fresh);
+        ((void(*)(void*))at(0x69520))(fresh);free(fresh);
         }
         *(uint32_t*)(team+0x2c)=*(uint32_t*)p;*(uint16_t*)(team+0x11e)=(uint16_t)*(uint32_t*)(p+8);
         *(uint32_t*)(manager+0x50)=*(uint32_t*)(p+4);
         memcpy(manager+0x2fc8,p+16,52);memcpy(manager+0x3098,p+68,8);memcpy(manager+0x72,p+76,8);
         memcpy(manager+0x30b2,p+176,10);memcpy(manager+0x30c1,p+186,7);manager[0x30c0]=p[193];
         auto traits=*(uint16_t*)(p+194);if(traits>32)desktop_finish_and_exit(230);
-        auto trait_memory=(unsigned char*)((void*(*)(void*,size_t))at(0xb6430))(*(void**)at(0x56f3ab0),(traits?traits:1)*2);
+        auto trait_memory=(unsigned char*)((void*(*)(void*,size_t))at(0xc03d0))(*(void**)at(0x580eaf0),(traits?traits:1)*2);
         memcpy(trait_memory,p+196,traits*2);*(void**)(manager+0x3000)=trait_memory;*(void**)(manager+0x3008)=trait_memory+traits*2;*(void**)(manager+0x3010)=trait_memory+(traits?traits:1)*2;
         *(uint32_t*)(manager+0x30a0)=0x24000u|*(uint32_t*)(p+272);
         *(uint32_t*)(team+0xd4)=*(uint32_t*)(p+276);
@@ -63,7 +63,7 @@ static void source_generation_install(unsigned char* match){
                 auto actor=*(unsigned char**)(team+0x138+8*i);
                 if(*(uint32_t*)(actor+0x50)!=uid)continue;
                 auto key=person_key(actor);
-                ((void(*)(void*,uint32_t,const uint32_t*,size_t))at(0x4a1e230))(list,0xffffffff,&key,1);
+                ((void(*)(void*,uint32_t,const uint32_t*,size_t))at(0x4bcffd0))(list,0xffffffff,&key,1);
                 if(i<11&&*(uint32_t*)(manager+0x8e8)==0x4e554c4c)*(uint32_t*)(manager+0x8e8)=key;
             }
         }
@@ -92,7 +92,7 @@ static void source_generation_verified(unsigned char* match){
         memcpy(expected_manager[side]+0x30c1,generation_source.data()+8+288*side+186,7);
     }
     for(unsigned side=0;side<2;side++)*(void**)(expected_manager[side]+0x290)=expected_team[1-side];
-    for(unsigned side=0;side<2;side++)if(!*(uint32_t*)(generation_source.data()+8+288*side+272))((void(*)(void*))at(0xd1180))(expected_manager[side]);
+    for(unsigned side=0;side<2;side++)if(!*(uint32_t*)(generation_source.data()+8+288*side+272))((void(*)(void*))at(0x6a370))(expected_manager[side]);
     wchar_t output[32768]={};GetEnvironmentVariableW(L"FM27_SOURCE_PLAN_DIRECTORY",output,32768);
     for(unsigned side=0;side<2;side++){
         auto p=generation_source.data()+8+288*side;
@@ -128,7 +128,7 @@ static void source_generation_verified(unsigned char* match){
         if(!output[0])continue;
         std::vector<unsigned char> bytes;void* methods[8]={};methods[2]=(void*)desktop_write_tell;methods[3]=(void*)desktop_write_seek;methods[5]=(void*)desktop_tac_write;
         DesktopTacticWriter writer={methods,0,0,0,&bytes,0};void* reference=&writer;
-        auto accepted=((unsigned char(*)(void*,void**,unsigned char))at(0x49a9ab0))(manager+0x1818,&reference,1);
+        auto accepted=((unsigned char(*)(void*,void**,unsigned char))at(0x1b8bfc0))(manager+0x1818,&reference,1);
         if(!accepted||writer.error||bytes.empty())desktop_finish_and_exit(233);
         std::ofstream file(fs::path(output)/(std::to_string(side)+".tac"),std::ios::binary);file.write((char*)bytes.data(),bytes.size());file.flush();if(!file)desktop_finish_and_exit(233);
     }

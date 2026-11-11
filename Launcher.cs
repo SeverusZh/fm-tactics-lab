@@ -11,6 +11,10 @@ using System.Text;
 using System.Threading;
 using System.Windows.Forms;
 
+[assembly: AssemblyVersion("1.111.2.0")]
+[assembly: AssemblyFileVersion("1.111.2.0")]
+[assembly: AssemblyInformationalVersion("v1111.2")]
+
 internal static class Program {
     static string L(string zh,string en){return System.Globalization.CultureInfo.CurrentUICulture.TwoLetterISOLanguageName=="zh"?zh:en;}
     static Process server;
@@ -81,7 +85,7 @@ internal static class Program {
                 if(headless){int code=0;try{server.WaitForExit();code=server.ExitCode;}finally{Stop();}return code;}
                 Application.EnableVisualStyles();Application.SetCompatibleTextRenderingDefault(false);
                 using(var appIcon=Icon.ExtractAssociatedIcon(Application.ExecutablePath))using(var context=new ApplicationContext())using(var tray=new NotifyIcon())using(var menu=new ContextMenuStrip())using(var timer=new System.Windows.Forms.Timer()){
-                    tray.Text=L("FM 战术实验室 · v1109.3","FM Tactics Lab \u00b7 v1109.3");tray.Icon=appIcon??SystemIcons.Application;tray.ContextMenuStrip=menu;tray.Visible=!lifecycleTest;
+                    tray.Text=L("FM 战术实验室 · v1111.2","FM Tactics Lab \u00b7 v1111.2");tray.Icon=appIcon??SystemIcons.Application;tray.ContextMenuStrip=menu;tray.Visible=!lifecycleTest;
                     menu.Items.Add(L("打开战术板","Open tactics board"),null,(s,e)=>OpenApp());menu.Items.Add(L("打开结果目录","Open results folder"),null,(s,e)=>Process.Start(new ProcessStartInfo(dataRoot){UseShellExecute=true}));menu.Items.Add(L("退出","Exit"),null,(s,e)=>context.ExitThread());tray.DoubleClick+=(s,e)=>OpenApp();
                     DateTime launched=DateTime.UtcNow;bool seenPage=false;int failedChecks=0;
                     timer.Interval=2000;timer.Tick+=(s,e)=>{
@@ -91,7 +95,7 @@ internal static class Program {
                     };
                     timer.Start();if(!Has(args,"--no-browser"))OpenApp();try{Application.Run(context);}finally{timer.Stop();tray.Visible=false;Stop();}return 0;
                 }
-            }catch(Exception ex){Stop();File.WriteAllText(Path.Combine(dataRoot,"startup-error.txt"),ex.ToString(),Encoding.UTF8);if(!selfTest&&!headless)MessageBox.Show(ex.Message,L("FM 战术实验室 · v1109.3","FM Tactics Lab \u00b7 v1109.3"),MessageBoxButtons.OK,MessageBoxIcon.Error);return 1;}
+            }catch(Exception ex){Stop();File.WriteAllText(Path.Combine(dataRoot,"startup-error.txt"),ex.ToString(),Encoding.UTF8);if(!selfTest&&!headless)MessageBox.Show(ex.Message,L("FM 战术实验室 · v1111.2","FM Tactics Lab \u00b7 v1111.2"),MessageBoxButtons.OK,MessageBoxIcon.Error);return 1;}
         }
     }
 }

@@ -48,7 +48,7 @@ Each batch uses a sequence of random seeds. When comparing a saved reference wit
 
 ## Download and launch
 
-The current source version is **v1109.3**. Download published desktop builds from [GitHub Releases](https://github.com/lqf0624/fm-tactics-lab/releases). Exit the previous app from its tray menu before launching an update.
+The current source version is **v1111.2**. Download published desktop builds from [GitHub Releases](https://github.com/lqf0624/fm-tactics-lab/releases). Exit the previous app from its tray menu before launching an update.
 
 Install FM27, open Steam and sign in to the account that owns the game, then launch the EXE. The tool looks for your installation automatically. You can also select the game root containing `fm_Data` and `shared` in the engine settings at the top.
 
@@ -64,9 +64,9 @@ Opponent tactics use a built-in preset selected from the head coach's saved styl
 
 ## Save tactics
 
-On **存档战术** (Save Tactics), read a save, then pick any loaded league in the game world to list every opponent head coach's preferences, excluding your club. Each coach produces two original game presets: one for his primary preferred formation and one for his secondary formation (tactic 1 and 2). Export the league's tactics into a local folder or add them to the away tactic pool in one click; pool imports are not deduplicated, so the same tactic may be added more than once. Exported files follow `club-coach-tactic N`. League and country names are read from the local FM27 game database and follow the interface language (Chinese or English); each league is listed once, using the active or nearest schedule, and unavailable names fall back to league numbers. Exported files are preset approximations, not the actual match-day tactics.
+On **存档战术** (Save Tactics), read a save, then pick any loaded league in the game world to list every opponent head coach's preferences, excluding your club. Each coach produces up to two original game presets: one for his primary preferred formation and one for his secondary formation (tactic 1 and 2; a single preset remains when the secondary preference is missing or identical). Export the league's tactics into a local folder or add them to the away tactic pool in one click; pool imports are not deduplicated, so the same tactic may be added more than once. Exported files follow `club-coach-第1套战术.fmf` / `club-coach-第2套战术.fmf` (the tactic suffix is Chinese). League and country names are read from the local FM27 game database and follow the interface language (Chinese or English); each league is listed once, using the active or nearest schedule, and unavailable names fall back to league numbers. Exported files are preset approximations, not the actual match-day tactics.
 
-Opponents in your current league can also batch-generate **real AI tactics**: for each club the tool reads its current head coach, current squad and your own coach, runs the original engine's zero-tick match preparation, and reads back the AI-generated two-phase plan (mentality, team instructions, roles and duties, player instructions and phase mapping). Every opponent produces two plans - tactic 1 for the opponent at home and tactic 2 for the opponent away - and they replace the two list columns (shown as `club home tactic` / `club away tactic`). Generation shows a progress bar, caches finished variants and only fills gaps on later runs. Export as `club-coach-home tactic.fmf` or `club-coach-away tactic.fmf` or import straight into the away tactic pool. This is the engine's real output for the preview context (seed 0), not a recording of a finished match; a real fixture regenerates the plan from its own squad and context. Clubs whose coach profile falls outside the engine's supported range keep their presets and show the failure reason.
+Opponents in your current league can also batch-generate **real AI tactics**: for each club the tool reads its current head coach, current squad and your own coach, runs the original engine's zero-tick match preparation, and reads back the AI-generated two-phase plan (mentality, team instructions, roles and duties, player instructions and phase mapping). Every opponent produces two plans - tactic 1 for the opponent at home and tactic 2 for the opponent away - and they replace the two list columns (shown as `club home tactic` / `club away tactic`). Generation shows a progress bar, caches finished variants and only fills missing clubs and contexts on later full runs, while a single-club button rebuilds both of that club's plans; the cache is bound to the generation engine identity, so a changed original engine or native adapter invalidates it and regenerates. Export as `club-coach-主场战术.fmf` or `club-coach-客场战术.fmf` or import straight into the away tactic pool; export and pool import merge generated plans with still-available manager presets per club and variant, keep presets for clubs without generated plans and report them as omitted. This is the original AI's output in a controlled preview context (current save squad, fixed preview seed 0 and the tool's default player-side template), not a recording of a finished match; a real fixture is generated by the in-game AI from its own squad and context, and this tool never recalculates per match - the away tactic pool stores this fixed plan. Clubs whose coach profile falls outside the engine's supported range keep their presets and show the failure reason.
 
 ![Batch real AI tactic generation progress](docs/screenshots/save-tactics-progress.png)
 
@@ -87,7 +87,7 @@ Open **战术板** (Tactics Board):
 - Drag shirts to swap players while keeping roles, duties and instructions attached to their positions. Moving to an empty position prompts for confirmation if any settings need to change.
 - Adjust mentality, passing, pressing and other team instructions.
 - Configure or import set-piece routines separately in **定位球与职责** (Set Pieces and Responsibilities).
-- **Away tactic pool**: import local FMF tactics on the pool page, or add the selected league's primary/secondary preference presets from **存档战术** in one click. With random mode enabled in the bottom bar, each match draws one away tactic by weight.
+- **Random opponent tactics**: enable the option beside Run matches to expand FMF import, candidates and weights. Save tactics can add candidates without enabling randomization. Disabling this option retains candidates and weights and uses the currently selected opponent tactic.
 
 Imported tactics remain editable. When the away tactic pool is enabled, every away player's ability attributes can be unified to a configurable interface value (15 by default), while starters receive maximum positional familiarity 20 for the drawn tactic's positions. Draws are derived from the task seed and reproduce within the same experiment.
 
@@ -156,10 +156,14 @@ The random away tactic pool can be combined with experimental tactical execution
 
 ## Version and project information
 
-The current source version is **v1109.3**, for Windows x64. The adapter reference build is `27.0.0+2493426`. Tool code is licensed under MIT; the engine and game resources come from your local installation.
+The current source version is **v1111.2**, for Windows x64. The adapter reference build is `27.0.1+2494687`. Tool code is licensed under MIT; the engine and game resources come from your local installation.
 
 Original engine code and a career match's complete conditions are separate considerations. This tool standardizes starting states; inputs, random states and in-match interventions affect results. Evidence and validation scope are described in [Simulation Fidelity](docs/SIMULATION_FIDELITY.md).
 
 For startup, path or version issues, see [Troubleshooting](docs/TROUBLESHOOTING.md). Developers can read the [build guide](docs/DEVELOPMENT.md), [contribution guide](CONTRIBUTING.md) and [third-party notices](THIRD_PARTY_NOTICES.md).
 
 The interface and system tray follow the Windows display language. Simplified Chinese and English are supported, with English as the fallback. Player names, club names, tactic data and raw logs retain their original text.
+
+## v1111.2 compatibility
+
+Supports the official FM27 27.0.1+2494687 engine and combines PR #3 with the v1111 adapter and save-reader fixes. AI plans use current squads, seed 0 and the default player-side template in a controlled preview; pool entries remain fixed plans.

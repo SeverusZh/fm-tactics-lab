@@ -3,7 +3,7 @@
 The complete ordinal/footer walk must succeed. A matching partial prefix is
 never returned as a recovered table.
 """
-import struct
+import re,struct
 U32=struct.Struct('<I');U16=struct.Struct('<H');FOOT=struct.Struct('<III')
 
 def record(data,at,ordinal):
@@ -71,14 +71,48 @@ def locate(data,count,wanted=None):
 
 
 def from_save(save,data,wanted=None):
-    """Discover the declared count from the source team index, then verify all rows.
+    """Use the club index as a lower bound, not the complete TEAM count.
 
-    The index is only a candidate count. locate() requires the actual count word,
-    every ordinal and the complete table grammar; no prefix is accepted.
+    Career-created/non-club teams can follow the last club-listed team. Try the
+    indexed count first, then discover a declared count with the same full walk.
+    Every ordinal/footer must still pass and exactly one table must qualify.
     """
     index=save._context.club_index().team_to_club
     if not index:raise ValueError('Empty source team index')
-    return locate(data,max(index)+1,wanted)
+    minimum=max(index)+1
+    try:return locate(data,minimum,wanted)
+    except ValueError as error:
+        if not isinstance(error.args[0],dict)or error.args[0].get('candidates')!=0:raise
+    return discover(data,minimum,wanted)
+
+
+def discover(data,minimum,wanted=None):
+    """Find candidate count words; only a complete unique table is returned."""
+    assert 0<minimum<1000000
+    # Overlapping lookahead avoids skipping a real header next to a false hit.
+    # Same count cap, mode byte and first-record variant as locate().
+    pattern=re.compile(rb'(?=(.{2}[\x00-\x0f]\x00)[\x00-\x03][\x00-\x0b])',re.DOTALL)
+    candidates=[];attempts=[]
+    for match in pattern.finditer(data):
+        hit=match.start();count=U32.unpack_from(data,hit)[0]
+        if not minimum<=count<1000000:continue
+        first=record(data,hit+5,0)
+        if first is None:continue
+        if count>1 and record(data,first['source_end'],1)is None:continue
+        cursor=hit+5;rows=[]
+        for ordinal in range(count):
+            row=record(data,cursor,ordinal)
+            if row is None:break
+            cursor=row['source_end']
+            if wanted is None or ordinal in wanted:rows.append(row)
+        else:
+            candidates.append({'count':count,'header_offset':hit,'end':cursor,'records':rows})
+        if len(attempts)<16:
+            attempts.append({'offset':hit,'count':count,'accepted_records':ordinal+(row is not None),'failure_offset':cursor})
+    if len(candidates)!=1:
+        raise ValueError({'error':'TEAM table not uniquely verified','minimum_count':minimum,
+                          'candidates':len(candidates),'attempts':attempts})
+    return candidates[0]
 
 if __name__=='__main__':
     import sys,json

@@ -7,7 +7,9 @@ from pathlib import Path
 import struct
 import sys
 import tempfile
+import threading
 import time
+import types
 import unittest
 from unittest import mock
 
@@ -118,7 +120,8 @@ class ExportWriteTests(unittest.TestCase):
         self.assertFalse(any(path.is_dir() for path in root.iterdir()))
         manifest=json.loads((root/'manifest.json').read_text(encoding='utf8'))
         self.assertEqual(manifest['profile'],result['profile'])
-        self.assertEqual(manifest['source'],SOURCE)
+        self.assertEqual(manifest['source'],{'save_id':SOURCE['save_id'],'source_name':'career.fm',
+            'source_sha256':SOURCE['source_sha256'],'date':SOURCE['date'],'build':SOURCE['build']})
         self.assertEqual(manifest['files'],result['files'])
         self.assertTrue(manifest['created']and manifest['notice'])
         plans={0:sample_plan(1),1:sample_plan(2),2:sample_plan(3)}
@@ -230,6 +233,10 @@ class _Engine:
     def sha(self,path):return hashlib.sha256(str(path).encode()).hexdigest()
     def require_available(self,compatibility):return None
 
+class _AlternateEngine:
+    def sha(self,path):return 'f'*64
+    def require_available(self,compatibility):return None
+
 class _App:
     def __init__(self,root):
         self.RUNS=root/'runs';self.RUNS.mkdir(parents=True)
@@ -262,7 +269,7 @@ class SaveLibraryLeagueTests(unittest.TestCase):
 
     def save(self):
         key='0123456789abcdef';folder=self.lib.root/key;folder.mkdir(parents=True)
-        data={'schema':4,'source':SOURCE['source'],'source_sha256':SOURCE['source_sha256'],'date':SOURCE['date'],
+        data={'schema':5,'source':SOURCE['source'],'source_sha256':SOURCE['source_sha256'],'date':SOURCE['date'],
               'build':SOURCE['build'],'tactics':[],'fixtures':[],'selections':[],'caches':[],
               'managed':[{'club_uid':1}],
               'clubs':[{'uid':1,'name':'甲队','short_name':'甲','nation_id':14}],
@@ -386,8 +393,9 @@ class SaveLibraryLeagueTests(unittest.TestCase):
             ['丙队-丙队主教练-第1套战术','乙队-乙队主教练-第1套战术'])
         self.assertEqual(len(pool['entries']),2)
         self.assertEqual(value['imported'],[{'club_uid':3,'club':'丙队','coach':'丙队主教练','index':1,
-            'name':'丙队-丙队主教练-第1套战术'},{'club_uid':2,'club':'乙队','coach':'乙队主教练','index':1,
-            'name':'乙队-乙队主教练-第1套战术'}])
+            'source':'coach_preset','venue':None,'label':None,'name':'丙队-丙队主教练-第1套战术'},
+            {'club_uid':2,'club':'乙队','coach':'乙队主教练','index':1,
+            'source':'coach_preset','venue':None,'label':None,'name':'乙队-乙队主教练-第1套战术'}])
         self.assertNotIn('away_tactic_pool',scenario)
         with mock.patch.object(desktop_coach_presets,'ensure',return_value=ensured),\
              mock.patch.object(desktop_coach_presets,'preset_by_index_team',return_value=preset_team(extra='3')):
@@ -410,6 +418,50 @@ class SaveLibraryLeagueTests(unittest.TestCase):
         self.assertIn('最多保存',str(caught.exception))
         self.assertEqual(len(scenario['away_tactic_pool']['entries']),fm27_tactic_pool.MAX_ENTRIES)
 
+    def wait_league(self,key,status,timeout=5):
+        deadline=time.time()+timeout
+        while time.time()<deadline:
+            value=self.lib.league_library(key,'17:200:2026')
+            if value.get('status')==status:return value
+            time.sleep(0.01)
+        raise AssertionError('league status timeout')
+
+    def test_league_read_retries_after_transient_failure(self):
+        key,_=self.save()
+        ensured={'teams':[self.team(2,'乙队'),self.team(3,'丙队')],
+            'failures':[{'club_uid':4,'name':'丁队','error':'主教练缺失'}]}
+        with mock.patch.object(desktop_coach_presets,'ensure',side_effect=ValueError('临时失败')):
+            self.assertEqual(self.lib.league_library(key,'17:200:2026')['status'],'reading')
+            self.assertEqual(self.wait_league(key,'error')['status'],'error')
+        with mock.patch.object(desktop_coach_presets,'ensure',return_value=ensured):
+            self.assertEqual(self.lib.league_library(key,'17:200:2026')['status'],'reading')
+            self.assertEqual(self.wait_league(key,'complete')['status'],'complete')
+
+    def test_selection_skips_incomplete_club_index(self):
+        index={'league_clubs':{'2':{'name':'乙队','first_team_id':12},'3':{'name':'丙队'}}}
+        rows=desktop_coach_presets._selection(None,index,[2,3])
+        self.assertEqual([row['uid']for row in rows],[2])
+        with self.assertRaises(ValueError):desktop_coach_presets._selection(None,{'league_clubs':{}},[2])
+
+    def test_preset_index_team_verifies_expected_sha(self):
+        key,_=self.save()
+        catalog={'styles':[],'formations':[],
+            'templates':[{'index':0,'style_code':0,'name':'预设','phases':[[],[]]}],'binding':{}}
+        with mock.patch.object(desktop_coach_presets,'assets',return_value=catalog),\
+             mock.patch.object(desktop_coach_presets,'_preset_team',return_value={'name':'甲'}):
+            expected=desktop_coach_presets.digest(catalog['templates'][0])
+            self.assertEqual(desktop_coach_presets.preset_by_index_team(self.lib,key,0,'队',expected),
+                {'name':'甲'})
+            with self.assertRaises(ValueError):
+                desktop_coach_presets.preset_by_index_team(self.lib,key,0,'队','0'*64)
+
+    def test_start_rejects_while_real_generation_runs(self):
+        source=self.root/'save.fm';source.write_bytes(b'save')
+        key,_=self.save()
+        self.lib.real_active={'key':key,'league':'17:200:2026','token':'t'}
+        with self.assertRaises(ValueError)as caught:self.lib.start(str(source))
+        self.assertIn('真实AI战术',str(caught.exception))
+
 class RealGenerationTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -422,7 +474,7 @@ class RealGenerationTests(unittest.TestCase):
             return_value={'competitions':{101:'测试甲级联赛',102:'测试乙级联赛'},'nations':{5:'英格兰'},'source':'game_db'})
         self.names.start()
         self.key='0123456789abcdef';folder=self.lib.root/self.key;folder.mkdir(parents=True)
-        data={'schema':4,'source':SOURCE['source'],'source_sha256':SOURCE['source_sha256'],'date':SOURCE['date'],
+        data={'schema':5,'source':SOURCE['source'],'source_sha256':SOURCE['source_sha256'],'date':SOURCE['date'],
               'build':SOURCE['build'],'tactics':[],'fixtures':[],'selections':[],'caches':[],'managed':[{'club_uid':1}],
               'clubs':[{'uid':1,'name':'甲队','short_name':'甲','nation_id':14}],
               'leagues':[{'key':'17:200:2026','competition_id':17,'stage_id':200,'season':2026,
@@ -527,7 +579,7 @@ class RealGenerationTests(unittest.TestCase):
             self.assertEqual(entry['report']['source'],'original_engine_generation')
             self.assertIn(entry['report']['venue'],('H','A'))
         notice=(Path(result['directory'])/'导出说明.txt').read_text(encoding='utf8')
-        self.assertIn('对手主场、对手客场',notice)
+        self.assertIn('对手主场、对手客场',notice);self.assertIn('career.fm',notice);self.assertNotIn('C:/saves',notice)
 
     def test_pool_import_uses_generated_library(self):
         started=self.patches()
@@ -568,10 +620,246 @@ class RealGenerationTests(unittest.TestCase):
         self.assertTrue(rows[2]['real']);self.assertTrue(all(variant['source']=='real_ai'for variant in rows[2]['variants']))
         self.assertEqual([variant['label']for variant in rows[2]['variants']],['队2主场战术','队2客场战术'])
 
+    def write_library(self,teams,failures=()):
+        value=desktop_real_library.build(SOURCE['source_sha256'],'17:200:2026',1,list(teams),list(failures),
+            0,self.lib.real_binding(self.key))
+        return desktop_real_library.save(self.lib,self.key,value)
+
+    def real_team_row(self,club_uid,club,venues=('A','H')):
+        variants=[]
+        for venue in venues:
+            index=1 if venue=='A' else 2
+            word='主场'if venue=='A'else'客场'
+            variants.append({'index':index,'venue':venue,'label':f'{club}{word}战术',
+                'name':f'{club}-教练-{word}战术','tactic_name':f'真实-{club}-{venue}',
+                'plan':{'mentality':5,'team_bits':'00'*16,'lineup_source_uids':list(range(11))},
+                'roster':list(range(club_uid*100,club_uid*100+23)),'club_uid':club_uid,'club':club,
+                'coach':f'教练{club_uid}','plan_sha256':hashlib.sha256(f'plan-{club_uid}-{venue}'.encode()).hexdigest(),
+                'payload_sha256':'a'*64,'config_sha256':'b'*64,'generated_at':'2026-11-10T00:00:00+08:00'})
+        return {'club_uid':club_uid,'club':club,'coach':f'教练{club_uid}','variants':variants}
+
+    def preset_rows(self):
+        return {'teams':[self.coach_row(2),self.coach_row(3)],'failures':[]}
+
+    def test_export_merges_generated_and_preset_teams(self):
+        started=self.patches()
+        for patch in started:patch.start();self.addCleanup(patch.stop)
+        self.lib.generate_real_team(self.key,'17:200:2026',2)
+        with mock.patch.object(desktop_coach_presets,'ensure',return_value=self.preset_rows()),\
+             mock.patch.object(desktop_coach_presets,'preset_by_index_team',return_value=preset_team()),\
+             mock.patch.object(desktop_real_generation,'team_from_plan',return_value={'name':'队2'}):
+            result=self.lib.export_league_tactics(self.key,'17:200:2026',str(self.directory))
+        self.assertEqual(result['source'],'mixed')
+        self.assertEqual((result['real_count'],result['preset_count']),(2,2))
+        self.assertEqual(result['profile'],desktop_save_export.MIXED_PROFILE)
+        self.assertEqual(len(result['files']),4)
+        self.assertEqual(sorted({entry['club_uid']for entry in result['files']}),[2,3])
+        self.assertEqual(result['skipped'],[])
+        notice=(Path(result['directory'])/'导出说明.txt').read_text(encoding='utf8')
+        self.assertIn('真实AI战术 2 套',notice);self.assertIn('教练偏好预设 2 套',notice)
+        self.assertIn('career.fm',notice);self.assertNotIn('C:/saves',notice)
+
+    def test_export_and_pool_import_fall_back_when_library_is_empty(self):
+        failures=[{'club_uid':2,'club':'乙队','venue':'A','error':'主教练档案超出范围'}]
+        self.write_library([],failures)
+        scenario={'teams':[{'name':'甲'},{'name':'乙'}]}
+        self.app.validate_scenario=lambda value:value
+        with mock.patch.object(desktop_coach_presets,'ensure',return_value=self.preset_rows()),\
+             mock.patch.object(desktop_coach_presets,'preset_by_index_team',return_value=preset_team()):
+            result=self.lib.export_league_tactics(self.key,'17:200:2026',str(self.directory))
+            imported=self.lib.import_league_tactics_pool(self.key,'17:200:2026',scenario)
+        self.assertEqual(result['source'],'coach_preset')
+        self.assertEqual(len(result['files']),4)
+        self.assertEqual(result['generation_failures'],failures)
+        self.assertEqual(imported['source'],'coach_preset')
+        self.assertEqual(len(imported['imported']),4)
+        self.assertEqual(imported['skipped'],[])
+        self.assertEqual(len(imported['generation_failures']),1)
+
+    def test_partial_variant_keeps_preset_column(self):
+        self.write_library([self.real_team_row(2,'乙队',('H',))])
+        with mock.patch.object(desktop_coach_presets,'ensure',return_value=self.preset_rows()),\
+             mock.patch.object(desktop_coach_presets,'preset_by_index_team',return_value=preset_team()),\
+             mock.patch.object(desktop_real_generation,'ensure',return_value={'inputs':{},'staff':{}}),\
+             mock.patch.object(desktop_real_generation,'team_from_plan',return_value={'name':'队2'}):
+            result=self.lib.export_league_tactics(self.key,'17:200:2026',str(self.directory))
+        self.assertEqual((result['real_count'],result['preset_count']),(1,3))
+        self.assertEqual(sorted((entry['club_uid'],entry['index'])for entry in result['files']),
+            [(2,1),(2,2),(3,1),(3,2)])
+        with mock.patch.object(desktop_coach_presets,'ensure',return_value=self.preset_rows()):
+            self.lib.build_league_report(self.key,'17:200:2026')
+            view=self.lib.league_library(self.key,'17:200:2026')
+        row=next(team for team in view['teams']if team['club_uid']==2)
+        self.assertEqual([variant.get('source')for variant in row['variants']],[None,'real_ai'])
+
+    def test_import_pool_merges_generated_and_preset_teams(self):
+        started=self.patches()
+        for patch in started:patch.start();self.addCleanup(patch.stop)
+        self.lib.generate_real_team(self.key,'17:200:2026',2)
+        scenario={'teams':[{'name':'甲'},{'name':'乙'}]}
+        self.app.validate_scenario=lambda value:value
+        with mock.patch.object(desktop_coach_presets,'ensure',return_value=self.preset_rows()),\
+             mock.patch.object(desktop_coach_presets,'preset_by_index_team',return_value=preset_team()),\
+             mock.patch.object(desktop_real_generation,'team_from_plan',return_value=preset_team(extra='3')):
+            value=self.lib.import_league_tactics_pool(self.key,'17:200:2026',scenario)
+        self.assertEqual(value['source'],'mixed')
+        self.assertEqual((value['real_count'],value['preset_count']),(2,2))
+        self.assertEqual(len(value['imported']),4)
+        self.assertEqual(value['skipped'],[])
+        self.assertEqual(sorted(row['source']for row in value['imported']),['coach_preset']*2+['real_ai']*2)
+
+    def test_export_reports_omitted_variants(self):
+        ensured={'teams':[self.coach_row(2)],'failures':[{'club_uid':3,'name':'丙队','error':'主教练缺失'}]}
+        with mock.patch.object(desktop_coach_presets,'ensure',return_value=ensured),\
+             mock.patch.object(desktop_coach_presets,'preset_by_index_team',return_value=preset_team()):
+            result=self.lib.export_league_tactics(self.key,'17:200:2026',str(self.directory))
+        self.assertEqual(result['source'],'coach_preset')
+        self.assertEqual(len(result['files']),2)
+        self.assertEqual(len(result['skipped']),2)
+        self.assertEqual({row['club_uid']for row in result['skipped']},{3})
+        self.assertEqual(len(result['failures']),1)
+
+    def test_export_keeps_generated_rows_when_preset_read_fails(self):
+        started=self.patches()
+        for patch in started:patch.start();self.addCleanup(patch.stop)
+        self.lib.generate_real_team(self.key,'17:200:2026',2)
+        with mock.patch.object(desktop_coach_presets,'ensure',side_effect=ValueError('预设读取失败')),\
+             mock.patch.object(desktop_real_generation,'team_from_plan',return_value={'name':'队2'}):
+            result=self.lib.export_league_tactics(self.key,'17:200:2026',str(self.directory))
+        self.assertEqual(result['source'],'real_ai')
+        self.assertEqual((result['real_count'],result['preset_count']),(2,0))
+        self.assertEqual({row['club_uid']for row in result['skipped']},{3})
+        self.assertTrue(any('教练偏好预设'in(item.get('club')or'')for item in result['failures']))
+
+    def test_resolved_generation_failures_are_dropped(self):
+        binding=self.lib.real_binding(self.key)
+        existing=desktop_real_library.build(SOURCE['source_sha256'],'17:200:2026',1,
+            [self.real_team_row(2,'乙队',('A',))],[{'club_uid':2,'venue':'H','error':'失败'}],0,binding)
+        merged=desktop_real_library.merge(existing,'17:200:2026',1,SOURCE['source_sha256'],
+            [self.real_team_row(2,'乙队',('A','H'))],[],1,binding)
+        self.assertEqual(merged['failures'],[])
+        self.assertEqual(len(desktop_real_library.variants(desktop_real_library.team(merged,2))),2)
+
+    def test_export_loads_generation_inputs_once(self):
+        started=self.patches()
+        for patch in started:patch.start();self.addCleanup(patch.stop)
+        self.lib.generate_real_team(self.key,'17:200:2026',2)
+        with mock.patch.object(desktop_coach_presets,'ensure',return_value=self.preset_rows()),\
+             mock.patch.object(desktop_coach_presets,'preset_by_index_team',return_value=preset_team()),\
+             mock.patch.object(desktop_real_generation,'ensure',return_value={'inputs':{},'staff':{}})as ensure_mock,\
+             mock.patch.object(desktop_real_generation,'team_from_plan',return_value={'name':'队2'}):
+            self.lib.export_league_tactics(self.key,'17:200:2026',str(self.directory))
+        self.assertEqual(ensure_mock.call_count,1)
+
+    def test_engine_identity_change_invalidates_and_regenerates_library(self):
+        started=self.patches()
+        for patch in started:patch.start();self.addCleanup(patch.stop)
+        self.lib.start_real_generation(self.key,'17:200:2026');self.wait_complete()
+        self.assertIsNotNone(desktop_real_library.load(self.lib,self.key,'17:200:2026'))
+        self.app.desktop_engine=_AlternateEngine();self.app.ENGINE_COMPATIBILITY={'resource_fingerprint':'changed'}
+        self.lib.check_binding(self.lib.folder(self.key))
+        self.assertIsNone(desktop_real_library.load(self.lib,self.key,'17:200:2026'))
+        self.assertIsNone(self.lib.real_library(self.key,'17:200:2026'))
+        self.assertEqual(self.lib.real_generation_status(self.key,'17:200:2026')['status'],'idle')
+        state=self.lib.start_real_generation(self.key,'17:200:2026')
+        self.assertEqual(state['status'],'reading')
+        self.assertEqual(self.wait_complete()['status'],'complete')
+        self.assertEqual(len(self.preview_calls),8)
+        library=desktop_real_library.load(self.lib,self.key,'17:200:2026')
+        self.assertEqual(library['binding'],self.lib.real_binding(self.key))
+
+    def test_completion_state_is_published_after_generation_lock_release(self):
+        started=self.patches()
+        for patch in started:patch.start();self.addCleanup(patch.stop)
+        observed=[];original=self.lib.write
+        def write(path,value):
+            if path.name.startswith('real_progress_')and isinstance(value,dict)and value.get('status')=='complete':
+                observed.append(self.lib.real_generation_lock.locked())
+            return original(path,value)
+        with mock.patch.object(self.lib,'write',side_effect=write):
+            self.lib.start_real_generation(self.key,'17:200:2026');self.wait_complete()
+            deadline=time.time()+5
+            while time.time()<deadline and not observed:time.sleep(0.01)
+        self.assertTrue(observed);self.assertFalse(any(observed))
+        again=self.lib.start_real_generation(self.key,'17:200:2026',force=True)
+        self.assertEqual(again['status'],'reading')
+        self.wait_complete()
+        self.assertEqual(len(self.preview_calls),8)
+
+    def test_status_reports_reading_while_single_team_generation_runs(self):
+        gate=threading.Event();entered=threading.Event()
+        def preview(lib,key,own,opponent,venue='H',seed=0,prepared=None):
+            self.preview_calls.append((opponent,venue));entered.set();gate.wait(10);return self.result(opponent,venue)
+        patches=[mock.patch.object(desktop_real_generation,'ensure',return_value={'inputs':{},'staff':{}}),
+            mock.patch.object(desktop_real_generation,'preview',side_effect=preview)]
+        for patch in patches:patch.start();self.addCleanup(patch.stop)
+        results=[]
+        worker=threading.Thread(target=lambda:results.append(self.lib.generate_real_team(self.key,'17:200:2026',2)))
+        worker.start();self.assertTrue(entered.wait(10))
+        self.assertEqual(self.lib.real_generation_status(self.key,'17:200:2026')['status'],'reading')
+        gate.set();worker.join(10)
+        self.assertEqual(results[0]['status'],'complete')
+
     def coach_row(self,club_uid):
         return {'club_uid':club_uid,'name':f'队{club_uid}','coach_name':f'教练{club_uid}','available':True,
             'variants':[{'index':1,'preset_index':1,'preset_sha256':'d'*64,'preset_name':'预设1','formation':'','formation_code':1,'exact':True,'position_difference':0},
                         {'index':2,'preset_index':2,'preset_sha256':'e'*64,'preset_name':'预设2','formation':'','formation_code':2,'exact':True,'position_difference':0}],'error':None}
+
+class RealGenerationCacheTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.temp_root=ROOT/'build/test-temp';cls.temp_root.mkdir(parents=True,exist_ok=True)
+
+    def setUp(self):
+        self.holder=tempfile.TemporaryDirectory(dir=self.temp_root);self.root=Path(self.holder.name)
+        self.app=_App(self.root);self.lib=desktop_save_mode.SaveLibrary(self.app)
+        self.key='0123456789abcdef';self.folder=self.lib.root/self.key;self.folder.mkdir(parents=True)
+        self.source=self.root/'career.fm';self.source.write_bytes(b'career-save')
+        self.digest=hashlib.sha256(b'career-save').hexdigest()
+        data={'schema':5,'source':str(self.source),'source_sha256':self.digest,'date':SOURCE['date'],
+              'build':SOURCE['build'],'tactics':[],'fixtures':[],'selections':[],'caches':[],
+              'managed':[{'club_uid':1}],'clubs':[],
+              'leagues':[{'key':'17:200:2026','competition_id':17,'stage_id':200,'season':2026,
+                          'club_uids':[1],'fixture_count':0,'first_date':'2026-08-01','last_date':'2027-05-01'}],
+              'league_clubs':{}}
+        (self.folder/'dataset.json').write_text(json.dumps(data,ensure_ascii=False),encoding='utf8')
+        self.lib.check_binding(self.folder);desktop_save_mode.dataset.cache_clear()
+        self.runs=[];self.native_calls=[]
+        def fake_run(script,args,log_path,timeout):
+            name=Path(script).name;self.runs.append(name);out=Path(args[1])
+            if name=='desktop_generation_inputs.py':
+                (out/'generation_inputs.json').write_text(json.dumps({'source_sha256':self.digest}),encoding='utf8')
+            else:
+                (out/'staff_fragments.json').write_text(json.dumps({'source_sha256':self.digest,
+                    'human_ready':True,'rows':[]}),encoding='utf8')
+            return types.SimpleNamespace(returncode=0)
+        self.run_patch=mock.patch.object(desktop_real_generation,'_run',side_effect=fake_run);self.run_patch.start()
+        self.addCleanup(self.run_patch.stop)
+        self.native_patch=mock.patch.object(self.lib,'native',side_effect=lambda *args,**kwargs:[]);self.native_patch.start()
+        self.addCleanup(self.native_patch.stop)
+
+    def tearDown(self):
+        desktop_save_mode.dataset.cache_clear();self.holder.cleanup()
+
+    def test_staff_cache_is_bound_to_engine_identity(self):
+        first=desktop_real_generation.ensure(self.lib,self.key)
+        self.assertEqual(self.runs,['desktop_generation_inputs.py','desktop_real_generation_prepare.py'])
+        self.assertEqual(first['binding'],self.lib.real_binding(self.key))
+        desktop_real_generation.ensure(self.lib,self.key)
+        self.assertEqual(len(self.runs),2)
+        self.app.desktop_engine=_AlternateEngine();self.app.ENGINE_COMPATIBILITY={'resource_fingerprint':'changed'}
+        self.lib.check_binding(self.folder)
+        third=desktop_real_generation.ensure(self.lib,self.key)
+        self.assertEqual(len(self.runs),4)
+        self.assertNotEqual(third['binding'],first['binding'])
+
+    def test_plan_cache_key_includes_engine_identity(self):
+        identity=self.lib.real_binding(self.key)
+        changed={'engine':{'host_sha256':'f'*64,'resource_fingerprint':'changed'},'fixture_sha256':None,
+            'protocol':desktop_generation_protocol.PROFILE,'prep_version':desktop_real_generation.PREP_VERSION}
+        first=desktop_real_generation.plan_cache(self.lib,self.key,'a'*32,0,identity)
+        second=desktop_real_generation.plan_cache(self.lib,self.key,'a'*32,0,changed)
+        self.assertNotEqual(first,second)
 
 class RealGenerationPayloadTests(unittest.TestCase):
     def inputs(self):
@@ -636,14 +924,16 @@ class ReusableSourceTests(unittest.TestCase):
     def tearDown(self):
         desktop_save_mode.dataset.cache_clear();self.holder.cleanup()
 
-    def test_requires_schema_4(self):
+    def test_requires_current_schema(self):
         digest='b'*64;folder=self.lib.root/'fedcba9876543210';folder.mkdir(parents=True)
         data={'source':SOURCE['source'],'source_sha256':digest,'reader_compatibility_profile':desktop_save_compat.PROFILE,
               'first_team_counts':{},'caches':[],'tactics':[],'clubs':[],'schema':3}
         self.lib.write(folder/'progress.json',{'status':'complete'})
         self.lib.write(folder/'dataset.json',data)
         self.assertIsNone(self.lib.reusable_source(digest))
-        data['schema']=4
+        data['schema']=4;self.lib.write(folder/'dataset.json',data);desktop_save_mode.dataset.cache_clear()
+        self.assertIsNone(self.lib.reusable_source(digest))
+        data['schema']=5
         self.lib.write(folder/'dataset.json',data)
         (folder/'player_index.json').write_text('{}',encoding='utf8');(folder/'rosters').mkdir()
         desktop_save_mode.dataset.cache_clear()

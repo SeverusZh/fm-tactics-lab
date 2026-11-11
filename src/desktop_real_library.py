@@ -3,7 +3,7 @@ import datetime
 import json
 from pathlib import Path
 
-PROFILE='real-ai-tactic-library-v2'
+PROFILE='real-ai-tactic-library-v3'
 
 
 def read(path):
@@ -18,7 +18,7 @@ def path(lib,key):
     return folder(lib,key)/'library.json'
 
 
-def load(lib,key,league=None):
+def load(lib,key,league=None,binding=None):
     target=path(lib,key)
     if not target.exists():return None
     try:value=read(target)
@@ -26,6 +26,11 @@ def load(lib,key,league=None):
     if not isinstance(value,dict)or value.get('profile')!=PROFILE:return None
     data=lib.index_data(lib.folder(key))
     if value.get('source_sha256')!=data['source_sha256']:return None
+    if binding is None:
+        import desktop_real_generation
+        try:binding=desktop_real_generation.binding(lib,key)
+        except (OSError,ValueError,KeyError):return None
+    if value.get('binding')!=binding:return None
     if league is not None and value.get('league')!=league:return None
     return value
 
@@ -36,12 +41,18 @@ def save(lib,key,value):
     return value
 
 
-def build(source_sha256,league,own_club,teams,failures,elapsed_seconds):
-    return {'profile':PROFILE,'source_sha256':source_sha256,'league':league,'own_club':own_club,
+def _pending_failures(teams,failures):
+    resolved={(row['club_uid'],variant.get('venue'))for row in teams for variant in row.get('variants')or []}
+    return [item for item in failures or [] if (item.get('club_uid'),item.get('venue'))not in resolved]
+
+
+def build(source_sha256,league,own_club,teams,failures,elapsed_seconds,binding):
+    teams=sorted(teams,key=lambda team:(team.get('club')or'',team['club_uid']))
+    return {'profile':PROFILE,'binding':binding,'source_sha256':source_sha256,'league':league,'own_club':own_club,
         'created':datetime.datetime.now().astimezone().isoformat(timespec='seconds'),
         'elapsed_seconds':round(elapsed_seconds,3),
-        'teams':sorted(teams,key=lambda team:(team.get('club')or'',team['club_uid'])),
-        'failures':failures}
+        'teams':teams,
+        'failures':_pending_failures(teams,failures)}
 
 
 def team(library,club_uid):
@@ -67,12 +78,13 @@ def summary(library):
         'count':len(teams),'variant_count':count,'teams':teams,'failures':library.get('failures')or []}
 
 
-def merge(existing,league,own_club,source_sha256,teams,failures,elapsed_seconds):
-    if existing is not None and existing.get('source_sha256')==source_sha256 and existing.get('league')==league:
+def merge(existing,league,own_club,source_sha256,teams,failures,elapsed_seconds,binding):
+    if (existing is not None and existing.get('source_sha256')==source_sha256 and
+            existing.get('league')==league and existing.get('binding')==binding):
         merged={str(row['club_uid']):row for row in existing.get('teams')or []}
         for row in teams:merged[str(row['club_uid'])]=row
         failures=sorted({(item.get('club_uid'),item.get('venue')):item for item in (existing.get('failures')or [])+failures}.values(),
             key=lambda item:(item.get('club_uid')or 0,str(item.get('venue'))))
         elapsed_seconds=(existing.get('elapsed_seconds')or 0)+elapsed_seconds
-        return build(source_sha256,league,own_club,list(merged.values()),failures,elapsed_seconds)
-    return build(source_sha256,league,own_club,teams,failures,elapsed_seconds)
+        return build(source_sha256,league,own_club,list(merged.values()),failures,elapsed_seconds,binding)
+    return build(source_sha256,league,own_club,teams,failures,elapsed_seconds,binding)

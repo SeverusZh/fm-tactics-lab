@@ -8,7 +8,7 @@ static void desktop_import_tac(unsigned char* match){
     wchar_t path[32768]={};bool direct=GetEnvironmentVariableW(L"FM27_IMPORT_TAC",path,32768)!=0;if(!direct&&desktop_fmf_payload.empty())return;
     std::vector<unsigned char> bytes=desktop_fmf_payload;if(direct){std::ifstream file(path,std::ios::binary);bytes.assign((std::istreambuf_iterator<char>(file)),{});}if(bytes.size()<8||bytes.size()>1024*1024)TerminateProcess(GetCurrentProcess(),172);
     void* methods[8]={};methods[2]=(void*)desktop_tac_tell;methods[3]=(void*)desktop_tac_seek;methods[5]=(void*)desktop_tac_read;DesktopTacticStream reader={methods,0,0,0,bytes.data(),bytes.size(),0};void* reference=&reader;
-    auto team=*(unsigned char**)(match+0x15380);auto manager=*(unsigned char**)(team+0x630);auto accepted=((unsigned char(*)(void*,void**,unsigned char))at(0x16fca0))(manager+0x1818,&reference,1);
+    auto team=*(unsigned char**)(match+0x15380);auto manager=*(unsigned char**)(team+0x630);auto accepted=((unsigned char(*)(void*,void**,unsigned char))at(0x161d20))(manager+0x1818,&reference,1);
     fprintf(log_file,"{\"event\":\"native_tactic_file_parsed\",\"accepted\":%s,\"stream_error\":%u,\"consumed\":%llu,\"size\":%llu,\"mentality\":%u,\"team_bits\":\"",accepted?"true":"false",reader.error,(unsigned long long)reader.cursor,(unsigned long long)reader.size,manager[0x191d]);for(unsigned j=0;j<16;j++)fprintf(log_file,"%02x",manager[0x18f8+j]);fputs("\",\"mapping\":[",log_file);for(unsigned j=0;j<11;j++)fprintf(log_file,"%s%u",j?",":"",manager[0x1fb4+j]);fputs("],\"phases\":[",log_file);
     for(unsigned phase=0;phase<2;phase++){
         fprintf(log_file,"%s[",phase?",":"");for(unsigned i=0;i<11;i++){

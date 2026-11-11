@@ -75,5 +75,5 @@ def export(output, root=ROOT):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--output', type=Path, default=ROOT / 'dist/fm-tactics-lab-v1109.3-source.zip')
+    parser.add_argument('--output', type=Path, default=ROOT / 'dist/fm-tactics-lab-v1111.2-source.zip')
     export(parser.parse_args().output)

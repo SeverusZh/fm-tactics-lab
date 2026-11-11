@@ -62,8 +62,11 @@ function libraryVariant(team,index){
  return `<span title="${esc(variant.name||variant.preset_name||'')}">${esc(variant.preset_name||'—')}${variant.formation?` <span class="tiny muted">${esc(variant.formation)}</span>`:''}</span>`;
 }
 function libraryExportResult(){
- const result=libraryExport,failures=result?.failures||[];
- return `${result?`<div class="notice">已导出 ${result.files?.length||0} 个战术文件到 ${esc(result.directory||'')}</div>`:''}${failures.length?`<details><summary>失败 ${failures.length} 项</summary>${failures.map(f=>`<p class="tiny">${esc(f.club||f.name||'')}${f.tactic_name?' · '+esc(f.tactic_name):''}：${esc(f.error||'写入失败')}</p>`).join('')}</details>`:''}`;
+ const result=libraryExport,failures=result?.failures||[],skipped=result?.skipped||[];
+ if(!result&&!failures.length&&!skipped.length)return '';
+ const counts=result&&(result.real_count||result.preset_count)?`（真实 ${result.real_count||0} 套 · 预设 ${result.preset_count||0} 套）`:'';
+ const omitted=skipped.length?`<details><summary>未导出 ${skipped.length} 套</summary>${skipped.map(s=>`<p class="tiny">${esc(s.club||('#'+s.club_uid))} · ${esc(s.index??'')} · ${esc(s.reason||'未导出')}</p>`).join('')}</details>`:'';
+ return `${result?`<div class="notice">已导出 ${result.files?.length||0} 个战术文件到 ${esc(result.directory||'')}${counts}</div>`:''}${omitted}${failures.length?`<details><summary>失败 ${failures.length} 项</summary>${failures.map(f=>`<p class="tiny">${esc(f.club||f.name||'')}${f.tactic_name?' · '+esc(f.tactic_name):''}：${esc(f.error||'写入失败')}</p>`).join('')}</details>`:''}`;
 }
 function libraryReportBody(report){
  const teams=report.teams||[],failures=report.failures||[],own=!!report.league?.own;
@@ -72,18 +75,18 @@ function libraryReportBody(report){
  const real=team=>{
   if(!own)return '';
   const has=team.real===true||(team.variants||[]).some(item=>item.source==='real_ai');
-  return `<td class="tiny"><button type="button" class="button small" data-real-tactic="${team.club_uid}" ${team.available===false||reading?'disabled':''}>${has?'重新生成':'生成'}</button></td>`;
+  return `<td class="tiny"><button type="button" class="button small" data-real-tactic="${team.club_uid}" ${reading?'disabled':''}>${has?'重新生成':'生成'}</button></td>`;
  };
  const rows=teams.map(team=>`<tr><td>${esc(team.name||'')}</td><td>${esc(team.coach_name||'—')}</td><td>${libraryVariant(team,1)}</td><td>${libraryVariant(team,2)}</td><td class="tiny muted">${team.error?esc(team.error):team.available===false?'暂不可用':'可用'}</td>${real(team)}</tr>`).join('');
  const head=own?'<th>球队</th><th>教练</th><th>第一套</th><th>第二套</th><th>状态</th><th>真实战术</th>':'<th>球队</th><th>教练</th><th>第一套</th><th>第二套</th><th>状态</th>';
  const table=teams.length?`<div class="table-scroll"><table class="library-table"><thead><tr>${head}</tr></thead><tbody>${rows}</tbody></table></div>`:`<p class="tiny muted">没有找到对手球队</p>`;
  const details=failures.length?`<details><summary>失败 ${failures.length} 项</summary>${failures.map(f=>`<p class="tiny">${esc(f.name||'')}：${esc(f.error||'读取失败')}</p>`).join('')}</details>`:'';
- const summary=report.real&&!reading?`<div class="notice">真实AI战术已就绪：${report.real.count} 队 / ${report.real.variant_count} 套 · 用时 ${Math.round(report.real.elapsed_seconds||0)} 秒</div>`:'';
+ const summary=report.real?.variant_count&&!reading?`<div class="notice">真实AI战术已就绪：${report.real.count} 队 / ${report.real.variant_count} 套 · 用时 ${Math.round(report.real.elapsed_seconds||0)} 秒</div>`:'';
  const realFailures=(report.real?.failures||[]).length?`<details><summary>真实战术失败 ${report.real.failures.length} 项</summary>${report.real.failures.map(f=>`<p class="tiny">${esc(f.club||('#'+f.club_uid))} · ${esc(f.venue==='A'?'主场':'客场')}：${esc(f.error||'生成失败')}</p>`).join('')}</details>`:'';
  const bar=own&&reading?`<div class="real-progress" role="status"><div class="real-progress-track"><div class="real-progress-bar" style="width:${pct}%"></div></div><p class="tiny muted">${esc(progress.stage||'正在生成真实AI战术')}</p></div>`:'';
- const hint=own?'<p class="tiny muted">真实战术对每个对手生成对手主场、对手客场两套；由本机原版引擎准备，首次较慢。</p>':'';
- const realButton=own?`<button id="library-real-all" class="button" ${reading?'disabled':''}>${report.real?'重新生成全部':'生成全部真实战术'}</button>`:'';
- const controls=`<div class="save-team-controls"><label>导出目录<input id="library-directory" value="${esc(libraryDirectory())}" placeholder="选择本机文件夹"></label><button id="library-folder" class="button">选择目录…</button><button id="library-export" class="button" ${reading?'disabled':''}>导出全部战术</button><button id="library-pool" class="button primary" ${reading?'disabled':''}>导入客队战术池</button>${realButton}</div>`;
+ const hint=own?'<p class="tiny muted">真实战术对每个对手生成对手主场、对手客场两套；由本机原版引擎准备，首次较慢。这是受控预览上下文输出，正式比赛由游戏内 AI 重新生成，本工具不逐场重算。</p>':'';
+ const realButton=own?`<button id="library-real-all" class="button" ${reading?'disabled':''}>${report.real?.variant_count?'补齐缺失的真实战术':'生成全部真实战术'}</button>`:'';
+ const controls=`<div class="save-team-controls"><label>导出目录<input id="library-directory" value="${esc(libraryDirectory())}" placeholder="选择本机文件夹"></label><button id="library-folder" class="button">选择目录…</button><button id="library-export" class="button" ${reading?'disabled':''}>导出全部战术</button><button id="library-pool" class="button primary" ${reading?'disabled':''}>加入随机候选</button>${realButton}</div>`;
  return `${summary}${realFailures}${bar}${table}${details}${hint}${controls}${libraryExportResult()}`;
 }
 function libraryLeagueCard(){
@@ -207,7 +210,8 @@ async function exportLibrary(){
   const result=await api('/api/save/league-export',{id:librarySave.id,league:libraryLeague,directory});
   localStorage.setItem('fm27-export-directory',directory);
   libraryExport=result;libraryRefresh();
-  toast(`${result.source==='real_ai'?'已导出真实AI战术':'已导出'} ${result.files?.length||0} 个文件到 ${result.directory||directory}`);
+  const skipped=result.skipped?.length||0;
+  toast(`${result.source==='real_ai'?'已导出真实AI战术':result.source==='mixed'?'已导出真实AI战术与预设':'已导出'} ${result.files?.length||0} 个文件到 ${result.directory||directory}${skipped?'，遗漏 '+skipped+' 套':''}${result.scenario.away_tactic_pool?.enabled?'':'；需要时勾选底部的随机对手战术'}`);
  }catch(e){toast('导出失败：'+e.message);if($('#library-export')){$('#library-export').disabled=false;$('#library-export').textContent='导出全部战术'}}
 }
 async function generateRealTeam(button){
@@ -227,7 +231,7 @@ async function generateLibraryReal(){
  const token=++libraryRealToken;
  libraryRealProgress={status:'reading',done:0,total:0,stage:'正在读取教练与阵容'};libraryRefresh();
  try{
-  const started=await api('/api/save/real-generation',{id,league,force:!!libraryReport?.real});
+  const started=await api('/api/save/real-generation',{id,league,force:false});
   if(started.status==='complete'){libraryRealProgress=null;await loadLibraryLeague();toast(`真实AI战术已就绪 ${started.variant_count||0} 套`);return}
   libraryRealProgress=started;libraryRefresh();
   await pollLibraryReal(token,id,league);
@@ -254,11 +258,13 @@ async function importLibraryPool(){
  button.disabled=true;button.textContent='正在导入…';
  try{
   const result=await libraryRequest('/api/save/league-pool',{id:librarySave.id,league:libraryLeague,scenario:clone(state)},stage=>{if(button)button.textContent=stage||'正在导入…'});
-  if(result.status==='error')throw Error(result.stage||'导入客队战术池失败');
+  if(result.status==='error')throw Error(result.stage||'加入随机候选失败');
   state=result.scenario;save();
-  toast(`已导入 ${result.imported?.length||0} 套${result.source==='real_ai'?'真实AI战术':'战术'}`);
-  view='pool';render();
- }catch(e){toast('导入客队战术池失败：'+e.message);if($('#library-pool')){$('#library-pool').disabled=false;$('#library-pool').textContent='导入客队战术池'}}
+  const skipped=result.skipped?.length||0;
+  toast(`已导入 ${result.imported?.length||0} 套${result.source==='real_ai'?'真实AI战术':result.source==='mixed'?'真实AI战术与预设':'战术'}${skipped?'，遗漏 '+skipped+' 套':''}${result.scenario.away_tactic_pool?.enabled?'':'；需要时勾选底部的随机对手战术'}`);
+  randomSelectionPending=false;randomOptionsOpen=false;
+  view='tactics';render();
+ }catch(e){toast('加入随机候选失败：'+e.message);if($('#library-pool')){$('#library-pool').disabled=false;$('#library-pool').textContent='加入随机候选'}}
 }
 const libraryBindPrevious=bind;
 bind=function(){libraryBindPrevious();bindLibrary()};

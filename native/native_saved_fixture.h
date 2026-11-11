@@ -13,8 +13,8 @@ static void saved_section_probe(void* interface_object){
     auto u32=[&](){need(4);auto value=*(uint32_t*)(bytes.data()+stream.cursor);stream.cursor+=4;return value;};
     auto fail=[&](const char* reason){fprintf(log_file,"{\"event\":\"section_error\",\"offset\":%llu,\"error\":\"%s\"}\n",(unsigned long long)stream.cursor,reason);fflush(log_file);desktop_finish_and_exit(196);};
     if(bytes.size()<12||memcmp(bytes.data(),"\x03\x01tad.\x07\0",8))fail("section header");
-    *(unsigned char*)at(0x570549c)=1;
-    *(void**)at(0x5701a00)=at(0xdf78e0);*(void**)at(0x5701a08)=at(0xdf7a20);
+    *(unsigned char*)at(0x58204dc)=1;
+    *(void**)at(0x581ca40)=at(0xe16120);*(void**)at(0x581ca48)=at(0xe16260);
     stream.cursor=8;unsigned count=u32();if(count>4096)fail("count");
     fprintf(log_file,"{\"event\":\"section_count\",\"count\":%u}\n",count);fflush(log_file);
     auto print_plan=[&](unsigned char* plan){
@@ -41,8 +41,8 @@ static void saved_section_probe(void* interface_object){
         unsigned core_present=byte();if(core_present>1)fail("core presence");
         unsigned char* core=nullptr;
         if(core_present){
-            core=((unsigned char*(*)())at(0x497f3e0))();
-            auto okay=((unsigned char(*)(void*,void**,void*,void*))at(0x49ca790))(core,&reference,interface_object,nullptr);
+            core=((unsigned char*(*)())at(0x4ba8840))();
+            auto okay=((unsigned char(*)(void*,void**,void*,void*))at(0x26329a0))(core,&reference,interface_object,nullptr);
             if(!okay||stream.error)fail("original core reader rejected");
         }
         need(22);stream.cursor+=22; // Native 4973d40's four u32s, date, two flags.
@@ -50,7 +50,7 @@ static void saved_section_probe(void* interface_object){
         if(type==0){
             auto present=byte();if(present>1)fail("composite presence");
             if(present){composite=true;composite_start=stream.cursor;
-                if(!((unsigned char(*)(void*,void**))at(0x3770660))(plans,&reference)||stream.error)fail("original composite reader rejected");}
+                if(!((unsigned char(*)(void*,void**))at(0x3919b10))(plans,&reference)||stream.error)fail("original composite reader rejected");}
             byte();
         }else{
             if(u16()!=0)fail("full fixture detail entries unsupported");

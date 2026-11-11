@@ -11,6 +11,7 @@ import fm27_fmf
 
 PROFILE='saved-tactic-export-v2'
 REAL_PROFILE='saved-tactic-real-ai-export-v1'
+MIXED_PROFILE='saved-tactic-mixed-export-v1'
 MAX_FILES=400
 MAX_PLAN_BYTES=4*1024*1024
 ILLEGAL=re.compile(r'[<>:"/\\|?*]')
@@ -80,7 +81,10 @@ def _atomic(path,payload):
 
 def _source(value):
     value=value if isinstance(value,dict) else {}
-    return {key:value.get(key)for key in ('save_id','source','source_sha256','date','build')}
+    source=value.get('source');name=value.get('source_name')
+    if not name and isinstance(source,str) and source:name=Path(source).name
+    return {'save_id':value.get('save_id'),'source_name':name,'source_sha256':value.get('source_sha256'),
+            'date':value.get('date'),'build':value.get('build')}
 
 def _rows(items):
     rows=list(items)if items is not None else []
@@ -111,7 +115,7 @@ def _rows(items):
 def _notice(source,file_count):
     lines=['FM27 存档战术导出','',
         f'本目录由 FM Tactics Lab 从 FM27 生涯存档导出，共 {file_count} 套战术。',
-        f"来源存档：{source.get('source') or '未知'}",
+        f"来源存档：{source.get('source_name') or '未知'}",
         f"存档日期：{source.get('date') or '未知'}，游戏版本：{source.get('build') or '未知'}",
         '文件名格式为 俱乐部-教练-第x套战术：第1套按主教练主偏好阵型匹配，第2套按次偏好阵型匹配，都是游戏原装预设的近似，不是当天实战战术。',
         '每套 .fmf 可在工具中重新导入；manifest.json 记录文件清单、内嵌计划校验值与导出依据。']
@@ -120,11 +124,21 @@ def _notice(source,file_count):
 def real_notice(source,file_count):
     lines=['FM27 真实AI战术导出','',
         f'本目录由 FM Tactics Lab 调用原版引擎生成，共 {file_count} 套战术。',
-        f"来源存档：{source.get('source') or '未知'}",
+        f"来源存档：{source.get('source_name') or '未知'}",
         f"存档日期：{source.get('date') or '未知'}，游戏版本：{source.get('build') or '未知'}",
         '每套战术按该队现任主教练和当前阵容（按能力选取 23 人）由本机原版引擎的 AI 准备流程生成，并从引擎回读完整计划后写出；包含心态、球队指令、双阶段角色与职责、个人指令和阶段映射。',
-        '每个对手生成对手主场、对手客场两套，文件名后缀为「主场战术」「客场战术」（预览种子 0）；正式比赛会按实际名单和对局上下文重新生成，不是存档中已结束比赛的录像战术。',
-        'manifest.json 记录文件清单、内嵌计划校验值与生成依据。']
+        '每个对手生成对手主场、对手客场两套，文件名后缀为「主场战术」「客场战术」（预览种子 0）；它是原版 AI 在受控预览上下文（当前存档阵容、固定预览种子 0、工具默认的玩家侧模板）下的输出，FM 正式比赛会由游戏内 AI 按实际名单和对局上下文自行生成，本工具不会逐场重算，导入客队战术池的也是这份固定计划。',
+        'manifest.json 记录文件清单、内嵌计划校验值、生成引擎身份与生成依据。']
+    return '\n'.join(lines)+'\n'
+
+def mixed_notice(source,file_count,real_count,preset_count):
+    lines=['FM27 联赛战术导出','',
+        f'本目录由 FM Tactics Lab 导出，共 {file_count} 套战术：真实AI战术 {real_count} 套，教练偏好预设 {preset_count} 套。',
+        f"来源存档：{source.get('source_name') or '未知'}",
+        f"存档日期：{source.get('date') or '未知'}，游戏版本：{source.get('build') or '未知'}",
+        '真实AI战术由本机原版引擎按该队现任主教练和当前阵容（按能力选取 23 人）做 0 tick 对局准备后回读完整计划，文件名后缀为「主场战术」「客场战术」（预览种子 0）；它是原版 AI 在受控预览上下文中的输出，FM 正式比赛会由游戏内 AI 按实际名单和对局上下文自行生成，本工具不会逐场重算。',
+        '未生成真实战术的球队按主教练主/次偏好阵型导出游戏原装预设（第1套/第2套），是配置近似，不是当天实战战术。',
+        'manifest.json 记录文件清单、内嵌计划校验值、生成引擎身份与导出依据。']
     return '\n'.join(lines)+'\n'
 
 def write(directory,source,items,stem=None,notice=None,profile=None):

@@ -44,9 +44,37 @@ def _run(script,args,log_path,timeout):
             stdout=stream,stderr=stream,timeout=timeout,creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
 
 
+_FIXTURE_SHA={}
+
+
+def _fixture_sha(lib):
+    path=lib.app.NATIVE/'fixtures/match.pkm'
+    try:stat=path.stat()
+    except OSError:return None
+    stamp=(str(path),stat.st_size,stat.st_mtime_ns)
+    if _FIXTURE_SHA.get('stamp')!=stamp:
+        _FIXTURE_SHA.clear()
+        _FIXTURE_SHA.update(stamp=stamp,sha256=lib.app.desktop_engine.sha(path))
+    return _FIXTURE_SHA.get('sha256')
+
+
+def binding(lib,key):
+    """Identity of the engine, fixture and generation protocol behind derived plans."""
+    root=lib.folder(key)
+    lib.check_binding(root)
+    return {'engine':read(root/'native_binding.json'),'fixture_sha256':_fixture_sha(lib),
+        'protocol':desktop_generation_protocol.PROFILE,'prep_version':PREP_VERSION}
+
+
+def plan_cache(lib,key,config_sha256,seed,binding):
+    binding_key=hashlib.sha256(json.dumps(binding,sort_keys=True).encode()).hexdigest()[:12]
+    return folder(lib,key)/f'plan_{binding_key}_{config_sha256}_{seed}.json'
+
+
 def ensure(lib,key):
     """Prepared league coaches and players, cached by save digest."""
     root=lib.folder(key);data=lib.index_data(root);out=folder(lib,key);out.mkdir(parents=True,exist_ok=True)
+    identity=binding(lib,key)
     source=_source(lib,key)
     stat=Path(source).stat();stamp=(str(source),stat.st_size,stat.st_mtime_ns,data['source_sha256'])
     if stamp not in _VERIFIED:
@@ -60,7 +88,8 @@ def ensure(lib,key):
     if marker.exists():
         try:prepared_stamp=read(marker)
         except (OSError,ValueError):prepared_stamp={}
-    stale=prepared_stamp.get('version')!=PREP_VERSION or prepared_stamp.get('source_sha256')!=data['source_sha256']
+    stale=(prepared_stamp.get('version')!=PREP_VERSION or prepared_stamp.get('source_sha256')!=data['source_sha256'] or
+        prepared_stamp.get('binding')!=identity)
     inputs=out/'generation_inputs.json'
     usable=False
     if inputs.exists()and not stale:
@@ -77,16 +106,17 @@ def ensure(lib,key):
     if not usable:
         result=_run('desktop_real_generation_prepare.py',(source,out),out/'prepare.log',300)
         if result.returncode:raise ValueError('真实AI战术教练档案准备失败，见 real_generation/prepare.log')
-        lib.write(marker,{'version':PREP_VERSION,'source_sha256':data['source_sha256']})
+        lib.write(marker,{'version':PREP_VERSION,'source_sha256':data['source_sha256'],'binding':identity})
     expected=read(fragments)
     if not expected.get('human_ready'):
         raise ValueError('你的主教练档案无法从存档定位：'+str(expected.get('human_error')or'未知原因'))
-    stamp={'source_sha256':data['source_sha256'],'fragments_sha256':hashlib.sha256(fragments.read_bytes()).hexdigest()}
+    stamp={'source_sha256':data['source_sha256'],'fragments_sha256':hashlib.sha256(fragments.read_bytes()).hexdigest(),
+        'binding':identity}
     cache=out/'staff_native.json'
     if cache.exists():
         try:
             value=read(cache)
-            if value.get('binding')==stamp:return {'inputs':read(inputs),'staff':value['staff'],'staff_native_binding':stamp}
+            if value.get('binding')==stamp:return {'inputs':read(inputs),'staff':value['staff'],'staff_native_binding':stamp,'binding':identity}
         except (OSError,ValueError):pass
     rows=lib.native([],root,'real_generation_staff',{'FM27_STAFF_FRAGMENT_DIRECTORY':str(out/FRAGMENTS)})
     native={str(row['selector']):row for row in rows if row.get('event')=='staff_body_read'}
@@ -100,7 +130,7 @@ def ensure(lib,key):
         staff[selector]={'profile_hex':entry['profile_hex'],'native_d4_to_f4_hex':entry['native_d4_to_f4_hex'],
             'generation_trait_pairs':entry['generation_trait_pairs'],'human':bool(row.get('human')),'uid':row.get('uid')}
     lib.write(cache,{'binding':stamp,'staff':staff})
-    return {'inputs':read(inputs),'staff':staff,'staff_native_binding':stamp}
+    return {'inputs':read(inputs),'staff':staff,'staff_native_binding':stamp,'binding':identity}
 
 
 def manager(inputs,club_uid,human):
@@ -149,7 +179,7 @@ def _side_record(inputs,club,coach,native,human,players):
     codes=extra[11:19]
     ordered=bytes(codes[index]for index in (0,1,3,2,4,5,7,6))
     if len(profile)!=52 or any(value>100 for value in profile) or any(value>64 for value in ordered):
-        raise ValueError('该队主教练档案的参数超出原版生成范围，暂不支持真实AI战术')
+        raise ValueError('该队主教练档案的参数超出原版生成范围，暂不支持该队的真实战术生成')
     personality=coach['personality']
     traits=native['generation_trait_pairs']
     influence=75 if human else 75+struct.unpack_from('<H',extra,6)[0]//10+max(1,min(20,(profile[51]+2)//5))
@@ -192,6 +222,10 @@ def _selection(lib,key,own_club,opponent_club,venue,prepared=None):
 
 
 def preview(lib,key,own_club,opponent_club,venue='H',seed=0,prepared=None):
+    prepared=prepared or ensure(lib,key)
+    identity=prepared.get('binding')
+    if identity is None:
+        prepared=ensure(lib,key);identity=prepared['binding']
     context=_selection(lib,key,own_club,opponent_club,venue,prepared)
     inputs=context['inputs'];clubs=context['clubs']
     own=context['own_coach'];opponent=context['opponent_coach']
@@ -215,7 +249,7 @@ def preview(lib,key,own_club,opponent_club,venue='H',seed=0,prepared=None):
     digest=hashlib.sha256(config).hexdigest()
     root=folder(lib,key);cfg=root/f'preview_{digest[:16]}.bin';cfg.write_bytes(config)
     name='real_generation_preview_'+digest[:16]
-    cache=root/f'plan_{digest[:16]}_{seed}.json'
+    cache=plan_cache(lib,key,digest[:16],seed,identity)
     if cache.exists():
         try:plan=read(cache)
         except (OSError,ValueError):plan=None
@@ -254,9 +288,9 @@ def variant_name(lib,club,coach,venue):
     return '-'.join(part for part in parts if part)
 
 
-def team_from_plan(lib,key,plan,roster,club_uid,tactic_name):
+def team_from_plan(lib,key,plan,roster,club_uid,tactic_name,prepared=None):
     """Rebuild the generated opponent team from a stored plan and roster."""
-    prepared=ensure(lib,key)
+    prepared=prepared or ensure(lib,key)
     inputs=prepared['inputs']
     players={player['unique_id']:player for player in inputs.get('players')or []}
     try:chosen=[players[uid]for uid in roster]

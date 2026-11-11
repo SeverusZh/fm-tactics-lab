@@ -99,19 +99,15 @@ def variants(catalog,style,primary,secondary):
                             'selection_policy':'same_style_then_secondary_shape_then_primary_phase'}})
     return result
 
-def choose(catalog,style,primary,secondary):
-    first=variants(catalog,style,primary,secondary)[0]
-    return first['preset'],first['match']
-
 def _selection(lib,index,clubs):
     registry=index.get('league_clubs')
     if not isinstance(registry,dict):raise ValueError('此存档缓存缺少联赛球队索引，请重新读取存档')
     rows=[]
     for club_uid in sorted({int(v)for v in clubs}):
         row=registry.get(str(club_uid))
-        if not isinstance(row,dict):raise ValueError('联赛球队索引缺少所选球队，请重新读取存档')
+        if not isinstance(row,dict):continue
         team_id=row.get('first_team_id')
-        if type(team_id)is not int:raise ValueError('联赛球队一线队索引不完整')
+        if type(team_id)is not int:continue
         rows.append({'uid':club_uid,'name':row.get('name')or str(club_uid),
                      'short_name':row.get('short_name')or row.get('name')or str(club_uid),
                      'nation_id':row.get('nation_id'),'team_id':team_id})
@@ -246,12 +242,10 @@ def _preset_team(lib,preset,name,tactic_name):
                           'positions':{p:copy.deepcopy(neutral)for p in result['opposition']['positions']}}
     return result
 
-def preset_tactic(lib,key,candidate):
-    preset,t=_preset(lib,key,candidate)
-    return _preset_team(lib,preset,t['name'],'教练偏好预设 · '+preset['name'])
-
-def preset_by_index_team(lib,key,preset_index,club_name):
+def preset_by_index_team(lib,key,preset_index,club_name,expected_sha256=None):
     catalog=assets(lib,lib.folder(key));preset=preset_by_index(catalog,preset_index)
+    if expected_sha256 is not None and digest(preset)!=expected_sha256:
+        raise ValueError('原装预设内容已改变，请重新读取存档')
     return _preset_team(lib,preset,club_name,'教练偏好预设 · '+preset['name'])
 
 def team(lib,key,candidate):

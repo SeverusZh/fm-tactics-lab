@@ -23,7 +23,8 @@ def prepare(source,folder):
     _version.FM27_TOTAL_DECOMPRESSED_CAP=1536*1024**2
     source=Path(source);folder=Path(folder);bounded_output(folder);folder.mkdir(parents=True,exist_ok=True)
     inputs=json.loads((folder/'generation_inputs.json').read_text(encoding='utf8'))
-    if inputs['source_sha256']!=hashlib.sha256(Path(inputs['source']).read_bytes()).hexdigest():
+    with Path(inputs['source']).open('rb')as stream:digest=hashlib.file_digest(stream,'sha256').hexdigest()
+    if inputs['source_sha256']!=digest:
         raise ValueError('来源存档已改变，请重新读取')
     target=folder/'staff_fragments';target.mkdir(exist_ok=True)
     rows=[]

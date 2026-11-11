@@ -9,3 +9,11 @@
 :root .team-bulk-actions .button:hover{background:#4b385b;color:#fff;border-color:#a565ff}:root .player-item.active{background:#40304e;color:#fff}
 
 .team-load-grid.single-team{grid-template-columns:1fr}
+
+.random-options{position:fixed;right:24px;bottom:calc(var(--runbar-height,100px) + 12px);width:min(760px,calc(100vw - 210px));max-height:min(460px,55vh);overflow:auto;z-index:45;box-shadow:0 12px 40px #0008;border:1px solid #6d577e;border-radius:10px;background:var(--bg)}
+.random-options[hidden],#random-manage[hidden]{display:none!important}
+.random-options .card{margin:0;border:0;border-radius:0}.random-options .card+.card{border-top:1px solid var(--border)}
+.random-options .card-head{padding:14px 18px}.random-options .card-body{padding:14px 18px}.random-options .pool-head{align-items:start;gap:12px;flex-wrap:wrap}
+.random-options .empty{padding:18px}.random-options .empty .symbol{display:none}.random-options .empty h2{font-size:16px;color:var(--text)}.random-options .pool-table td:first-child{white-space:normal;overflow-wrap:anywhere}
+.run-inputs{flex-wrap:wrap;justify-content:flex-end}#random-manage{white-space:nowrap}
+@media(max-width:850px){.random-options{right:12px;width:calc(100vw - 94px)}}

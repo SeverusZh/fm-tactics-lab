@@ -37,8 +37,10 @@ window.FM27I18n = (() => {
   }
   text = text.replace(/[\u3400-\u9fff]+/g, word => dictionary[word] === undefined ? word.replace(phrases, phrase=>` ${dictionary[phrase]} `) : ` ${dictionary[word]} `)
    .replace(/（/g,' (' ).replace(/）/g,')').replace(/：/g,': ').replace(/；/g,'; ').replace(/。/g,'. ').replace(/、/g,', ').replace(/，/g,', ')
+   .replace(/\s+([,;:.!?])/g,'$1')
    .replace(/ {2,}/g,' ').trim()
    .replace(/\uE000(\d+)\uE001/g, (_, index) => held[Number(index)]);
+  text=text.replace(/^([a-z])/,(letter)=>letter.toUpperCase());
   return (source.match(/^\s*/)[0])+text+(source.match(/\s*$/)[0]);
  }
  function project(root) {

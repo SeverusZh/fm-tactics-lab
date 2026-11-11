@@ -8,11 +8,11 @@ function poolData(){
 const poolTotal=pool=>pool.entries.reduce((n,e)=>n+(e.weight||1),0);
 async function poolSave(){
  try{state=(await api('/api/validate',clone(state))).scenario;save()}
- catch(e){toast('战术池保存失败：'+e.message)}
+ catch(e){toast('随机候选保存失败：'+e.message)}
  render();
 }
 function poolEmpty(){
- return `<div class="empty"><div class="symbol">⇄</div><h2>客队战术池还是空的</h2><p>可以导入本机 FMF 战术，或在存档战术页面读取存档后导入所选联赛对手的主/次偏好预设。</p><button class="button" data-goto="library">前往存档战术页面</button></div>`;
+ return `<div class="empty"><div class="symbol">⇄</div><h2>还没有随机候选战术</h2><p>导入本机 FMF，或在存档战术页加入联赛战术。</p></div>`;
 }
 function poolTable(pool,total){
  const rows=pool.entries.map((entry,index)=>{
@@ -21,9 +21,9 @@ function poolTable(pool,total){
  }).join('');
  return `<div class="table-scroll"><table class="pool-table"><thead><tr><th>战术</th><th>权重</th><th>单套概率</th><th>删除</th></tr></thead><tbody>${rows}</tbody></table></div>`;
 }
-function poolView(){
+function randomOptionsView(){
  const pool=poolData(),total=poolTotal(pool),uniform=pool.uniform;
- return `<div class="card"><div class="card-head pool-head"><div class="save-team-controls"><h2>客队战术池</h2><span class="tag">${pool.entries.length} 套</span><span class="tag">${pool.enabled?'随机模式已启用':'随机模式未启用'}</span></div><div class="save-team-controls"><button type="button" id="pool-import-fmf" class="button small primary">导入 FMF</button><button type="button" id="pool-import-save" class="button small">前往存档战术页面</button><input id="pool-import-file" type="file" accept=".fmf" multiple hidden></div></div><div class="card-body">${pool.entries.length?poolTable(pool,total):poolEmpty()}</div></div><div class="card"><div class="card-head"><h2>统一客队球员属性</h2></div><div class="card-body"><div class="save-team-controls"><label class="raw-toggle"><input id="pool-uniform" type="checkbox" ${uniform.enabled?'checked':''}>启用</label><label>属性值<input id="pool-uniform-value" type="number" min="1" max="20" step="1" value="${uniform.attribute_value}" ${uniform.enabled?'':'disabled'}></label></div><p class="tiny muted">开启后，每名首发在战术位置的熟练度固定为满 20，其余属性统一为设定面板值。</p></div></div>`;
+ return `<div class="card"><div class="card-head pool-head"><div class="save-team-controls"><h2>随机对手战术</h2><span class="tag">${pool.entries.length} 套</span><button id="random-options-close" class="button small ghost" type="button">收起设置</button></div><div class="save-team-controls"><button type="button" id="pool-import-fmf" class="button small primary">导入 FMF</button><button type="button" id="pool-import-save" class="button small">前往存档战术页面</button><input id="pool-import-file" type="file" accept=".fmf" multiple hidden></div></div><div class="card-body">${pool.entries.length?poolTable(pool,total):poolEmpty()}</div></div><div class="card"><div class="card-head"><h2>统一客队球员属性</h2></div><div class="card-body"><div class="save-team-controls"><label class="raw-toggle"><input id="pool-uniform" type="checkbox" ${uniform.enabled?'checked':''}>启用</label><label>属性值<input id="pool-uniform-value" type="number" min="1" max="20" step="1" value="${uniform.attribute_value}" ${uniform.enabled?'':'disabled'}></label></div><p class="tiny muted">开启后，每名首发在战术位置的熟练度固定为满值，其余属性统一为设定面板值。</p></div></div>`;
 }
 async function poolImportFiles(event){
  const files=[...event.target.files];if(!files.length)return;
@@ -34,8 +34,10 @@ async function poolImportFiles(event){
   if(file.size>4*1024*1024){failures.push(file.name+'：文件超过 4 MB');continue}
   try{
    const bytes=new Uint8Array(await file.arrayBuffer());let binary='';for(let i=0;i<bytes.length;i+=8192)binary+=String.fromCharCode(...bytes.subarray(i,i+8192));
-   const result=await api('/api/pool/import-fmf',{scenario:clone(state),file_base64:btoa(binary),name:file.name.replace(/\.fmf$/i,'').trim().slice(0,60)});
-   state=result.scenario;save();imported++;
+   const result=await api('/api/pool/import-fmf',{scenario:clone(state),file_base64:btoa(binary),name:file.name.replace(/\.fmf$/i,'').trim().slice(0,80)});
+   state=result.scenario;
+   if(randomSelectionPending){poolData().enabled=true;randomSelectionPending=false}
+   save();imported++;
   }catch(e){failures.push(file.name+'：'+e.message)}
  }
  event.target.value='';
@@ -44,8 +46,9 @@ async function poolImportFiles(event){
  if(failures.length)setTimeout(()=>toast(failures[0]),1200);
 }
 function bindPool(){
- if(view!=='pool')return;
- if($('#pool-import-save'))$('#pool-import-save').onclick=()=>{view='library';render()};
+ if(randomOptions.hidden)return;
+ if($('#random-options-close'))$('#random-options-close').onclick=()=>{randomOptionsOpen=false;syncRandomMode()};
+ if($('#pool-import-save'))$('#pool-import-save').onclick=()=>{randomOptionsOpen=false;view='library';render()};
  if($('#pool-import-fmf'))$('#pool-import-fmf').onclick=()=>$('#pool-import-file').click();
  if($('#pool-import-file'))$('#pool-import-file').onchange=poolImportFiles;
  $$('[data-pool-weight]').forEach(input=>input.onchange=()=>{
@@ -65,23 +68,51 @@ function bindPool(){
   poolData().uniform.attribute_value=value;poolSave();
  };
 }
+let randomOptionsOpen=false,randomSelectionPending=false;
+const randomOptions=document.createElement('section');
+randomOptions.id='random-options';randomOptions.className='random-options';randomOptions.hidden=true;
+randomOptions.setAttribute('aria-label','随机对手战术设置');
+$('.runbar').before(randomOptions);
 const randomModeLabel=document.createElement('label');randomModeLabel.className='compare-toggle';
-randomModeLabel.title='每场从客队战术池按权重抽取一套客队战术，同一实验内按种子可复现；需要先在客队战术池页面导入战术。';
-randomModeLabel.innerHTML='<input id="random-mode" type="checkbox">随机模式';
+randomModeLabel.title='开启后，每场从候选列表按权重抽取对手战术；关闭后使用当前选定的对手战术。';
+randomModeLabel.innerHTML='<input id="random-mode" type="checkbox" aria-controls="random-options">随机对手战术';
 $('#quick-score-mode').closest('label').after(randomModeLabel);
-randomModeLabel.hidden=saveMode==='save';
+const randomManage=document.createElement('button');randomManage.id='random-manage';randomManage.type='button';randomManage.className='button small';randomManage.hidden=true;
+randomManage.setAttribute('aria-controls','random-options');
+randomModeLabel.after(randomManage);
+randomManage.onclick=()=>{randomOptionsOpen=!randomOptionsOpen;syncRandomMode()};
 function syncRandomMode(){
  const input=$('#random-mode');if(!input)return;
- const locked=saveMode==='save';
- randomModeLabel.hidden=locked;input.disabled=locked;
- input.checked=locked||!state?false:!!poolData().enabled;
+ const locked=saveMode==='save',pool=state?poolData():poolDefaults();
+ if(locked)randomSelectionPending=false;
+ const enabled=!locked&&(pool.enabled||randomSelectionPending);
+ randomModeLabel.hidden=locked;input.disabled=locked;input.checked=enabled;
+ randomManage.hidden=!enabled;randomManage.textContent=`候选战术（${pool.entries.length}）`;
+ randomOptions.hidden=!enabled||!randomOptionsOpen;
+ randomManage.setAttribute('aria-expanded',String(!randomOptions.hidden));
+ input.setAttribute('aria-expanded',String(!randomOptions.hidden));
+ if(!randomOptions.hidden){randomOptions.innerHTML=randomOptionsView();bindPool()}
 }
-if($('#random-mode'))$('#random-mode').onchange=()=>{
+$('#random-mode').onchange=()=>{
  const input=$('#random-mode');
  if(saveMode==='save'){input.checked=false;return}
  const pool=poolData();
- if(input.checked&&!pool.entries.length){input.checked=false;toast('请先在客队战术池页面导入战术');return}
- pool.enabled=input.checked;poolSave();
+ randomSelectionPending=input.checked&&!pool.entries.length;
+ pool.enabled=input.checked&&pool.entries.length>0;
+ randomOptionsOpen=input.checked;
+ poolSave();
 };
 const poolBindPrevious=bind;
-bind=function(){poolBindPrevious();syncRandomMode();bindPool()};
+bind=function(){
+ poolBindPrevious();syncRandomMode();
+ const run=$('#run').onclick;
+ $('#run').onclick=async function(event){
+  if(saveMode!=='save'&&randomSelectionPending){
+   randomOptionsOpen=true;syncRandomMode();toast('请先添加随机候选战术');return;
+  }
+  return run?.call(this,event);
+ };
+};
+const updateRandomPosition=()=>document.documentElement.style.setProperty('--runbar-height',$('.runbar').getBoundingClientRect().height+'px');
+new ResizeObserver(updateRandomPosition).observe($('.runbar'));
+updateRandomPosition();
