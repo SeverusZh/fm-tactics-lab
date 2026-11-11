@@ -107,13 +107,13 @@ static void execution_install(unsigned char* match){
   }else if(c[Understanding]<0||c[BuyIn]<0||c[Opposition]<0)desktop_finish_and_exit(244);
  }
  if(execution_original_sample||strcmp(native_image_sha256,
-    "252ff8fb5b7a4a5a5464db6ba632e309eef9b6e65ffa992ae20575a189e66c6a"))desktop_finish_and_exit(244);
+    "f79b0a3413dd0e3f461b0afbc3ff397003f4a26d7525a30717428de6a8b91196"))desktop_finish_and_exit(244);
  for(unsigned side=0;side<2;side++)execution_teams[side]=*(unsigned char**)(match+0x15380+8*side);
  constexpr unsigned version=0x1b000000u;
  fprintf(log_file,"{\"event\":\"experimental_engine_version\",\"before\":%u,\"after\":%u,\"production_supported\":false}\n",*(unsigned*)(match+0xa3a),version);
  *(unsigned*)(match+0xa3a)=version;
- execution_original_build=(ExecutionBuild)execution_redirect(0xd85a0,(void*)execution_build,0x38,1);
- execution_original_sample=(ExecutionSample)execution_redirect(0x41a50,(void*)execution_sample,0x88,0);
+ execution_original_build=(ExecutionBuild)execution_redirect(0x71370,(void*)execution_build,0x38,1);
+ execution_original_sample=(ExecutionSample)execution_redirect(0x465b0,(void*)execution_sample,0x88,0);
 }
 static void execution_snapshot(unsigned char* match,const char* stage){
  if(!execution_original_sample)return;

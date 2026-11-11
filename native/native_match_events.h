@@ -84,12 +84,14 @@ static void desktop_player_totals(unsigned char* match){
 static LONG CALLBACK desktop_event_exception(EXCEPTION_POINTERS* e){
     if(e->ExceptionRecord->ExceptionCode!=EXCEPTION_SINGLE_STEP)return EXCEPTION_CONTINUE_SEARCH;
     auto c=e->ContextRecord;uintptr_t pc=c->Rip-(uintptr_t)native_base;
-    if((pc!=0x4520d2e&&pc!=0x4520f05&&pc!=0x4520f4c&&pc!=0x1866c1&&pc!=0x8375c&&pc!=0x49870d0)||!(c->Dr6&7))return EXCEPTION_CONTINUE_SEARCH;
-    c->Dr6=0;c->EFlags|=0x10000;desktop_event_breaks++;if(((pc==0x8375c)&&*(unsigned char**)(c->Rsi+0x280)==desktop_event_match)||((pc==0x49870d0)&&(unsigned char*)c->Rcx-0x12f40==desktop_event_match)||((pc!=0x8375c&&pc!=0x49870d0)&&(unsigned char*)c->Rdi==desktop_event_match))desktop_capture_event_queue(desktop_event_match);return EXCEPTION_CONTINUE_EXECUTION;
+    if((pc!=0x4764c1d&&pc!=0x4764e90&&pc!=0x4764dcd)||!(c->Dr6&7))return EXCEPTION_CONTINUE_SEARCH;
+    c->Dr6=0;c->EFlags|=0x10000;desktop_event_breaks++;
+    if(reinterpret_cast<unsigned char*>(c->Rdi)==desktop_event_match)desktop_capture_event_queue(desktop_event_match);
+    return EXCEPTION_CONTINUE_EXECUTION;
 }
 static DWORD WINAPI desktop_event_setup_thread(void*){
     CONTEXT c={};c.ContextFlags=CONTEXT_DEBUG_REGISTERS;SuspendThread(desktop_event_thread);
-    if(GetThreadContext(desktop_event_thread,&c)&&!(c.Dr7&255)){desktop_event_previous=c;c.Dr0=(uintptr_t)at(desktop_event_audit?0x4520d2e:0x1866c1);c.Dr1=(uintptr_t)at(desktop_event_audit?0x4520f05:0x8375c);c.Dr2=(uintptr_t)at(desktop_event_audit?0x4520f4c:0x49870d0);c.Dr6=0;c.Dr7=(c.Dr7&~0xffff00ffULL)|0x15;desktop_event_installed=SetThreadContext(desktop_event_thread,&c)!=0;}
+    if(GetThreadContext(desktop_event_thread,&c)&&!(c.Dr7&255)){desktop_event_previous=c;c.Dr0=(uintptr_t)at(0x4764c1d);c.Dr1=(uintptr_t)at(0x4764e90);c.Dr2=(uintptr_t)at(0x4764dcd);c.Dr6=0;c.Dr7=(c.Dr7&~0xffff00ffULL)|0x15;desktop_event_installed=SetThreadContext(desktop_event_thread,&c)!=0;}
     ResumeThread(desktop_event_thread);SetEvent(desktop_event_ready);return 0;
 }
 

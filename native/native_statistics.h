@@ -20,7 +20,7 @@ static HANDLE desktop_watch_thread=nullptr,desktop_watch_ready=nullptr;
 static unsigned desktop_watch_offsets[]={0x60,0x80,0x84,0xa4};
 static uint64_t desktop_watch_seen[128]={};static unsigned desktop_watch_count=0;
 static const char* desktop_native_type(void* object){
-    if(!object)return "null";auto table=*(uintptr_t**)object;if((uintptr_t)table<(uintptr_t)native_base||(uintptr_t)table>(uintptr_t)native_base+0x1821c000)return "unknown";auto col=table[-1];auto descriptor=*(unsigned*)(col+12);return(char*)native_base+descriptor+16;
+    if(!object)return "null";auto table=*(uintptr_t**)object;if((uintptr_t)table<(uintptr_t)native_base||(uintptr_t)table>(uintptr_t)native_base+0x17cb9000)return "unknown";auto col=table[-1];auto descriptor=*(unsigned*)(col+12);return(char*)native_base+descriptor+16;
 }
 static LONG CALLBACK desktop_stats_exception(EXCEPTION_POINTERS* e){
     if(e->ExceptionRecord->ExceptionCode!=EXCEPTION_SINGLE_STEP)return EXCEPTION_CONTINUE_SEARCH;
@@ -31,7 +31,7 @@ static LONG CALLBACK desktop_stats_exception(EXCEPTION_POINTERS* e){
         fprintf(log_file,"{\"event\":\"desktop_stat_producer\",\"field\":%u,\"value\":%u,\"tick\":%d,\"rva\":\"%llx\",\"stack\":[",desktop_watch_offsets[slot],*(unsigned*)(desktop_watched_stats+desktop_watch_offsets[slot]),*(int*)(desktop_watched_match+0x154ec),(unsigned long long)(c->Rip-(uintptr_t)native_base));
         CONTEXT walk=*c;for(unsigned j=0;j<10&&walk.Rip;j++){
             fprintf(log_file,"%s\"%llx\"",j?",":"",(unsigned long long)(walk.Rip-(uintptr_t)native_base));DWORD64 image=0,frame=0;PVOID data=nullptr;auto entry=RtlLookupFunctionEntry(walk.Rip,&image,nullptr);auto old=walk.Rsp;
-            if(entry)RtlVirtualUnwind(UNW_FLAG_NHANDLER,image,walk.Rip,entry,&walk,&data,&frame,nullptr);else{walk.Rip=*(DWORD64*)walk.Rsp;walk.Rsp+=8;}if(walk.Rsp<=old||walk.Rsp-old>0x100000||walk.Rip<(uintptr_t)native_base||walk.Rip>=(uintptr_t)native_base+0x1821c000)break;
+            if(entry)RtlVirtualUnwind(UNW_FLAG_NHANDLER,image,walk.Rip,entry,&walk,&data,&frame,nullptr);else{walk.Rip=*(DWORD64*)walk.Rsp;walk.Rsp+=8;}if(walk.Rsp<=old||walk.Rsp-old>0x100000||walk.Rip<(uintptr_t)native_base||walk.Rip>=(uintptr_t)native_base+0x17cb9000)break;
         }fputs("]",log_file);if(slot==0&&c->Rip-(uintptr_t)native_base==0x51a90)fprintf(log_file,",\"record_type\":\"%s\",\"record_value\":%.9g",desktop_native_type((void*)c->R14),*(float*)(c->R14+0x30));fputs("}\n",log_file);fflush(log_file);
     }return EXCEPTION_CONTINUE_EXECUTION;
 }

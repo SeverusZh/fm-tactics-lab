@@ -42,6 +42,10 @@ async function environment(system,browser){
  assert.equal(translate('立刻反击'),'Counter');
  assert.equal(translate('重新组织防守'),'Regroup');
  assert.equal(translate('立即反抢'),'Counter-press');
+ assert.equal(translate('真实战术对每个对手生成对手主场、对手客场两套。'),
+  'Real tactics create two plans per opponent - their home, and their away fixture.');
+ assert.equal(translate('开启后，每名首发在战术位置的熟练度固定为满值，其余属性统一为设定面板值。'),
+  "When enabled, each starter's tactical position familiarity is fixed at the maximum, other attributes use the configured panel value.");
  en.status.data='正在模拟 2 / 6';en.mutate(en.status);
  assert.equal(en.status.data,'Simulating 2 / 6');
  en.mutate(en.status);assert.equal(en.status.data,'Simulating 2 / 6');

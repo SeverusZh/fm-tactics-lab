@@ -43,7 +43,10 @@ NATIVE = ROOT / 'fm27_native'
 import desktop_engine
 ENGINE_COMPATIBILITY = desktop_engine.initialize(ROOT)
 ENGINE_DLL_SHA256 = ENGINE_COMPATIBILITY['actual_dll_sha256']
-EXECUTION_EXPERIMENT_DLL = '252ff8fb5b7a4a5a5464db6ba632e309eef9b6e65ffa992ae20575a189e66c6a'
+EXECUTION_EXPERIMENT_DLLS = {
+    '252ff8fb5b7a4a5a5464db6ba632e309eef9b6e65ffa992ae20575a189e66c6a',
+    'f79b0a3413dd0e3f461b0afbc3ff397003f4a26d7525a30717428de6a8b91196',
+}
 EXECUTION_COMPONENTS = ('understanding', 'buy_in', 'opposition', 'ability')
 CATALOG = json.loads((WEB/'catalog.json').read_text(encoding='utf8'))
 phase_inputs.annotate(CATALOG)
@@ -247,7 +250,7 @@ def validate_scenario(data):
         values = data['experimental_execution']
         if not isinstance(values, list) or len(values) != 2:
             raise ValueError('请分别设置两队的实验执行力')
-        if ENGINE_DLL_SHA256 != EXECUTION_EXPERIMENT_DLL:
+        if ENGINE_DLL_SHA256 not in EXECUTION_EXPERIMENT_DLLS:
             raise ValueError('当前 FM27 引擎版本尚未验证实验执行力')
         execution = []
         for value in values:
@@ -363,6 +366,7 @@ import sys
 SAVE_LIBRARY=desktop_save_mode.SaveLibrary(sys.modules[__name__])
 
 def require_league_idle(label):
+    if SAVE_LIBRARY.real_active:raise ValueError('请等待真实AI战术生成完成')
     if SAVE_LIBRARY.active:raise ValueError('请等待存档及历史输入解析完成')
     with LOCK:
         if any(j['status']in ('queued','running')for j in JOBS.values()):raise ValueError('请等待比赛结束后再'+label)
@@ -375,6 +379,7 @@ def experiment_name(value, fallback):
 
 def create_save_job(data):
     desktop_engine.require_available(ENGINE_COMPATIBILITY)
+    if SAVE_LIBRARY.real_active: raise ValueError('请等待真实AI战术生成完成')
     if SAVE_LIBRARY.active: raise ValueError('请等待存档／对手解析完成')
     scenario=validate_scenario(data['scenario'])
     reference=validate_scenario(data['reference']) if data.get('reference') else None
@@ -543,7 +548,7 @@ def import_fmf(data):
         variants[variant]={'name':bytes.fromhex(decoded['name_utf8_hex']).decode('utf8')[:64],'frequency':routine['frequency'],'strategy':routine['strategy'],'swing':routine['swing'],'groups':routine['groups'],'backups':backups,'priority':routine['priority'],'opaque_flags':routine['opaque_flags']}
         scenario=validate_scenario(scenario);report={'setpiece_type':kind,'notice':'已通过原版解析器导入'+setpieces.TYPE_NAMES[kind]+'套路；包含任务、备用任务、分配顺序、发球策略和频率。','native_roundtrip_verified':True}
         (directory/'import_report.json').write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding='utf8');return {'scenario':scenario,'report':report}
-    if result.returncode or not parsed or not decoded or not parsed['accepted']or parsed['stream_error']:raise ValueError('原版解析器未完整接受此 FM27 战术，未改动当前配置')
+    if result.returncode or not parsed or not decoded or not parsed['accepted']or parsed['stream_error']:raise ValueError('本机游戏解析器未完整接受此战术，未改动当前配置')
     team=scenario['teams'][side]
     SAVE_LIBRARY.apply_plan(team,parsed)
     team['tactic_name']=bytes.fromhex(decoded['name_utf8_hex']).decode('utf8')[:120]
@@ -773,10 +778,14 @@ class Handler(BaseHTTPRequestHandler):
         if path=='/api/catalog':return self.send(CATALOG)
         if path=='/api/defaults':return self.send(DEFAULT)
         if path=='/api/phase-defaults':return self.send(phase_inputs.pack(DEFAULT,CATALOG))
-        if path=='/api/status':return self.send({'engine':'original_native','engine_compatibility':ENGINE_COMPATIBILITY,'server_pid':os.getpid(),'fixture_me_version':'26.8.0.0','independent':True,'team_groups':len(GROUPS),'team_options':sum(len(g['options'])for g in GROUPS.values()),'player_groups':17,'roles':79,'batch':{'max_matches_per_variant':10000,**BATCH_LIMITS,'isolation':'bounded_reused_native_sessions','jobs_per_native_session':64,'postprocess_workers':2,'whole_match_automatic_retries':0}})
+        if path=='/api/status':return self.send({'engine':'original_native','engine_compatibility':ENGINE_COMPATIBILITY,'server_pid':os.getpid(),'application_version':'v1111.2','fmf_version_validation':'original_game_reader','fixture_me_version':'26.8.0.0','independent':True,'team_groups':len(GROUPS),'team_options':sum(len(g['options'])for g in GROUPS.values()),'player_groups':17,'roles':79,'batch':{'max_matches_per_variant':10000,**BATCH_LIMITS,'isolation':'bounded_reused_native_sessions','jobs_per_native_session':64,'postprocess_workers':2,'whole_match_automatic_retries':0}})
         if path=='/api/save/status':
             query=parse_qs(urlparse(self.path).query)
             try: return self.send(SAVE_LIBRARY.status(query.get('id',[None])[0]))
+            except (ValueError,OSError) as error: return self.send({'error':str(error)},400)
+        if path=='/api/save/leagues':
+            query=parse_qs(urlparse(self.path).query)
+            try: return self.send(SAVE_LIBRARY.league_catalog(query.get('id',[None])[0]))
             except (ValueError,OSError) as error: return self.send({'error':str(error)},400)
         if path=='/api/jobs':
             with LOCK:return self.send([{k:v for k,v in j.items()if not k.startswith('_')and(k!='runs'or parse_qs(urlparse(self.path).query).get('brief')!=['1'])}for j in sorted(JOBS.values(),key=lambda j:j.get('created',0))])
@@ -818,7 +827,7 @@ class Handler(BaseHTTPRequestHandler):
         if origin and origin!=f'http://{self.headers.get("Host")}':return self.send({'error':'拒绝跨站调用'},403)
         try:
             length=int(self.headers.get('Content-Length',0))
-            if not 0<length<=(8000000 if urlparse(self.path).path in ('/api/import-fmf','/api/pool/import-fmf')else 1500000):raise ValueError('请求大小无效')
+            if not 0<length<=(8000000 if urlparse(self.path).path in ('/api/import-fmf','/api/pool/import-fmf','/api/save/league-pool')else 1500000):raise ValueError('请求大小无效')
             data=json.loads(self.rfile.read(length));path=urlparse(self.path).path
             if path=='/api/jobs/rename':
                 with LOCK:
@@ -847,14 +856,23 @@ class Handler(BaseHTTPRequestHandler):
             if path.startswith('/api/save/'):
                 if path=='/api/save/pick': return self.send({'path':desktop_save_mode.choose_save_file()})
                 if path=='/api/save/pick-folder': return self.send({'path':desktop_save_mode.choose_folder()})
+                if path=='/api/save/leagues':
+                    return self.send(SAVE_LIBRARY.league_catalog(data['id']))
                 if path=='/api/save/league-library':
-                    return self.send(SAVE_LIBRARY.league_library(data['id'],data['club_uid']))
+                    return self.send(SAVE_LIBRARY.league_library(data['id'],data['league']))
                 if path=='/api/save/league-export':
                     require_league_idle('导出存档战术')
-                    return self.send(SAVE_LIBRARY.export_league_tactics(data['id'],data['club_uid'],data['directory']))
+                    return self.send(SAVE_LIBRARY.export_league_tactics(data['id'],data['league'],data['directory']))
+                if path=='/api/save/real-generation-status':
+                    return self.send(SAVE_LIBRARY.real_generation_status(data['id'],data['league']))
+                if path=='/api/save/real-generation':
+                    require_league_idle('生成真实AI战术')
+                    if data.get('club_uid') is not None:
+                        return self.send(SAVE_LIBRARY.generate_real_team(data['id'],data['league'],data['club_uid'],bool(data.get('force'))))
+                    return self.send(SAVE_LIBRARY.start_real_generation(data['id'],data['league'],data.get('clubs'),bool(data.get('force'))))
                 if path=='/api/save/league-pool':
                     require_league_idle('导入客队战术池')
-                    return self.send(SAVE_LIBRARY.import_league_tactics_pool(data['id'],data['club_uid'],data['scenario']))
+                    return self.send(SAVE_LIBRARY.import_league_tactics_pool(data['id'],data['league'],data['scenario']))
                 if path=='/api/save/import': return self.send(SAVE_LIBRARY.start(data['path']),202)
                 if path=='/api/save/club': return self.send(SAVE_LIBRARY.club(data['id'],data['club_uid']))
                 if path=='/api/save/load':
@@ -884,6 +902,7 @@ class Handler(BaseHTTPRequestHandler):
                 if not isinstance(selected,str) or not selected.strip():raise ValueError('请填写游戏安装目录')
                 selected=str(Path(selected.strip()).resolve())
                 with IMPORT_LOCK,LOCK:
+                    if SAVE_LIBRARY.real_active:return self.send({'error':'真实AI战术生成中不能更换游戏目录'},409)
                     if SAVE_LIBRARY.active:raise ValueError('存档／历史输入解析中不能更换引擎')
                     if any(j['status']in ('queued','running')for j in JOBS.values()):return self.send({'error':'比赛运行中不能更换游戏目录'},409)
                     os.environ['FM27_GAME_ROOT']=selected
@@ -901,6 +920,7 @@ class Handler(BaseHTTPRequestHandler):
             if path=='/api/phase-plan':return self.send({'scenario':phase_inputs.pack(validate_scenario(data),CATALOG)})
             if path=='/api/repair':return self.send(repair_saved_scenario(data))
             if path in('/api/run','/api/run-episodes'):
+                if SAVE_LIBRARY.real_active:raise ValueError('请等待真实AI战术生成完成后运行比赛')
                 if SAVE_LIBRARY.active:raise ValueError('请等待存档及历史输入解析完成后运行比赛')
                 event_details=data.get('event_details',True)
                 if type(event_details)is not bool:raise ValueError('事件明细开关必须为布尔值')

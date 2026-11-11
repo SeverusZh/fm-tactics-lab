@@ -3,9 +3,9 @@ import copy
 import random
 
 PROFILE='away-tactic-pool-v1'
-MAX_ENTRIES=64
+MAX_ENTRIES=128
 DEFAULT_ATTRIBUTE_VALUE=15
-MAX_NAME=60
+MAX_NAME=80
 MAX_WEIGHT=1000
 POSITION_ATTRIBUTES=15
 POSITION_FAMILIARITY=20
@@ -189,16 +189,37 @@ def apply(team,entry,uniform=None):
             for index in range(POSITION_ATTRIBUTES,69):attributes[index]=value*5
             attributes[POSITION_ATTRIBUTE_INDEX['GK']]=1
         lineup=team.get('lineup')
-        if isinstance(lineup,list):
-            for phase in team.get('phases')or[]:
-                if not isinstance(phase,list):continue
-                for slot,cell in enumerate(phase):
-                    if slot>=len(lineup)or not isinstance(cell,dict):continue
-                    player_index=lineup[slot]
-                    if type(player_index)is not int or not 0<=player_index<len(players):continue
-                    familiar=POSITION_ATTRIBUTE_INDEX.get(cell.get('position'))
-                    if familiar is not None:players[player_index]['attributes'][familiar]=POSITION_FAMILIARITY
+        if not isinstance(lineup,list)or len(lineup)<11:
+            raise ValueError('客队首发名单不完整，无法统一战术位置熟练度')
+        for phase in team.get('phases')or []:
+            if not isinstance(phase,list)or len(phase)!=11:
+                raise ValueError('客队战术阶段不完整，无法统一战术位置熟练度')
+            for slot,cell in enumerate(phase):
+                if not isinstance(cell,dict):raise ValueError('客队战术位置格式无效')
+                player_index=lineup[slot]
+                if type(player_index)is not int or not 0<=player_index<len(players):
+                    raise ValueError('客队首发名单包含无效球员序号')
+                familiar=POSITION_ATTRIBUTE_INDEX.get(cell.get('position'))
+                if familiar is None:raise ValueError('战术包含未知位置，无法统一熟练度：'+str(cell.get('position')))
+                players[player_index]['attributes'][familiar]=POSITION_FAMILIARITY
+        verify(team,value)
     return team
+
+
+def verify(team,value):
+    """Every starter must be fully familiar with the tactic position and carry the uniform panel value."""
+    players=team.get('players')or [];lineup=team.get('lineup')or []
+    if len(lineup)<11:raise ValueError('客队首发名单不完整')
+    for phase in team.get('phases')or []:
+        for slot,cell in enumerate(phase):
+            index=lineup[slot];familiar=POSITION_ATTRIBUTE_INDEX.get(cell.get('position'))
+            if familiar is None:raise ValueError('战术包含未知位置，无法核对熟练度：'+str(cell.get('position')))
+            attributes=players[index]['attributes']
+            if attributes[familiar]!=POSITION_FAMILIARITY:
+                raise ValueError('战术位置熟练度未达到满值')
+            if any(attributes[position]!=value*5 for position in range(POSITION_ATTRIBUTES,69)):
+                raise ValueError('统一球员属性未达到设定面板值')
+    return True
 
 
 def expand(scenario,index,side=1):

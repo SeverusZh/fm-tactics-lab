@@ -1,5 +1,26 @@
 # Changelog
 
+## v1111.2 · 2026-11-11
+
+- Move random opponent tactics into the match run controls and remove the standalone away-pool sidebar page.
+- Enable the option to open candidate import, weights and uniform-attribute settings; closing the settings retains the enabled state, while disabling randomization retains candidates and weights.
+- Rename save-library import to Add random candidates, without enabling randomization automatically.
+- Keep empty-candidate setup local and prevent starting a random match until candidates are added.
+- Preserve the existing pool format, per-seed draws and tactical-execution integration; update Chinese and English copy.
+
+
+## v1111.1 · 2026-11-11
+
+- Integrate PR #3 with the v1111 official FM27 27.0.1+2494687 adapter.
+- Browse loaded leagues and read league/country names from local game data.
+- Generate original-engine AI plans for opponents in the managed league, with club-home/club-away contexts, progress, caching and retry.
+- Export verified FMF plans and import mixed generated/preset plans into the away pool without silently dropping teams.
+- Invalidate derived plans when engine identity changes and preserve missing-coach restrictions.
+- Retain v1111 save-layout, tactic auxiliary-map, TEAM-count discovery and tactical-execution compatibility fixes.
+- AI generation uses current squads, fixed seed 0 and the default player-side template; imported pool plans are static.
+- Validation on a 27.0.1 Manchester United save: 19 opponents; 36 generated plans plus one fallback preset exported/imported; one unavailable secondary preset explicitly reported. HIGHWAY STAR FMF round-trip passed. Three complete native matches passed, including one using the final bundled runtime. Automated checks: 145 passed, one Windows symlink skip; i18n and EXE self-test passed.
+
+
 ## v1109.3 · 2026-11-09
 
 - Allow random away tactic pools with experimental tactical execution.
@@ -20,6 +41,14 @@
 
 ## 未发布
 
+- 新增真实AI战术批量生成：读取每队现任主教练、当前阵容和你自己的主教练，用本机原版引擎做 0 tick 对局准备并回读完整双阶段战术；每个对手生成对手主场/对手客场两套（列表显示为「球队主场战术/球队客场战术」）并直接替换第1/2套，支持进度条、并行生成与缓存增量补齐；缓存绑定引擎与生成协议身份，引擎或适配器变化后失效重生成；导出与导入客队战术池按球队/变体合并真实战术与可用预设并报告遗漏，空库不再阻断预设导出。
+- 客队战术池统一属性核对：开启统一属性时，每名首发在战术位置的熟练度固定为满 20，其余属性统一为可配置面板值（默认 15），并在展开后核对。
+- 重新设计存档战术导出：可从存档中任意已载入联赛导出对手战术，每位主教练按主/次偏好阵型各生成一套原装预设，文件按「俱乐部-教练-第x套战术」命名并平铺写入导出目录。
+- 联赛与国家名称改为读取本机 FM27 游戏数据库（lang_db.dat），并按存档 ID 交叉校验；读取失败时回退到联赛编号。
+- 客队战术池导入不再去重，支持重复加入同一套战术；池上限调整为 128 套。
+- 重新设计「存档战术」与「客队战术池」页面：联赛选择、球队/教练/两套战术表格、导出与导入主流程，移除旧页面冗余控件。
+- 存档战术页的联赛与国家名称跟随界面语言显示中文或英文（读取 FM27 游戏数据库的中文名称表）；同一联赛只列出一条，自动选择进行中或最近的赛程。
+- 联赛教练偏好改为直接读取一线队教练分配，不再依赖仅对部分存档可用的球队表；一线队主教练空缺的球队明确标记为不可用。
 - 新增存档战术页面：识别存档后按当前联赛浏览除玩家以外的教练偏好预设战术，可导出到本机文件夹或一键导入客队战术池。
 - 客队战术池改为侧边栏独立页面，支持导入本机 FMF 或从存档页面导入联赛对手预设；底栏快速模式旁新增随机模式开关，按权重逐场抽取客队战术。
 - 统一客队球员属性只统一能力属性，首发按抽中战术的对应位置获得最高位置熟练度，避免此前整队位置熟练度统一为 15 后明显变弱。

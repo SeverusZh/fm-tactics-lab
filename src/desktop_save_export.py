@@ -9,7 +9,9 @@ import shutil
 import time
 import fm27_fmf
 
-PROFILE='saved-tactic-export-v1'
+PROFILE='saved-tactic-export-v2'
+REAL_PROFILE='saved-tactic-real-ai-export-v1'
+MIXED_PROFILE='saved-tactic-mixed-export-v1'
 MAX_FILES=400
 MAX_PLAN_BYTES=4*1024*1024
 ILLEGAL=re.compile(r'[<>:"/\\|?*]')
@@ -32,11 +34,18 @@ def safe_component(value,fallback,limit=60):
         if not text:return '战术'
     return text
 
+def tactic_file_name(club,coach,index):
+    parts=[safe_component(club,'俱乐部',24),safe_component(coach,'主教练',24)]
+    try:number=max(1,int(index))
+    except (TypeError,ValueError):number=1
+    parts.append(f'第{number}套战术')
+    return '-'.join(part for part in parts if part)
+
 def _stamp():
     return time.strftime('%Y%m%d-%H%M%S')
 
-def _directory(base):
-    stem='FM27存档战术-'+_stamp()
+def _directory(base,stem='FM27存档战术'):
+    stem=stem+'-'+_stamp()
     for number in range(1,1000):
         candidate=base/(stem if number==1 else f'{stem}-{number}')
         try:candidate.mkdir()
@@ -72,7 +81,10 @@ def _atomic(path,payload):
 
 def _source(value):
     value=value if isinstance(value,dict) else {}
-    return {key:value.get(key)for key in ('save_id','source','source_sha256','date','build')}
+    source=value.get('source');name=value.get('source_name')
+    if not name and isinstance(source,str) and source:name=Path(source).name
+    return {'save_id':value.get('save_id'),'source_name':name,'source_sha256':value.get('source_sha256'),
+            'date':value.get('date'),'build':value.get('build')}
 
 def _rows(items):
     rows=list(items)if items is not None else []
@@ -90,22 +102,46 @@ def _rows(items):
         except ValueError as error:raise ValueError('战术文件校验失败：'+str(error))
         if not plan:raise ValueError('战术文件缺少内嵌计划')
         if len(plan)>MAX_PLAN_BYTES:raise ValueError('单套战术计划超过 4 MB，无法导出')
-        club=item.get('club');name=item.get('tactic_name');report=item.get('report')
+        club=item.get('club');coach=item.get('coach');index=item.get('index');name=item.get('name')
+        tactic_name=item.get('tactic_name');report=item.get('report')
+        if not isinstance(name,str)or not name:raise ValueError('战术文件名称无效')
         result.append({'club_uid':club_uid,'club':club if isinstance(club,str)else str(club if club is not None else club_uid),
-            'target':target,'tactic_name':name if isinstance(name,str)else '',
+            'coach':coach if isinstance(coach,str)else '', 'index':index if type(index)is int else None,
+            'name':name,'target':target,'tactic_name':tactic_name if isinstance(tactic_name,str)else '',
+            'preset_name':item.get('preset_name')if isinstance(item.get('preset_name'),str)else '',
             'payload':payload,'plan':plan,'report':report if isinstance(report,dict)else {}})
     return result
 
-def _notice(source,folders,files):
+def _notice(source,file_count):
     lines=['FM27 存档战术导出','',
-        f'本目录由 FM Tactics Lab 从 FM27 生涯存档导出，共 {len(folders)} 支球队、{len(files)} 套战术。',
-        f"来源存档：{source.get('source') or '未知'}",
+        f'本目录由 FM Tactics Lab 从 FM27 生涯存档导出，共 {file_count} 套战术。',
+        f"来源存档：{source.get('source_name') or '未知'}",
         f"存档日期：{source.get('date') or '未知'}，游戏版本：{source.get('build') or '未知'}",
-        '己方战术为存档中的存储战术，同联赛对手战术为教练偏好原装预设。',
-        '每套 .fmf 可在工具中重新导入；manifest.json 记录文件清单、内嵌计划校验值与原版回读结果。']
+        '文件名格式为 俱乐部-教练-第x套战术：第1套按主教练主偏好阵型匹配，第2套按次偏好阵型匹配，都是游戏原装预设的近似，不是当天实战战术。',
+        '每套 .fmf 可在工具中重新导入；manifest.json 记录文件清单、内嵌计划校验值与导出依据。']
     return '\n'.join(lines)+'\n'
 
-def write(directory,source,items):
+def real_notice(source,file_count):
+    lines=['FM27 真实AI战术导出','',
+        f'本目录由 FM Tactics Lab 调用原版引擎生成，共 {file_count} 套战术。',
+        f"来源存档：{source.get('source_name') or '未知'}",
+        f"存档日期：{source.get('date') or '未知'}，游戏版本：{source.get('build') or '未知'}",
+        '每套战术按该队现任主教练和当前阵容（按能力选取 23 人）由本机原版引擎的 AI 准备流程生成，并从引擎回读完整计划后写出；包含心态、球队指令、双阶段角色与职责、个人指令和阶段映射。',
+        '每个对手生成对手主场、对手客场两套，文件名后缀为「主场战术」「客场战术」（预览种子 0）；它是原版 AI 在受控预览上下文（当前存档阵容、固定预览种子 0、工具默认的玩家侧模板）下的输出，FM 正式比赛会由游戏内 AI 按实际名单和对局上下文自行生成，本工具不会逐场重算，导入客队战术池的也是这份固定计划。',
+        'manifest.json 记录文件清单、内嵌计划校验值、生成引擎身份与生成依据。']
+    return '\n'.join(lines)+'\n'
+
+def mixed_notice(source,file_count,real_count,preset_count):
+    lines=['FM27 联赛战术导出','',
+        f'本目录由 FM Tactics Lab 导出，共 {file_count} 套战术：真实AI战术 {real_count} 套，教练偏好预设 {preset_count} 套。',
+        f"来源存档：{source.get('source_name') or '未知'}",
+        f"存档日期：{source.get('date') or '未知'}，游戏版本：{source.get('build') or '未知'}",
+        '真实AI战术由本机原版引擎按该队现任主教练和当前阵容（按能力选取 23 人）做 0 tick 对局准备后回读完整计划，文件名后缀为「主场战术」「客场战术」（预览种子 0）；它是原版 AI 在受控预览上下文中的输出，FM 正式比赛会由游戏内 AI 按实际名单和对局上下文自行生成，本工具不会逐场重算。',
+        '未生成真实战术的球队按主教练主/次偏好阵型导出游戏原装预设（第1套/第2套），是配置近似，不是当天实战战术。',
+        'manifest.json 记录文件清单、内嵌计划校验值、生成引擎身份与导出依据。']
+    return '\n'.join(lines)+'\n'
+
+def write(directory,source,items,stem=None,notice=None,profile=None):
     if isinstance(directory,Path):base=directory.expanduser()
     elif isinstance(directory,str)and directory.strip():base=Path(directory).expanduser()
     else:raise ValueError('请选择导出目录')
@@ -113,32 +149,28 @@ def write(directory,source,items):
     base=base.resolve()
     if not base.is_dir():raise ValueError('所选导出目录不存在，请重新选择')
     rows=_rows(items);source=_source(source)
-    root=_directory(base)
+    root=_directory(base,stem or 'FM27存档战术')
     try:
-        folders={}
-        for row in rows:folders.setdefault(row['club_uid'],row['club'])
-        used_clubs=set();folder_names={uid:_unique(club,f'球队{uid}',used_clubs)for uid,club in folders.items()}
-        used_files={};files=[]
+        used=set();files=[]
         for row in rows:
-            club_dir=root/folder_names[row['club_uid']]
-            if not _inside(root,club_dir)or club_dir.is_symlink():raise ValueError('导出路径越界，已停止')
-            club_dir.mkdir(exist_ok=True)
-            used=used_files.setdefault(row['club_uid'],set())
-            name=_unique(row['tactic_name'],f"战术{row['target'].rsplit(':',1)[-1]}",used)
-            target=club_dir/(name+'.fmf')
+            name=_unique(row['name'],f"战术{row['index']or 1}",used)
+            target=root/(name+'.fmf')
             if not _inside(root,target):raise ValueError('导出路径越界，已停止')
             _atomic(target,row['payload'])
             files.append({'file':target.relative_to(root).as_posix(),'club_uid':row['club_uid'],
-                'club':row['club'],'target':row['target'],'tactic_name':row['tactic_name'],
+                'club':row['club'],'coach':row['coach'],'index':row['index'],'name':name,
+                'target':row['target'],'tactic_name':row['tactic_name'],'preset_name':row['preset_name'],
                 'sha256':hashlib.sha256(row['payload']).hexdigest(),'size':len(row['payload']),
                 'plan_sha256':hashlib.sha256(row['plan']).hexdigest(),'plan_size':len(row['plan']),
                 'report':row['report']})
-        manifest={'profile':PROFILE,'created':datetime.now().astimezone().isoformat(timespec='seconds'),
+        profile=profile or PROFILE
+        manifest={'profile':profile,'created':datetime.now().astimezone().isoformat(timespec='seconds'),
             'source':source,'files':files,
-            'notice':f'本目录包含 {len(folder_names)} 支球队、{len(files)} 套 FM27 战术文件，内嵌计划均已校验。'}
+            'notice':f'本目录包含 {len(files)} 套 FM27 战术文件，内嵌计划均已校验。'}
+        text=notice(source,len(files)) if callable(notice) else (notice if isinstance(notice,str) and notice.strip() else _notice(source,len(files)))
         _atomic(root/'manifest.json',json.dumps(manifest,ensure_ascii=False,indent=2).encode('utf8'))
-        _atomic(root/'导出说明.txt',_notice(source,folder_names,files).encode('utf8'))
+        _atomic(root/'导出说明.txt',text.encode('utf8'))
     except Exception:
         shutil.rmtree(root,ignore_errors=True)
         raise
-    return {'directory':str(root),'profile':PROFILE,'manifest':manifest,'files':files,'failures':[]}
+    return {'directory':str(root),'profile':profile,'manifest':manifest,'files':files,'failures':[]}
