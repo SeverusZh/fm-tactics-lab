@@ -10,6 +10,7 @@ import threading
 import time
 import types
 import unittest
+from unittest import mock
 import shutil
 from pathlib import Path
 
@@ -231,6 +232,98 @@ class ServerQueueTests(unittest.TestCase):
         self.assertEqual(pool["draws"]["total"], 3)
         self.assertEqual(len(pool["entries"]), 2)
 
+    def test_pool_rotation_plan_expands_every_entry_in_round_order(self):
+        scenario=pool_scenario(self.module)
+        scenario['away_tactic_pool']['rotation']={'enabled':True,'rounds':2}
+        reference=copy.deepcopy(self.module.DEFAULT)
+        submitted=self.module.start_run({
+            "scenario":scenario,"reference":reference,"seeds":[41,42,43,44],
+            "event_details":False})
+        self.assertEqual(submitted["total"],8)
+        job=self.module.JOBS[submitted["id"]]
+        self.wait_for(lambda: self.module.JOBS[submitted["id"]]["status"]=="complete")
+        self.assertEqual(job["_pool_draws"],{"41":0,"42":1,"43":0,"44":1})
+        self.assertEqual(job["tactic_pool"]["mode"],"rotation")
+        self.assertEqual(job["tactic_pool"]["rounds"],2)
+        self.assertEqual(job["tactic_pool"]["players"],"uniform")
+        provenance=json.loads((job["_dir"]/"provenance.json").read_text(encoding="utf8"))
+        self.assertEqual(provenance["pool"]["mode"],"rotation")
+        self.assertEqual(provenance["pool"]["rounds"],2)
+        for label in ("A","B"):
+            names=[item["teams"][1]["tactic_name"]for item in job["_pool_variants"][label]]
+            self.assertEqual(names,["池战术甲","池战术乙"])
+
+    def test_pool_rotation_rejects_seed_count_mismatch(self):
+        scenario=pool_scenario(self.module)
+        scenario['away_tactic_pool']['rotation']={'enabled':True,'rounds':2}
+        with self.assertRaises(ValueError)as caught:
+            self.module.start_run({"scenario":scenario,"seeds":[1,2,3],"event_details":False})
+        self.assertIn("2 套 × 2 轮 = 4 场",str(caught.exception))
+        with self.assertRaises(ValueError):
+            self.module.start_run({"scenario":scenario,"seeds":[1,2,3,4,5],"event_details":False})
+
+    def test_pool_real_roster_expands_saved_players(self):
+        scenario=pool_scenario(self.module)
+        players=[{'name':f'存档球员{index+1}','source_uid':900+index,
+            'attributes':[10]*15+[50]*54,'native_profile':{}}for index in range(11)]
+        roster={'club_uid':7,'club':'乙队','coach':'乙队主教练','source':'coach_preset',
+            'roster_size':11,'lineup':list(range(11)),'players':players}
+        for entry in scenario['away_tactic_pool']['entries']:entry["roster"]=copy.deepcopy(roster)
+        scenario['away_tactic_pool']['real']={'enabled':True}
+        submitted=self.module.start_run({"scenario":scenario,"seeds":[31],"event_details":False})
+        job=self.module.JOBS[submitted["id"]]
+        self.wait_for(lambda: self.module.JOBS[submitted["id"]]["status"]=="complete")
+        self.assertEqual(job["tactic_pool"]["players"],"real")
+        self.assertTrue(all(row["roster"]for row in job["tactic_pool"]["entries"]))
+        index=job["_pool_draws"]["31"]
+        expanded=job["_pool_variants"]["B"][index]
+        away=expanded["teams"][1]
+        self.assertEqual(away["roster_size"],11)
+        self.assertEqual(away["lineup"],list(range(11)))
+        self.assertEqual([player["source_uid"]for player in away["players"][:11]],
+            list(range(900,911)))
+        self.assertEqual([player["name"]for player in away["players"][:11]],
+            [f"存档球员{index+1}"for index in range(11)])
+        self.assertEqual(away["players"][0]["attributes"],[10]*15+[50]*54)
+        config=job["_dir"]/f"B_pool{index}.json"
+        saved=json.loads(config.read_text(encoding="utf8"))
+        self.assertEqual(saved["teams"][1]["players"][0]["name"],"存档球员1")
+
+    def test_apply_roster_output_passes_real_validation(self):
+        module = self.module
+        library = module.SAVE_LIBRARY
+        key = "abcdef0123456789"
+        folder = library.root / key
+        folder.mkdir(parents=True, exist_ok=True)
+        self.addCleanup(shutil.rmtree, folder, True)
+        (folder / "dataset.json").write_text(json.dumps({
+            "clubs": [{"uid": 2, "name": "乙队", "short_name": "乙"}],
+            "source": "C:/saves/career.fm", "source_sha256": "a" * 64,
+            "date": "2027-01-15", "build": "27.1.0"}, ensure_ascii=False), encoding="utf8")
+        (folder / "rosters").mkdir(exist_ok=True)
+        positions = ["gk", "sw", "dl", "dc", "dr", "dm", "ml", "mc", "mr", "aml",
+                     "amc", "amr", "stc", "wbl", "wbr"]
+        people = [{"unique_id": 900 + index, "name": f"乙队球员{index}", "club_uid": 2,
+                   "team_slot": 0, "positions": {name: 10 for name in positions},
+                   "ability": {"current": 100 + index}, "personality": None,
+                   "trait_bits": None, "reputation": {"home": 0, "current": 0, "world": 0}}
+                  for index in range(23)]
+        (folder / "rosters" / "2.json").write_text(json.dumps(people, ensure_ascii=False),
+                                                   encoding="utf8")
+        scenario = copy.deepcopy(module.DEFAULT)
+        with mock.patch.object(library, "player_values",
+                               side_effect=lambda person: ([10] * 15 + [50] * 54, {})):
+            result = library.apply_roster(key, 2, scenario)
+        validated = module.validate_scenario(result["scenario"])
+        home = validated["teams"][0]
+        self.assertEqual(home["roster_size"], 23)
+        self.assertEqual(len(home["squad"]), 23)
+        self.assertEqual({player["source_uid"] for player in home["players"][:23]},
+                         set(range(900, 923)))
+        self.assertEqual(home["players"][0]["attributes"], [10] * 15 + [50] * 54)
+        self.assertEqual(result["source"]["club"], "乙")
+        self.assertEqual(result["source"]["match_roster_count"], 23)
+
     def test_pool_rejects_native_generation_and_setpiece_episodes(self):
         scenario = pool_scenario(self.module)
         generated = copy.deepcopy(scenario)
@@ -317,6 +410,45 @@ class ServerQueueTests(unittest.TestCase):
             module.AGENT_TOKEN = original_token
         self.assertEqual(captured[0][0], 409)
         self.assertIn("已有比赛运行中", captured[0][1]["error"])
+
+
+    def test_ui_validate_accepts_large_pool_bodies_within_new_limit(self):
+        module = self.module
+        token = "t" * 64
+        port = 8765
+        captured = []
+        original_send = module.Handler.send
+        original_token = module.AGENT_TOKEN
+        module.AGENT_TOKEN = token
+        module.Handler.send = lambda handler, value, status=200, kind=None, headers=None: \
+            captured.append((status, value))
+        try:
+            handler = object.__new__(module.Handler)
+            handler.path = "/api/validate"
+            handler.headers = {
+                "Host": f"127.0.0.1:{port}",
+                "Origin": f"http://127.0.0.1:{port}",
+                "Cookie": f"fm27_session={token}",
+                "Content-Length": str(0),
+            }
+            handler.rfile = None
+            handler.wfile = io.BytesIO()
+            handler.server = types.SimpleNamespace(server_address=("127.0.0.1", port))
+            payload = json.dumps({**module.DEFAULT, "padding": "x" * 4400000},
+                                  ensure_ascii=False).encode("utf8")
+            handler.rfile = io.BytesIO(payload)
+            handler.headers["Content-Length"] = str(len(payload))
+            handler.do_POST()
+            self.assertEqual(captured[-1][0], 200)
+            self.assertIn("scenario", captured[-1][1])
+            handler.rfile = io.BytesIO(b"{}")
+            handler.headers["Content-Length"] = str(8500000)
+            handler.do_POST()
+            self.assertEqual(captured[-1][0], 400)
+            self.assertIn("请求大小无效", captured[-1][1]["error"])
+        finally:
+            module.Handler.send = original_send
+            module.AGENT_TOKEN = original_token
 
 
 if __name__ == "__main__":

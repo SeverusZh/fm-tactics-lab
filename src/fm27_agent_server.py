@@ -119,8 +119,8 @@ class Router:
             "max_workers": int(self.app.BATCH_LIMITS.get("maximum", 4)),
             "max_opponents": 40,
             "max_career_count": 10000,
-            "max_body_bytes": 1500000,
-            "max_import_bytes": 6000000,
+            "max_body_bytes": 8000000,
+            "max_import_bytes": 8000000,
             "max_draft_bytes": 5242880,
         }
 

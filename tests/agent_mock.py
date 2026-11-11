@@ -186,8 +186,8 @@ class _Handler(BaseHTTPRequestHandler):
                 "capabilities": ["free_run", "career_save", "comparison", "fmf",
                                  "repair", "resume", "cancel", "idempotency"],
                 "limits": {"max_seeds": 10000, "max_workers": 4, "max_opponents": 40,
-                           "max_career_count": 10000, "max_body_bytes": 1500000,
-                           "max_import_bytes": 6000000, "max_draft_bytes": 5242880},
+                           "max_career_count": 10000, "max_body_bytes": 8000000,
+                           "max_import_bytes": 8000000, "max_draft_bytes": 5242880},
                 "schemas": "/api/agent/v1/schemas",
             })
         if path == "/api/agent/v1/status":
@@ -383,12 +383,14 @@ class MockAgentServer:
         draws = {}
         entry_rows = []
         if pool:
-            draws = {seed: fm27_tactic_pool.draw_index(pool["entries"], seed, job_id)
-                     for seed in seeds}
-            probabilities = fm27_tactic_pool.probabilities(pool["entries"])
+            rotation = bool((pool.get("rotation") or {}).get("enabled"))
             entry_rows = [{"index": index, "name": entry.get("name"),
-                           "weight": row["weight"], "probability": row["probability"]}
-                          for index, (entry, row) in enumerate(zip(pool["entries"], probabilities))]
+                           "weight": row["weight"],
+                           "probability": None if rotation else row["probability"],
+                           "roster": bool(entry.get("roster"))}
+                          for index, (entry, row) in enumerate(zip(
+                              pool["entries"], fm27_tactic_pool.probabilities(pool["entries"])))]
+            draws = fm27_tactic_pool.draws(pool, seeds, job_id)
         if mode == "career":
             total = len(body.get("opponents") or []) * int(body.get("count") or 0)
         else:
@@ -427,10 +429,12 @@ class MockAgentServer:
             "matches_per_minute": 0,
         }
         if pool:
+            summary = fm27_tactic_pool.summary({**pool, "entries": pool["entries"]})
             job["tactic_pool"] = {
                 "profile": pool.get("profile") or POOL_PROFILE,
                 "enabled": True,
                 "salt": job_id,
+                "mode": summary["mode"], "rounds": summary["rounds"], "players": summary["players"],
                 "uniform": pool.get("uniform"),
                 "entries": entry_rows,
                 "draws": {"total": len(draws),
@@ -501,6 +505,9 @@ class MockAgentServer:
                       "fixture_sha256": "0" * 64}
         if pool and draws:
             provenance["pool"] = {"salt": pool.get("salt"),
+                                  "mode": pool.get("mode", "random"),
+                                  "rounds": pool.get("rounds", 1),
+                                  "players": pool.get("players", "uniform"),
                                   "entries": pool.get("entries"),
                                   "draws": {str(seed): index for seed, index in draws.items()}}
         scenarios = self.job_scenarios.get(job_id) or {

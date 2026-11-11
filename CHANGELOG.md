@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Add rotation and real-roster modes to the away tactic pool: rotation cycles every candidate for a configured number of rounds instead of drawing by weight, real-roster mode applies the saved club's current squad and attributes instead of uniform values, the run-bar checkbox becomes a single pool button that opens a bottom-right popup holding both draw modes and both squad sources, save-library rows gain an Overwrite home squad action, and the starting seed gains a random button; pool summaries, provenance and Agent results carry the mode, rounds and roster flags, while CSV keeps the per-match tactic entry columns.
 - Add a local AI agent interface: /api/agent/v1 endpoints, fm27lab CLI, stdio MCP sidecar, file-backed drafts, endpoint discovery with token authentication, headless launcher mode, and cancellable save import and opponent scans.
 - Improve the agent surface: compact JSON tool text, richer draft/job/results payloads, batch draft edits, draft clone, legal option lookup, inline scenario file paths, cross-job paired comparisons, queued free-run submissions with queue positions, and shorter job wait defaults.
 - Unify run submission: the web UI and Agent interface share one start_run path; /api/run and /api/run-episodes keep the UI 409 behaviour while Agent submissions enter a real FIFO queue that executes one batch at a time in creation order; cancelling a queued run lands status cancelled immediately and resume uses the same serial gate.

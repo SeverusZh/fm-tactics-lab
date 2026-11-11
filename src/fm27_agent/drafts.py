@@ -27,9 +27,16 @@ def _pool_summary(pool):
         return None
     entries = pool.get("entries") if isinstance(pool.get("entries"), list) else []
     uniform = pool.get("uniform") if isinstance(pool.get("uniform"), dict) else None
+    rotation = pool.get("rotation") if isinstance(pool.get("rotation"), dict) else {}
+    real = pool.get("real") if isinstance(pool.get("real"), dict) else {}
     return {
         "enabled": bool(pool.get("enabled")),
         "entries": len(entries),
+        "mode": "rotation" if rotation.get("enabled") else "random",
+        "rounds": int(rotation.get("rounds") or 1),
+        "players": "real" if real.get("enabled") else "uniform",
+        "roster_entries": sum(1 for item in entries
+                              if isinstance(item, dict) and isinstance(item.get("roster"), dict)),
         "uniform": copy.deepcopy(uniform),
     }
 

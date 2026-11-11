@@ -76,7 +76,8 @@ class DraftTests(unittest.TestCase):
             path.write_text(json.dumps(scenario, ensure_ascii=False), encoding="utf-8")
             inline = self.drafts.create("inline", scenario_path=str(path))
         self.assertEqual(inline["away_tactic_pool"], {
-            "enabled": True, "entries": 2,
+            "enabled": True, "entries": 2, "mode": "random", "rounds": 1,
+            "players": "uniform", "roster_entries": 0,
             "uniform": {"enabled": True, "attribute_value": 15}})
         cloned = self.drafts.create("draft", base_draft_id=inline["draft_id"])
         self.assertEqual(cloned["away_tactic_pool"]["entries"], 2)

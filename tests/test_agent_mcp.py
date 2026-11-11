@@ -671,7 +671,8 @@ class McpSidecarTests(unittest.TestCase):
             temp.cleanup()
 
     def test_pool_round_trips_through_draft_sources(self):
-        expected_pool = {"enabled": True, "entries": 2,
+        expected_pool = {"enabled": True, "entries": 2, "mode": "random",
+                         "rounds": 1, "players": "uniform", "roster_entries": 0,
                          "uniform": {"enabled": True, "attribute_value": 15}}
         scenario = make_pool_scenario()
         with tempfile.TemporaryDirectory() as folder:
@@ -818,9 +819,71 @@ class McpSidecarTests(unittest.TestCase):
             "candidate_job_ids": [mismatch_job], "reps": 200})["structuredContent"]
         candidate = compared["candidates"][0]
         self.assertFalse(candidate["comparable"])
-        self.assertIn("抽签", candidate["reason"])
+        self.assertIn("分配", candidate["reason"])
         self.assertIsNone(candidate["paired"])
         self.assertGreater(candidate["pairing"]["draw_mismatches"], 0)
+
+    def test_rotation_and_real_pool_summaries_and_pairing(self):
+        import copy
+
+        def roster(team):
+            return {"club_uid": 2, "club": "乙队", "coach": "乙队主教练",
+                    "source": "coach_preset", "roster_size": 11,
+                    "lineup": list(range(11)),
+                    "players": [{"name": f"存档球员{index}", "source_uid": 700 + index,
+                                 "attributes": [12] * 69, "native_profile": {}}
+                                for index in range(11)]}
+
+        rotation = make_pool_scenario()
+        rotation["away_tactic_pool"]["rotation"] = {"enabled": True, "rounds": 2}
+        with tempfile.TemporaryDirectory() as folder:
+            rotation_path = Path(folder) / "rotation.json"
+            rotation_path.write_text(json.dumps(rotation, ensure_ascii=False), encoding="utf-8")
+            rotation_draft = self.call_tool("draft_create", {
+                "source": "inline", "scenario_path": str(rotation_path),
+                "name": "轮战池"})["structuredContent"]["draft_id"]
+            uniform = make_pool_scenario()
+            real = make_pool_scenario()
+            shared_roster = roster(real["teams"][1])
+            for scenario in (uniform, real):
+                for entry in scenario["away_tactic_pool"]["entries"]:
+                    entry["roster"] = copy.deepcopy(shared_roster)
+            real["away_tactic_pool"]["real"] = {"enabled": True}
+            real_path = Path(folder) / "real.json"
+            real_path.write_text(json.dumps(real, ensure_ascii=False), encoding="utf-8")
+            real_draft = self.call_tool("draft_create", {
+                "source": "inline", "scenario_path": str(real_path),
+                "name": "真实名单池"})["structuredContent"]["draft_id"]
+            uniform_path = Path(folder) / "uniform.json"
+            uniform_path.write_text(json.dumps(uniform, ensure_ascii=False), encoding="utf-8")
+            uniform_draft = self.call_tool("draft_create", {
+                "source": "inline", "scenario_path": str(uniform_path),
+                "name": "统一属性池"})["structuredContent"]["draft_id"]
+        rotation_job = self.call_tool("experiment_run", {
+            "draft_id": rotation_draft, "seeds": {"start": 501, "count": 4},
+            "event_details": False})["structuredContent"]["job_id"]
+        rotation_summary = self.call_tool("results_summary", {
+            "job_id": rotation_job})["structuredContent"]["tactic_pool"]
+        self.assertEqual((rotation_summary["mode"], rotation_summary["rounds"],
+                          rotation_summary["players"]), ("rotation", 2, "uniform"))
+        self.assertEqual(rotation_summary["draws"]["total"], 4)
+        self.assertEqual(sum(row["draws"] for row in rotation_summary["entries"]), 4)
+        self.assertTrue(all(row["roster"] is False for row in rotation_summary["entries"]))
+        real_job = self.call_tool("experiment_run", {
+            "draft_id": real_draft, "seeds": {"start": 601, "count": 2},
+            "event_details": False})["structuredContent"]["job_id"]
+        real_summary = self.call_tool("results_summary", {
+            "job_id": real_job})["structuredContent"]["tactic_pool"]
+        self.assertEqual(real_summary["players"], "real")
+        self.assertTrue(all(row["roster"] for row in real_summary["entries"]))
+        uniform_job = self.call_tool("experiment_run", {
+            "draft_id": uniform_draft, "seeds": {"start": 601, "count": 2},
+            "event_details": False})["structuredContent"]["job_id"]
+        compared = self.call_tool("results_compare", {
+            "baseline_job_id": real_job, "candidate_job_ids": [uniform_job],
+            "reps": 100})["structuredContent"]["candidates"][0]
+        self.assertFalse(compared["comparable"])
+        self.assertIn("模式", compared["reason"])
 
     def test_app_unavailable_returns_tool_error(self):
         with tempfile.TemporaryDirectory() as folder:

@@ -255,8 +255,8 @@ manifest 示例：
     "max_workers": 4,
     "max_opponents": 40,
     "max_career_count": 10000,
-    "max_body_bytes": 1500000,
-    "max_import_bytes": 6000000,
+    "max_body_bytes": 8000000,
+    "max_import_bytes": 8000000,
     "max_draft_bytes": 5242880
   },
   "schemas": "/api/agent/v1/schemas"
@@ -290,7 +290,8 @@ Schema 包包含：
 
 - schema 3 为权威输入；schema 4 为双阶段视图，字段为 teams[].phase_plans[2]。
 - 顶层字段：schema、rules、fixture、teams[2]，可选 native_generation、experimental_execution、away_tactic_pool。
-- away_tactic_pool 启用后按权重逐场抽取客队战术；A/B 对照共享一次抽签，提交时展开为每个条目的完整场景并写入 provenance。
+- away_tactic_pool 启用后按 mode 分配客队战术：random 按权重逐场抽取，rotation 按条目顺序轮换且种子数必须等于条目数乘 rounds；A/B 对照共享同一分配，提交时展开为每个条目的完整场景并写入 provenance。
+- away_tactic_pool 支持 uniform 与 real 两种客队名单来源：uniform 统一能力属性与位置熟练度；real 使用条目 roster 中的存档球员名单与属性，要求全部条目来自存档战术页。带 roster 的条目合计不能超过约 1.5 MB；轮战每方案最多 10000 场；池最多 128 套、每套 roster 最多 26 名球员。
 - 球队字段：name、tactic_name、mentality、instructions、lineup、captains、takers、setpieces、opposition、players、phases 或 phase_plans、roster_size、native_extra_team_bits。
 - Agent 只操作 schema 4；提交时由服务端归一化为 schema 3。
 
@@ -342,8 +343,8 @@ draft_id 格式：dr_ 加 12 位十六进制。
 
 - metrics 沿用现有结构，含 n、wins、draws、losses、win_rate、win_interval、goals_for、goals_against、points。
 - 存档模式追加 xg、xga、possession、shots、pass_completion、opponent_metrics、paired。
-- 随机模式 job 追加 tactic_pool：salt、uniform、entries（weight、probability）与 draws（total 与每套抽中次数）；draws 按 seed 计数，同一 seed 的 A/B 只算一次。
-- results_compare 对任一方带战术池的任务先核对抽签与条目：同种子抽中不同战术、仅一方启用池或条目不同时返回 comparable=false 与原因，paired 置空。
+- 客队战术池 job 追加 tactic_pool：salt、mode（random 或 rotation）、rounds、players（uniform 或 real）、uniform、entries（weight、probability、roster）与 draws（total 与每套出场次数）；probability 仅在 random 模式有值，rotation 下为 null；draws 按 seed 计数，同一 seed 的 A/B 只算一次。
+- results_compare 对任一方带战术池的任务先核对模式、条目与分配：模式或条目不同、同种子战术不同、仅一方启用池时返回 comparable=false 与原因，paired 置空。
 - results_csv 输出列见 CLI 章节。
 
 ## 6. Draft 工作区
@@ -508,7 +509,7 @@ draft_id 格式：dr_ 加 12 位十六进制。
 | job_list | 任务分页 |
 | job_action | 取消、续跑、删除、重命名 |
 | results_summary | 汇总指标、分布、配对差值与随机池抽中次数 |
-| results_compare | 多任务同种子配对比较与置信区间；战术池抽签不一致时拒绝配对 |
+| results_compare | 多任务同种子配对比较与置信区间；战术池模式、条目或分配不一致时拒绝配对 |
 | results_matches | 逐场分页，可选事件 |
 | results_csv | 导出 CSV 并返回路径 |
 | fmf_import | 战术文件导入草案 |
@@ -549,7 +550,7 @@ career_preview：save_id、club_uid、key、draft_id 必填；适配器从草案
 
 career_cancel：kind 取 import 或 opponents，save_id 必填，club_uid 在 opponents 时必填。返回 accepted。
 
-experiment_run：draft_id 或 candidates 二选一；candidates 为 1 到 20 个草案，每项含 draft_id 与可选 name；baseline_draft_id 可选；seeds 为起始与数量，或长度 1 到 10000 的唯一整数数组；workers 可选；event_details 默认 true；name 可选。场景带启用的 away_tactic_pool 时，服务端按 seed 与任务 salt 只抽一次，A/B 共享同一套客队战术。多草案按创建顺序进入同一 FIFO 队列串行执行；返回 jobs 列表与合计 total；单草案返回 job_id、total、workers、mode、seed_count、queued、queue_position、variant_names、seeds。
+experiment_run：draft_id 或 candidates 二选一；candidates 为 1 到 20 个草案，每项含 draft_id 与可选 name；baseline_draft_id 可选；seeds 为起始与数量，或长度 1 到 10000 的唯一整数数组；workers 可选；event_details 默认 true；name 可选。场景带启用的 away_tactic_pool 时，服务端按 seed 把每场分配到条目（random 按权重、rotation 按顺序），A/B 共享同一分配；轮战要求种子数等于条目数乘轮数。多草案按创建顺序进入同一 FIFO 队列串行执行；返回 jobs 列表与合计 total；单草案返回 job_id、total、workers、mode、seed_count、queued、queue_position、variant_names、seeds。
 
 career_run：save_id、club_uid、draft_id、opponents、count、first_seed 必填；baseline_draft_id、workers、event_details、name 可选。返回 job_id、total、workers、mode。
 
@@ -561,13 +562,13 @@ job_list：status、limit、offset 可选。返回分页摘要与排队位置。
 
 job_action：job_id 与 action 必填，action 取 cancel、resume、delete、rename；resume 可带 workers；rename 必须带 name。返回对应结果。
 
-results_summary：job_id 必填。返回 mode、metrics（A/B 分列）、distributions、paired、tactic_pool、failures 摘要、timings。tactic_pool 含 salt、entries 与 draws：draws.total 为参与抽签的 seed 数，每个 entry 的 draws 为该套被抽中的次数（同 seed 的 A/B 只计一次）。
+results_summary：job_id 必填。返回 mode、metrics（A/B 分列）、distributions、paired、tactic_pool、failures 摘要、timings。tactic_pool 含 salt、mode、rounds、players、entries 与 draws：draws.total 为参与分配的 seed 数，每个 entry 的 draws 为该套出场次数（同 seed 的 A/B 只计一次）。
 
-results_compare：baseline_job_id 与 candidate_job_ids 必填；candidate_job_ids 为 1 到 20 个任务；variant 默认 B；reps 默认 2000。按同种子配对返回每个候选的 Δ胜率、Δ积分、Δ净胜球、ΔxGD 与 bootstrap 95% 置信区间。任务带客队战术池时先读取 provenance 的抽签：仅一方启用池、条目不同或同种子抽中不同战术时返回 comparable=false、reason 与 pairing，paired 置空，禁止错误配对。
+results_compare：baseline_job_id 与 candidate_job_ids 必填；candidate_job_ids 为 1 到 20 个任务；variant 默认 B；reps 默认 2000。按同种子配对返回每个候选的 Δ胜率、Δ积分、Δ净胜球、ΔxGD 与 bootstrap 95% 置信区间。任务带客队战术池时先读取 provenance 的模式、条目与分配：仅一方启用池、模式或条目不同、同种子分配不同时返回 comparable=false、reason 与 pairing，paired 置空，禁止错误配对。
 
 results_matches：job_id 必填；variant、seed、limit、offset、include_events 可选。返回 runs 分页与 runs_total；带 seed 时返回单场。文本只返回紧凑比分与关键统计。
 
-results_csv：job_id 必填；out 可选。MCP 工具只接受 dataDir/agent/exports 下的相对文件名，默认按 job_id 命名；CLI 的 --out 可写用户指定路径。CSV 含双方统计、xGA、比分变化、进球时间线与客队战术抽签列（tactic_pool_entry_index、tactic_pool_entry_name；无池时留空）；返回 path、path_wsl_hint、sha256、rows、columns。
+results_csv：job_id 必填；out 可选。MCP 工具只接受 dataDir/agent/exports 下的相对文件名，默认按 job_id 命名；CLI 的 --out 可写用户指定路径。CSV 含双方统计、xGA、比分变化、进球时间线与客队战术条目列（tactic_pool_entry_index、tactic_pool_entry_name；无池时留空）；返回 path、path_wsl_hint、sha256、rows、columns。
 
 fmf_import：draft_id、side、file_base64 或 file_path 必填。返回更新后的草案摘要与 report。
 
@@ -701,7 +702,7 @@ fmf_export draft_id side=1
 
 导出后 App 会立即回读并比对，report 中不一致会报错。
 
-### 9.5 随机客队战术池
+### 9.5 客队战术池模式
 
 ```text
 draft_create source=inline scenario_path=<含 away_tactic_pool 的场景文件>
@@ -713,10 +714,12 @@ results_summary job_id
 ```
 
 - 池草案可来自 inline、draft、job 或 fmf；创建后 draft_get include_scenario 与 save_scenario 均保留 away_tactic_pool。
-- 同一任务的 A/B 共享 salt 与 seed 抽签：同 seed 的客队战术完全相同，配对差值只反映战术变化。
-- results_summary 的 tactic_pool.draws 给出每套客队战术的抽中次数；results_matches 逐场返回 tactic_pool_entry。
-- 两个独立种子块应在同一实验配置下重复提交，再用 results_compare 比较；不同任务的 salt 不同，若同 seed 抽签不一致会被拒绝配对（comparable=false），此时不得手工合并配对结果。
-- 随机池不能与定位球片段或 native_generation 同时使用；存档对战不支持随机池。
+- 同一任务的 A/B 共享 salt 与 seed 分配：同 seed 的客队战术完全相同，配对差值只反映战术变化。
+- random 模式按权重抽取，轮次由种子数决定；rotation 模式要求 seeds 数量等于条目数乘 rounds，第 i 个种子固定对应第 i 对条目数取模的战术。
+- real 名单模式要求每套条目带 roster；roster 来自存档战术页导入时的当前一线队快照，FMF 导入条目没有 roster，不能与 real 同时启用。
+- results_summary 的 tactic_pool.draws 给出每套客队战术的出场次数；results_matches 逐场返回 tactic_pool_entry。
+- 两个独立种子块应在同一实验配置下重复提交，再用 results_compare 比较；不同任务的 salt 不同，若同 seed 分配不一致会被拒绝配对（comparable=false），此时不得手工合并配对结果。
+- 战术池不能与定位球片段或 native_generation 同时使用；存档对战不支持战术池。
 
 ## 10. 安全与隐私
 
@@ -779,7 +782,7 @@ results_summary job_id
 | A14 | 恢复 | App 重启后任务标记 interrupted，可续跑；草案保留 |
 | A15 | 性能基线 | 记录单场耗时与批次吞吐，写入验收记录 |
 | A16 | MCP 文本 | 工具文本为可解析 JSON；超限返回截断标记；results_summary、job_get、draft_list 含关键数据 |
-| A17 | 随机客队战术池 | 池场景经 inline/draft/job/fmf 往返不丢；同任务 A/B 同 seed 抽中同一战术；results_summary 给出每套抽中次数；results_compare 对抽签不同返回 comparable=false |
+| A17 | 客队战术池 | 池场景经 inline/draft/job/fmf 往返不丢；random 与 rotation 分配可复现且 A/B 同 seed 战术一致；real 名单与 uniform 属性互斥生效；results_summary 给出每套出场次数；results_compare 对模式、条目或分配不同返回 comparable=false |
 | A18 | 状态与重连 | lab_status 兼容 engine_compatibility 与字符串 profile；token 轮换或端口变化时 MCP 重读 endpoint.json 并重试一次 |
 
 ## 14. 实施分期
@@ -797,8 +800,8 @@ results_summary job_id
 - src/desktop_save_mode.py：读取进程句柄、取消与 cancelled 状态。
 - Launcher.cs：headless、token 感知的自检与关闭、入口脚本生成。
 - scripts/run.py 与 scripts/build_exe.py：现有 src 递归收集已覆盖 fm27_agent，无需新增文件清单。
-- src/fm27_agent：status 形状兼容、战术池摘要与结果视图、CSV 抽签列、results_compare 配对保护、token 轮换重试。
-- tests：Agent 契约、CLI、MCP、安全用例；mock 覆盖战术池与 A/B 同抽签；离线服务端队列串行、排队取消与池展开测试。
+- src/fm27_agent：status 形状兼容、战术池摘要与结果视图、CSV 客队战术列、results_compare 配对保护、token 轮换重试。
+- tests：Agent 契约、CLI、MCP、安全用例；mock 覆盖随机与轮战战术池、A/B 同分配和真实名单摘要；离线服务端队列串行、排队取消与池展开测试。
 
 ## 15. 风险与待评审问题
 

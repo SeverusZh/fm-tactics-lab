@@ -28,11 +28,13 @@ modePanel.after(executionOptions);
 $('#execution-enabled').onchange=()=>{
  for(const input of $$('[data-execution-component]'))input.disabled=!$('#execution-enabled').checked;
 };
-function saveModeDraft(){if(state)localStorage.setItem('fm27-mode-draft-'+saveMode,JSON.stringify(state));}
+function saveModeDraft(){if(!state)return;try{localStorage.setItem('fm27-mode-draft-'+saveMode,JSON.stringify(state))}catch(e){toast('模式草稿过大，未自动保存；请导出完整方案')}}
 function setSaveMode(value){
  if(activeJob){toast('请先等待当前实验结束或取消');return;}
  clearTimeout(saveTimer);
- saveModeDraft();localStorage.setItem('fm27-mode-reference-'+saveMode,JSON.stringify(reference));saveMode=value;
+ saveModeDraft();
+ try{localStorage.setItem('fm27-mode-reference-'+saveMode,JSON.stringify(reference))}catch(e){toast('对照战术过大，未自动保存；请导出完整方案')}
+ saveMode=value;
  localStorage.setItem('fm27-mode-value',value);
  try{const draft=JSON.parse(localStorage.getItem('fm27-mode-draft-'+value));if(draft)state=draft;}catch(e){toast('模式草稿读取失败');}
  try{reference=JSON.parse(localStorage.getItem('fm27-mode-reference-'+value))||null;}catch(e){reference=null;}
@@ -135,6 +137,7 @@ async function previewSaveOpponent(key){
 api=async function(url,data){
  if(url==='/api/run'&&data){
   data={...data,name:$('#experiment-name').value.trim()||undefined};
+  if(data.scenario?.away_tactic_pool?.enabled&&data.reference?.away_tactic_pool)delete data.reference.away_tactic_pool;
   delete data.scenario.experimental_execution;
   if(data.reference)delete data.reference.experimental_execution;
   if($('#execution-enabled').checked){

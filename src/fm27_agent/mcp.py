@@ -39,7 +39,7 @@ FREE_MODE_WORKFLOW = """# 自由模式战术对比
 5. experiment_run 单草案或 candidates，同种子 200 场，workers 用上限，event_details=false。
 6. job_get include_runs=false 看进度与 queue_position；job_wait timeout_seconds<=45；超时按 next_poll_seconds 轮询。
 7. results_summary 读单任务；results_compare 读跨任务同种子配对与 95%CI；results_csv 取逐场双方数据。
-8. 随机模式：场景带 away_tactic_pool 时，同一任务的 A/B 共享一次抽签（同 seed 同客队战术）；results_summary 的 tactic_pool.draws 给出每套抽中次数。跨任务比较前先看 results_compare 的 comparable；抽签不同会被拒绝配对。
+8. 客队战术池：场景带启用的 away_tactic_pool 时，随机模式按权重逐场抽取，轮战模式按条目顺序轮换；同一任务的 A/B 共享同一分配（同 seed 同客队战术）。轮战模式要求种子数等于条目数乘轮数，results_summary 的 tactic_pool.draws 给出每套出场次数。客队名单支持统一属性或存档真实名单。跨任务比较前先看 results_compare 的 comparable；分配不同会被拒绝配对。
 9. 200 场只做筛选；确认需两个独立种子块各 200 场且方向一致；再做消融。
 10. fmf_export 导出后重新 fmf_import，静态对比场景并跑同种子 200 场验证逐场一致。
 """
@@ -453,7 +453,8 @@ def _pool_view(job):
         if not isinstance(entry, dict):
             continue
         rows.append({"index": entry.get("index"), "name": entry.get("name"),
-                     "weight": entry.get("weight"), "probability": entry.get("probability")})
+                     "weight": entry.get("weight"), "probability": entry.get("probability"),
+                     "roster": bool(entry.get("roster"))})
     draws = pool.get("draws") if isinstance(pool.get("draws"), dict) else {}
     counts = draws.get("counts") if isinstance(draws.get("counts"), dict) else {}
     for row in rows:
@@ -461,6 +462,9 @@ def _pool_view(job):
     return {
         "profile": pool.get("profile"),
         "salt": pool.get("salt"),
+        "mode": pool.get("mode", "random"),
+        "rounds": pool.get("rounds", 1),
+        "players": pool.get("players", "uniform"),
         "uniform": pool.get("uniform"),
         "entries": rows,
         "draws": {"total": draws.get("total"),
@@ -479,26 +483,32 @@ def _pool_pairing(baseline, candidate, seeds):
             "draw_mismatches": None, "mismatched_seeds": []}
     if baseline is None or candidate is None:
         if baseline is None:
-            reason = "基线任务未使用随机客队战术池，候选任务使用了随机客队战术池"
+            reason = "基线任务未使用客队战术池，候选任务使用了客队战术池"
         else:
-            reason = "候选任务未使用随机客队战术池，基线任务使用了随机客队战术池"
+            reason = "候选任务未使用客队战术池，基线任务使用了客队战术池"
         return False, reason, info
+    baseline_mode = (baseline.get("mode") or "random", baseline.get("rounds") or 1,
+                     baseline.get("players") or "uniform")
+    candidate_mode = (candidate.get("mode") or "random", candidate.get("rounds") or 1,
+                      candidate.get("players") or "uniform")
+    if baseline_mode != candidate_mode:
+        return False, "两个任务的客队战术池模式不同，同种子分配无法对齐", info
     if baseline.get("entries") != candidate.get("entries"):
-        return False, "两个任务的客队战术池条目不同，同种子抽签无法对齐", info
+        return False, "两个任务的客队战术池条目不同，同种子分配无法对齐", info
     if not seeds:
-        return False, "没有同种子比赛，无法核对随机客队战术池抽签", info
+        return False, "没有同种子比赛，无法核对客队战术池分配", info
     missing = [seed for seed in seeds
                if seed not in baseline.get("draws", {}) or seed not in candidate.get("draws", {})]
     if missing:
         info["missing_seeds"] = missing[:20]
-        return False, "缺少同种子的客队战术池抽签记录，不能配对", info
+        return False, "缺少同种子的客队战术池分配记录，不能配对", info
     mismatched = [seed for seed in seeds
                   if baseline["draws"][seed] != candidate["draws"][seed]]
     info["draw_mismatches"] = len(mismatched)
     info["mismatched_seeds"] = mismatched[:20]
     if mismatched:
-        return False, (f"客队战术池抽签不同：{len(mismatched)}/{len(seeds)} 个同种子场次"
-                       "抽中不同战术"), info
+        return False, (f"客队战术池分配不同：{len(mismatched)}/{len(seeds)} 个同种子场次"
+                       "使用了不同战术"), info
     return True, None, info
 
 
@@ -1621,7 +1631,8 @@ class McpServer:
         signature = []
         for entry in entries:
             if isinstance(entry, dict):
-                signature.append((entry.get("index"), entry.get("name"), entry.get("weight")))
+                signature.append((entry.get("index"), entry.get("name"), entry.get("weight"),
+                                  bool(entry.get("roster"))))
         raw = recorded.get("draws") if isinstance(recorded.get("draws"), dict) else {}
         draws = {}
         for seed, index in raw.items():
@@ -1632,7 +1643,11 @@ class McpServer:
         salt = recorded.get("salt")
         if salt is None:
             salt = pool.get("salt")
-        return {"salt": salt if salt is not None else "", "entries": signature, "draws": draws}
+        mode = recorded.get("mode") or pool.get("mode") or "random"
+        rounds = recorded.get("rounds") or pool.get("rounds") or 1
+        players = recorded.get("players") or pool.get("players") or "uniform"
+        return {"salt": salt if salt is not None else "", "mode": mode, "rounds": rounds,
+                "players": players, "entries": signature, "draws": draws}
 
     def _fetch_job(self, client, job_id, variant=None):
         detail = client.job(job_id, runs_offset=0, runs_limit=RUN_PAGE_SIZE, variant=variant)

@@ -836,7 +836,11 @@ class SaveLibrary:
         room=fm27_tactic_pool.MAX_ENTRIES-len(entries)
         if len(rows)>room:
             raise ValueError(f'客队战术池最多保存 {fm27_tactic_pool.MAX_ENTRIES} 套战术，当前还可加入 {room} 套，请先清理客队战术池')
-        imported=[];prepared=None
+        imported=[];prepared=None;roster_failures=[]
+        preset_clubs=sorted({row['club_uid']for row in rows if row['source']!='real_ai'})
+        if preset_clubs:
+            try:self.ensure_rosters(folder,preset_clubs)
+            except Exception as error:roster_failures.append({'clubs':preset_clubs,'error':str(error)})
         for row in rows:
             try:
                 if row['source']=='real_ai':
@@ -850,8 +854,14 @@ class SaveLibrary:
                     team=desktop_coach_presets.preset_by_index_team(self,key,preset['preset_index'],row['club'],
                         preset.get('preset_sha256'))
                     name=desktop_save_export.tactic_file_name(row['club'],row['coach'],row['index'])
+                roster=None
+                try:
+                    if row['source']!='real_ai':desktop_static_plans.roster(self,key,row['club_uid'],team)
+                    roster=fm27_tactic_pool.roster_from_team(team,row['club_uid'],row['club'],row['coach'],row['source'])
+                except Exception as error:
+                    roster_failures.append({'club_uid':row['club_uid'],'club':row['club'],'error':str(error)})
                 entry=fm27_tactic_pool.entry_from_team(team,
-                    name=desktop_save_export.safe_component(name,'战术',fm27_tactic_pool.MAX_NAME))
+                    name=desktop_save_export.safe_component(name,'战术',fm27_tactic_pool.MAX_NAME),roster=roster)
                 entries.append(entry)
                 imported.append({'club_uid':row['club_uid'],'club':row['club'],'coach':row['coach'],
                     'index':row['index'],'source':row['source'],
@@ -864,17 +874,23 @@ class SaveLibrary:
         if not imported:
             detail='；'.join(item['error']for item in failures[:3])
             raise ValueError('客队战术池没有可导入的战术'+(('：'+detail)if detail else''))
+        real_disabled=False
+        if pool.get('real',{}).get('enabled')and any('roster'not in entry for entry in entries):
+            pool={**pool,'real':{'enabled':False}}
+            real_disabled=True
         scenario['away_tactic_pool']=fm27_tactic_pool.normalize({**pool,'entries':entries})
         scenario=self.app.validate_scenario(scenario)
         value=scenario.get('away_tactic_pool')
         if value and value.get('entries'):pool_summary=fm27_tactic_pool.summary(value)
         else:
             default=fm27_tactic_pool.defaults()
-            pool_summary={'profile':fm27_tactic_pool.PROFILE,'enabled':False,'uniform':default['uniform'],'entries':[]}
+            pool_summary={'profile':fm27_tactic_pool.PROFILE,'enabled':False,'mode':'random','rounds':1,
+                'players':'uniform','uniform':default['uniform'],'entries':[]}
         real_count=sum(1 for row in imported if row['source']=='real_ai');preset_count=len(imported)-real_count
         source='mixed' if real_count and preset_count else 'real_ai' if real_count else 'coach_preset'
         return {'status':'complete','scenario':scenario,'imported':imported,'skipped':skipped,
-                'skipped_count':len(skipped),'failures':failures,
+                'skipped_count':len(skipped),'failures':failures,'roster_failures':roster_failures,
+                'real_disabled':real_disabled,
                 'generation_failures':view['generation_failures'],
                 'source':source,'real_count':real_count,'preset_count':preset_count,
                 'pool':pool_summary,'league':self._league_header(key,league)}
@@ -1051,6 +1067,45 @@ class SaveLibrary:
         for k in ['home','current','world']:
             profile[k+'_reputation']=p['reputation'][k]
         return values,profile
+
+    def apply_roster(self, key, club, scenario, side=0):
+        app=self.app
+        folder=self.folder(key);data=dataset(folder/'dataset.json')
+        scenario=app.validate_scenario(scenario)
+        side=app.integer(side,0,1,'球队');club=int(club)
+        self.ensure_rosters(folder,[club])
+        people={p['unique_id']:p for p in read(folder/'rosters'/f'{club}.json') if p.get('unique_id')is not None}
+        if len(people)<11:raise ValueError('该队不足11名可读取真实属性的球员')
+        team=scenario['teams'][side]
+        old_uids={index:player.get('source_uid')for index,player in enumerate(team['players'])}
+        old_captains=list(team.get('captains')or[])
+        old_takers={key:list(values)for key,values in(team.get('takers')or{}).items()}
+        squad=[]
+        for person in people.values():
+            values,profile=self.player_values(person)
+            squad.append({'name':person['name'],'source_uid':person['unique_id'],'attributes':values,
+                'initial_attributes':values[:],'native_profile':profile})
+        desktop_static_plans.roster(self,key,club,team)
+        team['squad']=squad
+        remap={player.get('source_uid'):index for index,player in enumerate(team['players'][:team.get('roster_size',0)])if player.get('source_uid')is not None}
+        def remapped(values):
+            result=[]
+            for index in values:
+                if index in old_uids and old_uids[index]in remap:
+                    target=remap[old_uids[index]]
+                    if target not in result:result.append(target)
+            return result
+        team['captains']=remapped(old_captains)
+        team['takers']={key:remapped(values)for key,values in old_takers.items()}
+        priorities=team.get('setpieces',{}).get('role_priorities')
+        if isinstance(priorities,dict):
+            team['setpieces']['role_priorities']={kind:[remap[old_uids[index]]for index in values if index in old_uids and old_uids[index]in remap]for kind,values in priorities.items()}
+        record=next((row for row in data['clubs']if row['uid']==club),None)
+        name=(record or {}).get('short_name')or(record or {}).get('name')or str(club)
+        scenario=app.validate_scenario(scenario)
+        return {'scenario':scenario,'source':{'club_uid':club,'club':name,'roster_count':len(people),
+            'match_roster_count':scenario['teams'][side].get('roster_size',0),
+            'notice':'主队球员名单与属性已覆盖为该存档球队的当前一线队；战术、定位球套路与球队名称保持不变。'}}
 
     def load_team(self, key, club, index, selected, side, scenario, substitutes=None):
         folder=self.folder(key);data=dataset(folder/'dataset.json')
