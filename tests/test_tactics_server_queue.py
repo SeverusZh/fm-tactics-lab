@@ -246,7 +246,7 @@ class ServerQueueTests(unittest.TestCase):
     def test_experimental_execution_survives_pool_expansion(self):
         module = self.module
         original = module.ENGINE_DLL_SHA256
-        module.ENGINE_DLL_SHA256 = module.EXECUTION_EXPERIMENT_DLL
+        module.ENGINE_DLL_SHA256 = next(iter(module.EXECUTION_EXPERIMENT_DLLS))
         try:
             scenario = pool_scenario(module)
             execution = [{"understanding": 10, "buy_in": 20, "opposition": 30},
