@@ -23,6 +23,7 @@ import desktop_generation_protocol
 import desktop_save_compat
 import desktop_save_export
 import desktop_save_mode
+import desktop_static_plans
 import fm27_fmf
 import fm27_tactic_pool
 
@@ -242,6 +243,9 @@ class _App:
         self.RUNS=root/'runs';self.RUNS.mkdir(parents=True)
         self.NATIVE=root/'native';self.NATIVE.mkdir()
         self.desktop_engine=_Engine();self.ENGINE_COMPATIBILITY={'resource_fingerprint':'test'}
+    def integer(self,value,low,high,label):
+        if type(value)is not int or not low<=value<=high:raise ValueError(label)
+        return value
 
 def tactic_cells():
     return [{'position':'GK'if index==0 else'DC','role':'GK'if index==0 else'DC','duty':'0',
@@ -250,6 +254,14 @@ def tactic_cells():
 def preset_team(extra='0'):
     return {'name':'对手','tactic_name':'教练偏好预设','mentality':4,'instructions':{'1':0},
             'native_extra_team_bits':extra,'phases':[tactic_cells(),tactic_cells()]}
+
+
+def generated_team(extra='0'):
+    team=preset_team(extra)
+    team['players']=[{'name':f'生成球员{index}','native_id':index,'source_uid':600+index,
+        'attributes':[10]*69,'native_profile':{}}for index in range(23)]
+    team.update(lineup=list(range(11)),roster_size=23,captains=[],takers={})
+    return team
 
 class SaveLibraryLeagueTests(unittest.TestCase):
     @classmethod
@@ -417,6 +429,109 @@ class SaveLibraryLeagueTests(unittest.TestCase):
                 self.lib.import_league_tactics_pool(key,'17:200:2026',scenario)
         self.assertIn('最多保存',str(caught.exception))
         self.assertEqual(len(scenario['away_tactic_pool']['entries']),fm27_tactic_pool.MAX_ENTRIES)
+
+    def test_pool_import_attaches_real_save_rosters(self):
+        key,_=self.save()
+        scenario={'teams':[{'name':'甲'},{'name':'乙'}]}
+        self.app.validate_scenario=lambda value:value
+        ensured={'teams':[self.team(2,'乙队',variants=((1,10,True),)),self.team(3,'丙队',variants=((1,10,True),))],'failures':[]}
+        def fake_roster(lib,key,club,team,preferred=()):
+            team['players']=[{'name':f'队{club}球员{index}','native_id':index,'attributes':[10]*69,
+                'source_uid':club*100+index}for index in range(23)]
+            team.update(lineup=list(range(11)),roster_size=23,captains=[],takers={})
+            return team
+        with mock.patch.object(self.lib,'ensure_rosters'),\
+             mock.patch.object(desktop_coach_presets,'ensure',return_value=ensured),\
+             mock.patch.object(desktop_coach_presets,'preset_by_index_team',return_value=preset_team()),\
+             mock.patch.object(desktop_static_plans,'roster',side_effect=fake_roster):
+            value=self.lib.import_league_tactics_pool(key,'17:200:2026',scenario)
+        self.assertEqual(value['roster_failures'],[])
+        for entry in value['scenario']['away_tactic_pool']['entries']:
+            roster=entry['roster']
+            self.assertEqual(roster['roster_size'],23)
+            self.assertEqual(roster['lineup'],list(range(11)))
+            self.assertEqual(len(roster['players']),23)
+            self.assertTrue(all(player['attributes']==[10]*69 for player in roster['players']))
+        self.assertEqual({entry['roster']['club_uid']for entry in value['scenario']['away_tactic_pool']['entries']},{2,3})
+
+    def test_pool_import_keeps_tactics_when_roster_read_fails(self):
+        key,_=self.save()
+        scenario={'teams':[{'name':'甲'},{'name':'乙'}]}
+        self.app.validate_scenario=lambda value:value
+        ensured={'teams':[self.team(2,'乙队',variants=((1,10,True),))],'failures':[]}
+        with mock.patch.object(self.lib,'ensure_rosters',side_effect=ValueError('名单读取失败')),\
+             mock.patch.object(desktop_coach_presets,'ensure',return_value=ensured),\
+             mock.patch.object(desktop_coach_presets,'preset_by_index_team',return_value=preset_team()),\
+             mock.patch.object(desktop_static_plans,'roster',side_effect=ValueError('名单读取失败')):
+            value=self.lib.import_league_tactics_pool(key,'17:200:2026',scenario)
+        self.assertEqual(len(value['imported']),1)
+        self.assertEqual(len(value['scenario']['away_tactic_pool']['entries']),1)
+        self.assertNotIn('roster',value['scenario']['away_tactic_pool']['entries'][0])
+        self.assertEqual(len(value['roster_failures']),2)
+
+    def test_pool_import_disables_real_mode_when_new_entries_lack_rosters(self):
+        key,_=self.save()
+        entry=fm27_tactic_pool.entry_from_team(preset_team(),name='已有真实战术')
+        entry['roster']={'club_uid':2,'club':'乙队','coach':'乙队主教练','source':'coach_preset',
+            'roster_size':11,'lineup':list(range(11)),
+            'players':[{'name':f'乙队球员{index}','source_uid':900+index,'attributes':[10]*69,
+                'native_profile':{}}for index in range(11)]}
+        scenario={'teams':[{'name':'甲'},{'name':'乙'}],
+            'away_tactic_pool':{'profile':fm27_tactic_pool.PROFILE,'enabled':True,'entries':[entry],
+                'uniform':{'enabled':True,'attribute_value':15},'real':{'enabled':True},
+                'rotation':{'enabled':False,'rounds':1}}}
+        self.app.validate_scenario=lambda value:value
+        ensured={'teams':[self.team(3,'丙队',variants=((1,10,True),))],'failures':[]}
+        with mock.patch.object(self.lib,'ensure_rosters',side_effect=ValueError('名单读取失败')),\
+             mock.patch.object(desktop_coach_presets,'ensure',return_value=ensured),\
+             mock.patch.object(desktop_coach_presets,'preset_by_index_team',return_value=preset_team()),\
+             mock.patch.object(desktop_static_plans,'roster',side_effect=ValueError('名单读取失败')):
+            value=self.lib.import_league_tactics_pool(key,'17:200:2026',scenario)
+        self.assertTrue(value['real_disabled'])
+        pool=value['scenario']['away_tactic_pool']
+        self.assertFalse(pool['real']['enabled'])
+        self.assertEqual(pool['players'] if 'players'in pool else fm27_tactic_pool.summary(pool)['players'],'uniform')
+        self.assertNotIn('roster',pool['entries'][1])
+        self.assertEqual(len(value['imported']),1)
+
+    def test_apply_roster_overwrites_home_squad_and_keeps_tactics(self):
+        key,folder=self.save()
+        data=json.loads((folder/'dataset.json').read_text(encoding='utf8'))
+        data['clubs'].append({'uid':2,'name':'乙队','short_name':'乙','nation_id':14})
+        (folder/'dataset.json').write_text(json.dumps(data,ensure_ascii=False),encoding='utf8')
+        desktop_save_mode.dataset.cache_clear()
+        (folder/'rosters').mkdir()
+        people=[{'unique_id':300+index,'name':f'乙队球员{index}','club_uid':2,'team_slot':0,
+            'positions':{},'ability':{'current':100+index}}for index in range(23)]
+        (folder/'rosters'/'2.json').write_text(json.dumps(people,ensure_ascii=False),encoding='utf8')
+        scenario={'teams':[{'name':'主队','tactic_name':'当前战术','mentality':3,
+            'players':[{'name':'旧球员','native_id':index,'attributes':[9]*69,'source_uid':300+index}for index in range(23)],
+            'lineup':list(range(11)),'roster_size':11,'captains':[5],'takers':{'penalties':[3]},
+            'setpieces':{'role_priorities':{'penalties':[4]}}},{'name':'客队'}]}
+        self.app.validate_scenario=lambda value:value
+        def fake_roster(lib,key,club,team,preferred=()):
+            for index in range(23):
+                team['players'][index].update(name=f'乙队球员{index}',source_uid=300+index,
+                    attributes=[10]*15+[50]*54,native_profile={'current_ability':100+index})
+            team.update(lineup=list(range(11)),roster_size=23,captains=[],takers={})
+            return team
+        with mock.patch.object(desktop_static_plans,'roster',side_effect=fake_roster),\
+             mock.patch.object(self.lib,'player_values',side_effect=lambda person:([10]*15+[50]*54,{'current_ability':person['unique_id']%100})):
+            result=self.lib.apply_roster(key,2,scenario)
+        home=result['scenario']['teams'][0]
+        self.assertEqual(home['name'],'主队')
+        self.assertEqual(home['tactic_name'],'当前战术')
+        self.assertEqual(home['roster_size'],23)
+        self.assertEqual(home['lineup'],list(range(11)))
+        self.assertEqual(len(home['squad']),23)
+        self.assertEqual([player['source_uid']for player in home['squad']],list(range(300,323)))
+        self.assertEqual(home['squad'][0]['initial_attributes'],[10]*15+[50]*54)
+        self.assertEqual([player['name']for player in home['players'][:2]],['乙队球员0','乙队球员1'])
+        self.assertEqual(home['captains'],[5])
+        self.assertEqual(home['takers'],{'penalties':[3]})
+        self.assertEqual(home['setpieces']['role_priorities'],{'penalties':[4]})
+        self.assertEqual(result['source'],{'club_uid':2,'club':'乙','roster_count':23,'match_roster_count':23,
+            'notice':'主队球员名单与属性已覆盖为该存档球队的当前一线队；战术、定位球套路与球队名称保持不变。'})
 
     def wait_league(self,key,status,timeout=5):
         deadline=time.time()+timeout
@@ -587,11 +702,16 @@ class RealGenerationTests(unittest.TestCase):
         self.lib.start_real_generation(self.key,'17:200:2026');self.wait_complete()
         scenario={'teams':[{'name':'甲'},{'name':'乙'}]}
         self.app.validate_scenario=lambda value:value
-        with mock.patch.object(desktop_real_generation,'team_from_plan',return_value=preset_team(extra='3')):
+        with mock.patch.object(desktop_real_generation,'team_from_plan',return_value=generated_team(extra='3')):
             value=self.lib.import_league_tactics_pool(self.key,'17:200:2026',scenario)
         self.assertEqual(value['source'],'real_ai')
         self.assertEqual(len(value['imported']),4)
         self.assertEqual(len(value['scenario']['away_tactic_pool']['entries']),4)
+        self.assertEqual(value['roster_failures'],[])
+        for entry in value['scenario']['away_tactic_pool']['entries']:
+            self.assertEqual(entry['roster']['roster_size'],23)
+            self.assertEqual([player['source_uid']for player in entry['roster']['players']],
+                list(range(600,623)))
         self.assertEqual([row['venue']for row in value['imported']],['A','H','A','H'])
         self.assertTrue(all(('主场战术'in row['label'])or('客场战术'in row['label'])for row in value['imported']))
 

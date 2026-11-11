@@ -13,3 +13,4 @@
 .library-leagues .card{position:sticky;top:16px}
 @media (max-width:1180px){.library-layout{grid-template-columns:minmax(0,1fr)}.library-leagues .card{position:static}.library-leagues .card-body{max-height:none}}
 .real-progress{margin:12px 0}.real-progress-track{height:8px;border-radius:999px;background:#ffffff14;overflow:hidden}.real-progress-bar{height:100%;background:#b66fff;transition:width .3s ease}.real-progress .tiny{margin:6px 0 0}
+.library-table .library-actions{width:1%;white-space:nowrap}.library-table .library-actions .button{padding:5px 9px;font-size:11px}.roster-confirm{width:min(460px,92vw);max-width:min(460px,92vw)}.roster-confirm p{margin:14px 0;line-height:1.8}

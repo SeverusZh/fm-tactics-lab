@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Add rotation and real-roster modes to the away tactic pool: rotation cycles every candidate for a configured number of rounds instead of drawing by weight; real-roster mode applies the saved club's current squad and attributes instead of uniform values; the run-bar checkbox becomes a single pool button that opens a bottom-right popup holding both draw modes and both squad sources; save-library rows gain an Overwrite home squad action; the starting seed gains a random button; pool summaries and provenance carry the mode, rounds and roster flags, while CSV keeps the per-match tactic entry columns.
+
 ## v1111.2 · 2026-11-11
 
 - Move random opponent tactics into the match run controls and remove the standalone away-pool sidebar page.

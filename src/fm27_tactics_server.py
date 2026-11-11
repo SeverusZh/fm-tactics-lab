@@ -383,7 +383,7 @@ def create_save_job(data):
     if SAVE_LIBRARY.active: raise ValueError('请等待存档／对手解析完成')
     scenario=validate_scenario(data['scenario'])
     reference=validate_scenario(data['reference']) if data.get('reference') else None
-    if enabled_pool(scenario)or enabled_pool(reference):raise ValueError('随机客队战术池仅支持自由推演，存档对战不可用')
+    if enabled_pool(scenario)or enabled_pool(reference):raise ValueError('客队战术池仅支持自由推演，存档对战不可用')
     own=integer(data.get('club_uid'),0,0xffffffff,'己方球队')
     selected=data.get('opponents')
     if not isinstance(selected,list) or not 1<=len(selected)<=40 or len({v['key'] for v in selected})!=len(selected):
@@ -728,8 +728,15 @@ def resume_job(job,workers):
         for index in draws.values():
             if type(index)is not int or not 0<=index<len(entries):raise ValueError('客队战术池随机抽取记录越界')
         job['_pool_variants']=groups;job['_pool_draws']={seed:index for seed,index in draws.items()}
+        if pool.get('mode')=='rotation':
+            rounds=pool.get('rounds')
+            if type(rounds)is not int or rounds<1:raise ValueError('轮战每套轮数记录无效')
+            if len(draws)!=len(entries)*rounds:raise ValueError('轮战模式种子排期与原任务不符')
+            expected={str(seed):index%len(entries)for index,seed in enumerate(provenance['seeds'])}
+            if job['_pool_draws']!=expected:raise ValueError('轮战模式客队战术排期与原任务不符')
         if not isinstance(job.get('tactic_pool'),dict):
             job['tactic_pool']={'profile':str(pool.get('profile')or fm27_tactic_pool.PROFILE),'enabled':True,'salt':str(pool['salt']),
+                'mode':str(pool.get('mode')or'random'),'rounds':int(pool.get('rounds')or 1),'players':str(pool.get('players')or'uniform'),
                 'uniform':copy.deepcopy(pool.get('uniform',fm27_tactic_pool.defaults()['uniform'])),'entries':copy.deepcopy(entries),
                 'draws':{'total':len(draws),'counts':{str(index):0 for index in range(len(entries))}}}
     for run in job['runs']:
@@ -827,7 +834,8 @@ class Handler(BaseHTTPRequestHandler):
         if origin and origin!=f'http://{self.headers.get("Host")}':return self.send({'error':'拒绝跨站调用'},403)
         try:
             length=int(self.headers.get('Content-Length',0))
-            if not 0<length<=(8000000 if urlparse(self.path).path in ('/api/import-fmf','/api/pool/import-fmf','/api/save/league-pool')else 1500000):raise ValueError('请求大小无效')
+            limit=8000000
+            if not 0<length<=limit:raise ValueError('请求大小无效')
             data=json.loads(self.rfile.read(length));path=urlparse(self.path).path
             if path=='/api/jobs/rename':
                 with LOCK:
@@ -881,6 +889,9 @@ class Handler(BaseHTTPRequestHandler):
                         return self.send(SAVE_LIBRARY.load_team(data['id'],data['club_uid'],data['tactic_index'],data.get('lineup'),0,data['scenario'],data.get('bench')))
                 if path=='/api/save/selection':
                     return self.send({'scenario':SAVE_LIBRARY.select_squad(data['scenario'],0,data['lineup'],data['bench'])})
+                if path=='/api/save/apply-roster':
+                    require_league_idle('覆盖主队名单')
+                    return self.send(SAVE_LIBRARY.apply_roster(data['id'],data['club_uid'],data['scenario']))
                 if path=='/api/save/opponents':
                     with LOCK:
                         if any(j['status']in ('queued','running')for j in JOBS.values()): raise ValueError('请等待比赛结束后解析历史输入')
@@ -927,7 +938,7 @@ class Handler(BaseHTTPRequestHandler):
                 if path=='/api/run-episodes'and not event_details:raise ValueError('定位球片段需要事件明细；快速模式仅适用于整场比赛')
                 scenario=validate_scenario(data['scenario']);reference=validate_scenario(data['reference']) if data.get('reference')else None
                 if path=='/api/run-episodes'and(enabled_pool(scenario)or enabled_pool(reference)):
-                    raise ValueError('随机客队战术池不支持定位球片段')
+                    raise ValueError('客队战术池不支持定位球片段')
                 episode=None
                 if path=='/api/run-episodes':
                     if any('experimental_execution' in item for item in (scenario, reference) if item is not None):
@@ -949,8 +960,11 @@ class Handler(BaseHTTPRequestHandler):
                 expanded={}
                 if pool:
                     if any('native_generation' in item for _,item in variants):
-                        raise ValueError('随机客队战术池不能与电脑生成战术同时使用')
-                    expanded={label:[validate_scenario(fm27_tactic_pool.expand({**item,'away_tactic_pool':pool},index))for index in range(len(pool['entries']))]for label,item in variants}
+                        raise ValueError('客队战术池不能与电脑生成战术同时使用')
+                    if pool['rotation']['enabled']:
+                        expected=len(pool['entries'])*pool['rotation']['rounds']
+                        if len(seeds)!=expected:raise ValueError(fm27_tactic_pool.rotation_message(pool,len(seeds)))
+                    expanded={label:[validate_scenario(fm27_tactic_pool.expand({**item,'away_tactic_pool':pool},index,pool_value=pool))for index in range(len(pool['entries']))]for label,item in variants}
                 with LOCK:
                     desktop_engine.require_available(ENGINE_COMPATIBILITY)
                     if any(j['status']in ('queued','running')for j in JOBS.values()):return self.send({'error':'已有比赛运行中，请等待或取消'},409)
@@ -971,7 +985,9 @@ class Handler(BaseHTTPRequestHandler):
                     provenance={'host_sha256':hashlib.sha256((NATIVE/'FM27Simulator.exe').read_bytes()).hexdigest(),'fixture_sha256':hashlib.sha256((NATIVE/'fixtures/match.pkm').read_bytes()).hexdigest(),'native_dll_sha256':ENGINE_DLL_SHA256,'engine_compatibility':copy.deepcopy(ENGINE_COMPATIBILITY),'engine_resource_fingerprint':ENGINE_COMPATIBILITY['resource_fingerprint'],'seeds':seeds,'fixture_me_version':'26.8.0.0','config_hashes':{label:hashlib.sha256((directory/f'{label}.bin').read_bytes()).hexdigest()for label,_ in variants}}
                     provenance['event_details']=event_details
                     if pool:
-                        provenance['pool']={'profile':pool_summary['profile'],'enabled':True,'salt':key,'uniform':copy.deepcopy(pool_summary['uniform']),
+                        provenance['pool']={'profile':pool_summary['profile'],'enabled':True,'salt':key,
+                            'mode':pool_summary['mode'],'rounds':pool_summary['rounds'],'players':pool_summary['players'],
+                            'uniform':copy.deepcopy(pool_summary['uniform']),
                             'entries':copy.deepcopy(pool_summary['entries']),'draws':{str(seed):index for seed,index in pool_draws.items()}}
                         provenance['configs']=copy.deepcopy(configs)
                     (directory/'provenance.json').write_text(json.dumps(provenance,indent=2),encoding='utf8')

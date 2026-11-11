@@ -77,8 +77,9 @@ function libraryReportBody(report){
   const has=team.real===true||(team.variants||[]).some(item=>item.source==='real_ai');
   return `<td class="tiny"><button type="button" class="button small" data-real-tactic="${team.club_uid}" ${reading?'disabled':''}>${has?'重新生成':'生成'}</button></td>`;
  };
- const rows=teams.map(team=>`<tr><td>${esc(team.name||'')}</td><td>${esc(team.coach_name||'—')}</td><td>${libraryVariant(team,1)}</td><td>${libraryVariant(team,2)}</td><td class="tiny muted">${team.error?esc(team.error):team.available===false?'暂不可用':'可用'}</td>${real(team)}</tr>`).join('');
- const head=own?'<th>球队</th><th>教练</th><th>第一套</th><th>第二套</th><th>状态</th><th>真实战术</th>':'<th>球队</th><th>教练</th><th>第一套</th><th>第二套</th><th>状态</th>';
+ const roster=team=>`<td class="library-actions">${team.club_uid==null?'':`<button type="button" class="button small" data-apply-roster="${esc(team.club_uid)}" ${reading?'disabled':''}>覆盖主队名单</button>`}</td>`;
+ const rows=teams.map(team=>`<tr><td>${esc(team.name||'')}</td><td>${esc(team.coach_name||'—')}</td><td>${libraryVariant(team,1)}</td><td>${libraryVariant(team,2)}</td><td class="tiny muted">${team.error?esc(team.error):team.available===false?'暂不可用':'可用'}</td>${real(team)}${roster(team)}</tr>`).join('');
+ const head=own?'<th>球队</th><th>教练</th><th>第一套</th><th>第二套</th><th>状态</th><th>真实战术</th><th class="library-actions">操作</th>':'<th>球队</th><th>教练</th><th>第一套</th><th>第二套</th><th>状态</th><th class="library-actions">操作</th>';
  const table=teams.length?`<div class="table-scroll"><table class="library-table"><thead><tr>${head}</tr></thead><tbody>${rows}</tbody></table></div>`:`<p class="tiny muted">没有找到对手球队</p>`;
  const details=failures.length?`<details><summary>失败 ${failures.length} 项</summary>${failures.map(f=>`<p class="tiny">${esc(f.name||'')}：${esc(f.error||'读取失败')}</p>`).join('')}</details>`:'';
  const summary=report.real?.variant_count&&!reading?`<div class="notice">真实AI战术已就绪：${report.real.count} 队 / ${report.real.variant_count} 套 · 用时 ${Math.round(report.real.elapsed_seconds||0)} 秒</div>`:'';
@@ -86,7 +87,7 @@ function libraryReportBody(report){
  const bar=own&&reading?`<div class="real-progress" role="status"><div class="real-progress-track"><div class="real-progress-bar" style="width:${pct}%"></div></div><p class="tiny muted">${esc(progress.stage||'正在生成真实AI战术')}</p></div>`:'';
  const hint=own?'<p class="tiny muted">真实战术对每个对手生成对手主场、对手客场两套；由本机原版引擎准备，首次较慢。这是受控预览上下文输出，正式比赛由游戏内 AI 重新生成，本工具不逐场重算。</p>':'';
  const realButton=own?`<button id="library-real-all" class="button" ${reading?'disabled':''}>${report.real?.variant_count?'补齐缺失的真实战术':'生成全部真实战术'}</button>`:'';
- const controls=`<div class="save-team-controls"><label>导出目录<input id="library-directory" value="${esc(libraryDirectory())}" placeholder="选择本机文件夹"></label><button id="library-folder" class="button">选择目录…</button><button id="library-export" class="button" ${reading?'disabled':''}>导出全部战术</button><button id="library-pool" class="button primary" ${reading?'disabled':''}>加入随机候选</button>${realButton}</div>`;
+ const controls=`<div class="save-team-controls"><label>导出目录<input id="library-directory" value="${esc(libraryDirectory())}" placeholder="选择本机文件夹"></label><button id="library-folder" class="button">选择目录…</button><button id="library-export" class="button" ${reading?'disabled':''}>导出全部战术</button><button id="library-pool" class="button primary" ${reading?'disabled':''}>加入客队战术池</button>${realButton}</div>`;
  return `${summary}${realFailures}${bar}${table}${details}${hint}${controls}${libraryExportResult()}`;
 }
 function libraryLeagueCard(){
@@ -128,6 +129,7 @@ function bindLibrary(){
  if($('#library-pool'))$('#library-pool').onclick=importLibraryPool;
  if($('#library-real-all'))$('#library-real-all').onclick=generateLibraryReal;
  $$('[data-real-tactic]').forEach(button=>button.onclick=()=>generateRealTeam(button));
+ $$('[data-apply-roster]').forEach(button=>button.onclick=()=>showLibraryRosterConfirm(button));
 }
 async function readLibrary(){
  const path=$('#library-path')?.value.trim()||'';
@@ -211,7 +213,7 @@ async function exportLibrary(){
   localStorage.setItem('fm27-export-directory',directory);
   libraryExport=result;libraryRefresh();
   const skipped=result.skipped?.length||0;
-  toast(`${result.source==='real_ai'?'已导出真实AI战术':result.source==='mixed'?'已导出真实AI战术与预设':'已导出'} ${result.files?.length||0} 个文件到 ${result.directory||directory}${skipped?'，遗漏 '+skipped+' 套':''}${result.scenario.away_tactic_pool?.enabled?'':'；需要时勾选底部的随机对手战术'}`);
+  toast(`${result.source==='real_ai'?'已导出真实AI战术':result.source==='mixed'?'已导出真实AI战术与预设':'已导出'} ${result.files?.length||0} 个文件到 ${result.directory||directory}${skipped?'，遗漏 '+skipped+' 套':''}${result.scenario.away_tactic_pool?.enabled?'':'；可在底部战术池中启用'}`);
  }catch(e){toast('导出失败：'+e.message);if($('#library-export')){$('#library-export').disabled=false;$('#library-export').textContent='导出全部战术'}}
 }
 async function generateRealTeam(button){
@@ -258,13 +260,49 @@ async function importLibraryPool(){
  button.disabled=true;button.textContent='正在导入…';
  try{
   const result=await libraryRequest('/api/save/league-pool',{id:librarySave.id,league:libraryLeague,scenario:clone(state)},stage=>{if(button)button.textContent=stage||'正在导入…'});
-  if(result.status==='error')throw Error(result.stage||'加入随机候选失败');
+  if(result.status==='error')throw Error(result.stage||'加入客队战术池失败');
   state=result.scenario;save();
   const skipped=result.skipped?.length||0;
-  toast(`已导入 ${result.imported?.length||0} 套${result.source==='real_ai'?'真实AI战术':result.source==='mixed'?'真实AI战术与预设':'战术'}${skipped?'，遗漏 '+skipped+' 套':''}${result.scenario.away_tactic_pool?.enabled?'':'；需要时勾选底部的随机对手战术'}`);
-  randomSelectionPending=false;randomOptionsOpen=false;
+  const realNote=result.real_disabled?'；真实名单模式已关闭：部分新条目缺少存档名单':'';
+  const rosterNote=result.roster_failures?.length?`；${result.roster_failures.length} 条缺少存档名单，只能使用统一属性`:'';
+  toast(`已导入 ${result.imported?.length||0} 套${result.source==='real_ai'?'真实AI战术':result.source==='mixed'?'真实AI战术与预设':'战术'}${skipped?'，遗漏 '+skipped+' 套':''}${result.scenario.away_tactic_pool?.enabled?'':'；可在底部战术池中启用'}${realNote}${rosterNote}`);
   view='tactics';render();
- }catch(e){toast('加入随机候选失败：'+e.message);if($('#library-pool')){$('#library-pool').disabled=false;$('#library-pool').textContent='加入随机候选'}}
+ }catch(e){toast('加入客队战术池失败：'+e.message);if($('#library-pool')){$('#library-pool').disabled=false;$('#library-pool').textContent='加入客队战术池'}}
 }
+function showLibraryRosterConfirm(button){
+ const clubUid=Number(button.dataset.applyRoster);
+ if(!librarySave?.id||!libraryReport||!Number.isInteger(clubUid))return;
+ const club=(libraryReport.teams||[]).find(team=>String(team.club_uid)===String(clubUid)),home=state?.teams?.[0]?.name||'主队';
+ const dialog=document.createElement('dialog');dialog.className='save-dialog roster-confirm';
+ dialog.innerHTML=`<h2>覆盖主队名单？</h2><p class="tiny muted">存档球队：<b>${esc(club?.name||('#'+clubUid))}</b> · 当前主队：<b>${esc(home)}</b></p><p>一线队名单与属性将覆盖主队，并替换当前主队球员；操作会立即保存本地方案。</p><div class="dialog-actions"><button class="button" data-roster-cancel>取消</button><button class="button primary" data-roster-apply>覆盖主队名单</button></div>`;
+ document.body.append(dialog);
+ dialog.querySelector('[data-roster-cancel]').onclick=()=>dialog.close();
+ dialog.querySelector('[data-roster-apply]').onclick=()=>{dialog.close();applyLibraryRoster(button,clubUid)};
+ dialog.onclose=()=>dialog.remove();
+ dialog.showModal();
+}
+async function applyLibraryRoster(button,clubUid){
+ const id=librarySave?.id;if(!id||!button)return;
+ const label=button.textContent;button.disabled=true;button.textContent='读取中…';
+ try{
+  const result=await api('/api/save/apply-roster',{id,club_uid:clubUid,scenario:clone(state)});
+  if(result.status==='error')throw Error(result.stage||result.error||'覆盖主队名单失败');
+  if(!result.scenario)throw Error('覆盖主队名单失败');
+  state=result.scenario;side=0;player=0;save();view='players';render();window.scrollTo(0,0);
+  const source=result.source||{};
+  toast(`已覆盖主队名单：一线队 ${source.roster_count||0} 人${source.match_roster_count?`，比赛名单 ${source.match_roster_count} 人`:''}；属性来自当前存档。来源球队：${source.club||('#'+clubUid)}`);
+ }catch(e){
+  toast('覆盖主队名单失败：'+e.message);
+  if(button.isConnected){button.disabled=false;button.textContent=label}
+ }
+}
+function randomSeedValue(){
+ const values=new Uint32Array(1);
+ if(window.crypto?.getRandomValues)window.crypto.getRandomValues(values);
+ else values[0]=Math.floor(Math.random()*0x100000000);
+ return values[0];
+}
+const seedRandomInput=$('#seed'),seedRandomButton=$('#seed-random');
+if(seedRandomInput&&seedRandomButton)seedRandomButton.onclick=event=>{event.preventDefault();event.stopPropagation();seedRandomInput.value=String(randomSeedValue())};
 const libraryBindPrevious=bind;
 bind=function(){libraryBindPrevious();bindLibrary()};
