@@ -49,6 +49,8 @@
 | 2026-11-12 | Catalog 与双阶段战术第二轮 | 同上 | PASS | role_eligibility_context 四桶分桶、上下文覆盖、严格 catalog、2×11/职责/指令/盯防与归一化测试闭环；13 项测试。 |
 | 2026-11-12 | SQLite 客队池仓储 | repositories.py、tests | FAIL | 首轮：NaN 可落库、事务接口不对称、128 上限未执行；第二轮：并发可突破上限。 |
 | 2026-11-12 | SQLite 客队池仓储终轮 | 同上 | PASS | JSON allow_nan/UTF-8、事务读己之写、BEGIN IMMEDIATE 单条原子上限、rowid 排序与并发测试闭环；11 项测试。 |
+| 2026-11-12 | Sidecar 池 HTTP | app.py、tests | FAIL | 首轮：路径 id 可创建不可寻址、OpenAPI 无 Bearer/响应模型、Pydantic 宽松转换；次轮：422/405/分页 schema/清单。 |
+| 2026-11-12 | Sidecar 池 HTTP 终轮 | 同上 | PASS | URL-safe id、HTTPBearer、strict body、PoolService 注入、分页 items/total/next_offset、错误封套/422/405/OpenAPI defaults 闭环；12 项测试。 |
 
 ## 审核规则
 
@@ -57,6 +59,6 @@
 - 先列 findings，再列已验证项，最后给结论。
 - Critical 或 Important 未闭环时不得标记 PASS。
 - 审核通过不等于整体发布就绪；发布仍需最终验收与 Windows 真机验证。
-- 旧 `tests/` 当前 281 项通过，覆盖 legacy UI/HTTP/CLI/MCP、存档战术库、池与名单；新 `fm27lab/tests` 当前 131 项通过，覆盖包版本、CLI 环境继承、配置/路径边界、SQLite 迁移/事务/池仓储、HTTP 健康、鉴权、错误封套、Origin、ACL 失败清理、sidecar serve、23 人名单、真实名单应用、scenario 归一化、catalog/双阶段战术、客队战术池选择与结果指标；Vitest 当前 9 项。
+- 旧 `tests/` 当前 281 项通过，覆盖 legacy UI/HTTP/CLI/MCP、存档战术库、池与名单；新 `fm27lab/tests` 当前 143 项通过，覆盖包版本、CLI 环境继承、配置/路径边界、SQLite 迁移/事务/池仓储、HTTP 健康/池 CRUD、鉴权、错误封套、Origin、ACL 失败清理、sidecar serve、23 人名单、真实名单应用、scenario 归一化、catalog/双阶段战术、客队战术池选择与结果指标；Vitest 当前 9 项。
 - Tauri sidecar supervisor 的静态实现已存在，但 Linux 无 WebKitGTK，Windows CI 的 `cargo build`/`cargo test`/安装包构建是唯一编译证据。PyInstaller onedir sidecar 已在 Linux 构建并通过 ready/health/shutdown 冒烟测试。
 - Rust 核心 crate 当前 4 项 cargo test 通过；React 壳当前 9 项 Vitest 通过、类型检查与生产构建通过。Windows CI 已通过 cargo build/test、NSIS 安装包与 sidecar 资源断言；Linux 本机仍无 WebKitGTK。合并、设计、sidecar、壳层、名单五个审核门均已 PASS。
