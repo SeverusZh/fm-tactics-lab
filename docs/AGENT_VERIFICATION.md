@@ -107,10 +107,9 @@ python3 -m unittest discover -s tests
 | 自由推演 | 2 场完成，0 失败；单场吞吐约 23.8 场/分钟 |
 | 对比推演 | 2 种子 × A/B 共 4 场完成；A 与 B 指标独立；paired 差值为 0.5 |
 | 存档导入 | 用户提供的 FM27 存档，构建 27.0.0+2493426，导入完成；32 名一线队球员，74 名可解析球员；原存档只读未修改 |
-| 对手扫描 | 同联赛 23 个可用教练预设对手；预览生成 23 人名单 |
 | FMF | 导出 1728 字节，native_roundtrip_verified 为真；导入消耗 1376 字节，records 369 |
 | 定位球 | 导出 451 字节，native_roundtrip_verified 为真 |
-| MCP | initialize 协商 2025-06-18，serverInfo 为 fm27lab-mcp，26 个工具，lab_status 无错误，manifest 资源可读，3 个 prompt |
+| MCP | initialize 协商 2025-06-18，serverInfo 为 fm27lab-mcp，21 个工具，lab_status 无错误，manifest 资源可读，2 个 prompt |
 | 鉴权 | 无 token 401，错误 Host 403，正确 token 200；Cookie 访问旧 /api/catalog 200，无凭证 401 |
 | UI | GET / 与 /app.js 均 200，Set-Cookie 正常返回 |
 | 取消 | 8 场批次取消后状态 cancelled，已完成 0 |

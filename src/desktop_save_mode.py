@@ -13,13 +13,9 @@ import subprocess
 import sys
 import threading
 import time
-import shutil
 from functools import lru_cache
 import collections
-import desktop_cache_index
-import desktop_opponent_scope
 import desktop_recovery_sources
-import desktop_ai_state
 import desktop_static_plans
 import desktop_real_generation
 import desktop_real_library

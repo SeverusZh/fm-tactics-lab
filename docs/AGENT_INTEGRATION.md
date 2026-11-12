@@ -80,6 +80,7 @@ Agent client  ──stdio──  fm27lab-mcp sidecar ──HTTP loopback──  
 | game_root | string | 游戏安装目录，可为空 |
 | created_at | string | ISO 8601 本地时间 |
 | versions | object | server、adapter、engine_build、scenario_schema、batch_schema |
+| capabilities | array | free_run、comparison、fmf、repair、resume、cancel、idempotency |
 | limits | object | 与 manifest 中 limits 相同 |
 
 ### 3.3 无头模式与关闭
