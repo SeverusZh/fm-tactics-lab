@@ -29,7 +29,9 @@
 | 2026-11-12 | Windows 构建门槛 | GitHub Actions run 43252465016 | PASS | 全 job success：sidecar PyInstaller、Python、cargo build、cargo test、tauri build --bundles nsis、sidecar 资源断言、NSIS artifact 上传；安装包约 19.6 MB。 |
 | 2026-11-12 | 23 人名单领域 | fm27lab/domain/roster.py、tests | FAIL | 首轮：索引用作 uid、位置分组偏离 ADR、首发可含 2 GK、GK 未按熟练度、generated 全判 GK/隐藏值错误、ability 含隐藏属性、uid 排序/唯一性、默认主罚缺位置资格、测试恒真断言。已重写。 |
 | 2026-11-12 | 23 人名单领域第二轮 | 同上 | FAIL | 第二轮：GK fill 仍可加入 2 名门将且未用熟练度；可见属性 41 漏算；测试仍有恒真断言与缺口。已修复并扩至 25 项测试。 |
-| 2026-11-12 | 23 人名单领域第三轮 | 同上 | 待审 | 等待 roster-reviewer 第三轮结果。 |
+| 2026-11-12 | 23 人名单领域第三轮 | 同上 | FAIL | 第三轮：短名单 fallback 仍可把第二 GK 加回首發；测试未覆盖短名单。已修并补测试。 |
+| 2026-11-12 | 23 人名单领域第四轮 | 同上 | FAIL | 第四轮：bench fill 也限制 1 GK，23→23 时真实 GK 被 generated 替代；显式多 GK lineup 未归一化。已修。 |
+| 2026-11-12 | 23 人名单领域第五轮 | 同上 | PASS | bench 不限 GK、显式多 GK 归一化、短名单/23+3GK 保留、starter padding 均闭环；31 项领域测试（复审时 29）+ full 59；仅剩 Minor 断言/策略说明。 |
 
 ## 审核规则
 
@@ -38,6 +40,6 @@
 - 先列 findings，再列已验证项，最后给结论。
 - Critical 或 Important 未闭环时不得标记 PASS。
 - 审核通过不等于整体发布就绪；发布仍需最终验收与 Windows 真机验证。
-- 现有 276 项 Python 测试来自旧 `tests/` 基线，不是 v2 架构证据；新 `fm27lab/tests` 当前 55 项测试，覆盖包版本、CLI 环境继承、配置/路径边界、SQLite 迁移/事务、HTTP 健康、鉴权、错误封套、Origin、ACL 失败清理、sidecar serve 与 23 人名单；Vitest 当前 9 项。
+- 现有 276 项 Python 测试来自旧 `tests/` 基线，不是 v2 架构证据；新 `fm27lab/tests` 当前 59 项测试，覆盖包版本、CLI 环境继承、配置/路径边界、SQLite 迁移/事务、HTTP 健康、鉴权、错误封套、Origin、ACL 失败清理、sidecar serve 与 23 人名单；Vitest 当前 9 项。
 - Tauri sidecar supervisor 的静态实现已存在，但 Linux 无 WebKitGTK，Windows CI 的 `cargo build`/`cargo test`/安装包构建是唯一编译证据。PyInstaller onedir sidecar 已在 Linux 构建并通过 ready/health/shutdown 冒烟测试。
-- Rust 核心 crate 当前 4 项 cargo test 通过；React 壳当前 9 项 Vitest 通过、类型检查与生产构建通过。Windows CI 已通过 cargo build/test、NSIS 安装包与 sidecar 资源断言；Linux 本机仍无 WebKitGTK。
+- Rust 核心 crate 当前 4 项 cargo test 通过；React 壳当前 9 项 Vitest 通过、类型检查与生产构建通过。Windows CI 已通过 cargo build/test、NSIS 安装包与 sidecar 资源断言；Linux 本机仍无 WebKitGTK。合并、设计、sidecar、壳层、名单五个审核门均已 PASS。

@@ -207,10 +207,11 @@ def _fill(
     players: Sequence[Mapping[str, Any]],
     count: int,
     allow_goalkeeper: bool,
+    max_goalkeepers: int | None = 1,
 ) -> list[int]:
     chosen: list[int] = []
     remaining = list(candidates)
-    chosen_goalkeeper = False
+    chosen_goalkeepers = 0
     for group in POSITION_GROUPS:
         slots = {POSITION_INDEX[name] for name in group}
         if not allow_goalkeeper and slots == {POSITION_INDEX["GK"]}:
@@ -218,7 +219,8 @@ def _fill(
         matched = [index for index in remaining if player_position(players[index]) in slots]
         if group == ("GK",):
             matched.sort(key=lambda index: _gk_key((index, players[index])))
-            matched = matched[:1]
+            if max_goalkeepers is not None:
+                matched = matched[: max(0, max_goalkeepers - chosen_goalkeepers)]
         else:
             matched.sort(key=lambda index: _sort_key((index, players[index])))
         for index in matched:
@@ -227,17 +229,20 @@ def _fill(
             chosen.append(index)
             remaining.remove(index)
             if group == ("GK",):
-                chosen_goalkeeper = True
+                chosen_goalkeepers += 1
         if len(chosen) >= count:
             break
     for index in sorted(remaining, key=lambda index: _sort_key((index, players[index]))):
         if len(chosen) >= count:
             break
-        if is_goalkeeper(players[index]) and (not allow_goalkeeper or chosen_goalkeeper):
+        goalkeeper = is_goalkeeper(players[index])
+        if goalkeeper and not allow_goalkeeper:
+            continue
+        if goalkeeper and max_goalkeepers is not None and chosen_goalkeepers >= max_goalkeepers:
             continue
         chosen.append(index)
-        if is_goalkeeper(players[index]):
-            chosen_goalkeeper = True
+        if goalkeeper:
+            chosen_goalkeepers += 1
     return chosen
 
 
@@ -303,8 +308,30 @@ def normalize_roster(
             source,
             STARTERS - len(starters),
             allow_goalkeeper=not any(is_goalkeeper(source[index]) for index in starters),
+            max_goalkeepers=1,
         )
     )
+
+    forced_bench: list[int] = []
+    starters_goalkeepers = [index for index in starters if is_goalkeeper(source[index])]
+    if len(starters_goalkeepers) > 1:
+        keeper = min(starters_goalkeepers, key=lambda index: _gk_key((index, source[index])))
+        forced_bench = [index for index in starters_goalkeepers if index != keeper]
+        starters = [index for index in starters if index not in set(forced_bench)]
+        remaining = [
+            index
+            for index in range(len(source))
+            if index not in set(starters) and index not in set(forced_bench)
+        ]
+        starters.extend(
+            _fill(
+                remaining,
+                source,
+                STARTERS - len(starters),
+                allow_goalkeeper=False,
+                max_goalkeepers=0,
+            )
+        )
 
     if not any(is_goalkeeper(source[index]) for index in starters):
         goalkeepers = [index for index in range(len(source)) if is_goalkeeper(source[index])]
@@ -328,11 +355,24 @@ def normalize_roster(
         generated_count += 1
         starter_entries.append((None, _generated(generated_count, used_uids)))
 
-    bench = [index for index in _unique_indices(substitutes, len(source)) if index not in set(starters)]
+    bench = list(forced_bench)
+    bench.extend(
+        index
+        for index in _unique_indices(substitutes, len(source))
+        if index not in set(starters) and index not in set(bench)
+    )
     remaining = [
         index for index in range(len(source)) if index not in set(starters) and index not in set(bench)
     ]
-    bench.extend(_fill(remaining, source, BENCH - len(bench), allow_goalkeeper=True))
+    bench.extend(
+        _fill(
+            remaining,
+            source,
+            BENCH - len(bench),
+            allow_goalkeeper=True,
+            max_goalkeepers=None,
+        )
+    )
     bench_entries: list[tuple[int | None, dict[str, Any]]] = [(index, source[index]) for index in bench][
         :BENCH
     ]

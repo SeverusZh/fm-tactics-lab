@@ -11,7 +11,7 @@
 - [x] 设计文档与 ADR，第十一轮审核 PASS；合并审核第三轮 PASS。
 - [x] React/Tauri 壳层第五轮 PASS；Windows cargo build/test、NSIS 与 sidecar 资源断言在 Actions run 43252465016 全部通过。
 - [ ] 安装包内 sidecar 启动/退出/卸载真机 QA（发布门槛）。
-- [~] 23 人名单领域切片（25 项测试）已修复 GK/可见属性，待第三轮独立审核。
+- [x] 23 人名单领域切片（31 项测试）第五轮审核 PASS；bench/显式多 GK/短名单规则闭环。
 - [x] sidecar 基础切片：三轮审核 PASS；28 项测试；迁移/health/错误封套/连接/Origin/token repr/CLI env/入口/ACL 已闭环。
 - [x] PyInstaller onedir sidecar 构建成功，并通过 ready/health/shutdown 冒烟测试（Linux）。
 - [x] Rust 纯核心 crate：ready/token/backoff/connection，4 项 cargo test 通过。

@@ -327,12 +327,36 @@ def test_short_two_goalkeeper_roster_never_starts_two():
     assert any(item.get("generated") for item in starters)
 
 
-def test_short_three_goalkeeper_roster_never_starts_two():
+def test_short_three_goalkeeper_roster_never_starts_two_and_keeps_all_real_players():
     players = [player(1, 0, 20), player(2, 0, 10), player(3, 0, 5)]
     players.extend(player(index + 4, 7, 10) for index in range(7))
     result = normalize_roster(players, [], [], [], {}, {})
     starters = result.players[:11]
     assert sum(1 for item in starters if is_goalkeeper(item)) == 1
+    assert result.removed == ()
+    assert len(result.generated) == 13
+    assert sum(1 for item in result.players if is_goalkeeper(item)) == 3
+
+
+def test_23_players_with_three_goalkeepers_are_all_retained():
+    players = [player(1, 0, 20), player(2, 0, 10), player(3, 0, 5)]
+    players.extend(player(index + 4, 7, 10) for index in range(20))
+    result = normalize_roster(players, [], [], [], {}, {})
+    assert result.removed == ()
+    assert result.generated == ()
+    assert sum(1 for item in result.players if is_goalkeeper(item)) == 3
+    assert sum(1 for item in result.players[:11] if is_goalkeeper(item)) == 1
+    assert sum(1 for item in result.players[11:] if is_goalkeeper(item)) == 2
+
+
+def test_explicit_two_goalkeeper_lineup_moves_one_to_bench():
+    players = [player(1, 0, 20), player(2, 0, 10)]
+    players.extend(player(index + 3, 7, 10) for index in range(21))
+    lineup = [0, 1] + list(range(2, 10))
+    result = normalize_roster(players, lineup, [], [], {}, {})
+    assert result.removed == ()
+    assert sum(1 for item in result.players[:11] if is_goalkeeper(item)) == 1
+    assert any(is_goalkeeper(item) for item in result.players[11:])
 
 
 def test_second_goalkeeper_goes_to_bench_before_generated_padding():
@@ -356,3 +380,14 @@ def test_roster_trim_includes_remapped_references():
     assert result.roster_trim["captains"] == list(result.captains)
     assert result.roster_trim["takers"]["penalties"] == list(result.takers["penalties"])
     assert result.roster_trim["setpiece_priorities"]["corners"] == list(result.setpiece_priorities["corners"])
+
+def test_canonical_position_accepts_base_names():
+    assert canonical_position("DC") == "DC"
+    assert canonical_position("ST") == "ST"
+
+
+def test_roster_trim_reports_source_size_and_generated_count():
+    players = roster(20)
+    result = normalize_roster(players, list(range(11)), list(range(11, 20)), [], {}, {})
+    assert result.roster_trim["source_size"] == 20
+    assert len(result.roster_trim["generated"]) == 3
