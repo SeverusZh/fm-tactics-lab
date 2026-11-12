@@ -107,7 +107,7 @@
   "src-tauri/icons/128x128@2x.png": "7c6fa260c67abca4c8d135eea40c663005aa409015b79811a49603d38e70100b",
   "src-tauri/icons/32x32.png": "76af85322cf8def9d9b3deefa831ab7c9cd0772c889443a58550746052dcae09",
   "src-tauri/icons/icon.ico": "828882de6122482aed5741cdc92dfacab8c4f4dfd2eeb41feea358e7caf0c3e1",
-  "src-tauri/src/lib.rs": "30aeda645470b863c6abc189da5d62d4b43a3b47fbe6e10851dbac6b0cb8d7ca",
+  "src-tauri/src/lib.rs": "123a5637ed8ca98d3bf61db6968e9130bc48af15a1223fa6bc06bbdfe903db1e",
   "src-tauri/src/main.rs": "c38385900158c46b6dcc27eb4a5144ad2c324c846cbe1801466c3ee244eaab62",
   "src-tauri/tauri.conf.json": "906f06891110bc85a909f29d7eba80a8b6b9e60f7ef0de26c121e5b7715ac712",
   "src/desktop_ai_state.py": "e6eb8e003d0979cd2b9e0cc80087e5559830acaa5415479687e82333cedd4005",

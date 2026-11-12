@@ -174,11 +174,20 @@ fn child_running(state: &SidecarState) -> bool {
     }
 }
 
-fn should_start(state: &SidecarState) -> bool {
-    !state.stopping.load(Ordering::SeqCst)
-        && !state.paused.load(Ordering::SeqCst)
+fn start_allowed(state: &SidecarState, allow_restart: bool) -> bool {
+    if state.stopping.load(Ordering::SeqCst) {
+        return false;
+    }
+    if allow_restart {
+        return true;
+    }
+    !state.paused.load(Ordering::SeqCst)
         && !state.restart_in_progress.load(Ordering::SeqCst)
         && !child_running(state)
+}
+
+fn should_start(state: &SidecarState) -> bool {
+    start_allowed(state, false)
 }
 
 fn take_dead_child(state: &SidecarState) -> Option<Child> {
@@ -194,21 +203,26 @@ fn take_dead_child(state: &SidecarState) -> Option<Child> {
 }
 
 fn start_sidecar(app: &AppHandle) -> Result<ConnectionInfo, String> {
+    start_sidecar_inner(app, false)
+}
+
+fn start_sidecar_inner(app: &AppHandle, allow_restart: bool) -> Result<ConnectionInfo, String> {
     let state = app.state::<SidecarState>();
     let _lifecycle = state
         .lifecycle
         .lock()
         .map_err(|_| "lifecycle lock poisoned")?;
-    if state.stopping.load(Ordering::SeqCst) {
-        return Err("sidecar is stopping".to_string());
+    if !start_allowed(&state, allow_restart) {
+        return Err("sidecar start is not allowed".to_string());
     }
-    clear_connection(&state);
-    kill_child(&state);
-    let (program, args, cwd) = launch_spec(app)?;
     let data_dir = app
         .path()
         .app_local_data_dir()
         .map_err(|error| format!("data directory is unavailable: {error}"))?;
+    remove_endpoint(&data_dir);
+    clear_connection(&state);
+    kill_child(&state);
+    let (program, args, cwd) = launch_spec(app)?;
     let token = generate_token().map_err(|error| format!("token generation failed: {error}"))?;
     let engine_root = env::var("FM27_ENGINE_ROOT")
         .map(PathBuf::from)
@@ -485,7 +499,7 @@ fn restart_sidecar(app: AppHandle, state: State<SidecarState>) -> Result<Connect
     state.restarts.store(0, Ordering::SeqCst);
     kill_child(&state);
     clear_connection(&state);
-    let result = start_sidecar(&app);
+    let result = start_sidecar_inner(&app, true);
     state.restart_in_progress.store(false, Ordering::SeqCst);
     if let Ok(connection) = &result {
         let _ = app.emit("sidecar-ready", connection);
@@ -580,14 +594,18 @@ mod tests {
     fn start_gate_blocks_stopping_paused_and_restarting() {
         let state = SidecarState::default();
         assert!(should_start(&state));
+        assert!(start_allowed(&state, true));
         state.stopping.store(true, Ordering::SeqCst);
         assert!(!should_start(&state));
+        assert!(!start_allowed(&state, true));
         state.stopping.store(false, Ordering::SeqCst);
         state.paused.store(true, Ordering::SeqCst);
         assert!(!should_start(&state));
+        assert!(start_allowed(&state, true));
         state.paused.store(false, Ordering::SeqCst);
         state.restart_in_progress.store(true, Ordering::SeqCst);
         assert!(!should_start(&state));
+        assert!(start_allowed(&state, true));
     }
 
     #[test]
