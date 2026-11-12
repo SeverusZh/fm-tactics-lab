@@ -208,3 +208,114 @@ def test_normalization_is_deterministic():
         setpiece_priorities={"corners": [uid(3), uid(4)]},
     )
     assert normalize_roster(**arguments) == normalize_roster(**arguments)
+
+def _two_goalkeepers():
+    players = [player(1, 0, 30), player(2, 0, 5)]
+    players[0]["attributes"][0] = 18
+    players[1]["attributes"][0] = 20
+    players.extend(player(index + 3, 7, 10) for index in range(21))
+    return players
+
+
+def test_goalkeeper_fill_never_adds_two_starters_and_uses_familiarity():
+    players = _two_goalkeepers()
+    result = normalize_roster(players, [], [], [], {}, {})
+    starters = result.players[:11]
+    goalkeepers = [item for item in starters if is_goalkeeper(item)]
+    assert len(goalkeepers) == 1
+    assert goalkeepers[0]["source_uid"] == 2
+
+
+def test_nine_outfield_starters_fill_one_goalkeeper():
+    players = _two_goalkeepers()
+    result = normalize_roster(players, list(range(2, 11)), [], [], {}, {})
+    starters = result.players[:11]
+    assert sum(1 for item in starters if is_goalkeeper(item)) == 1
+
+
+def test_ten_outfield_starters_fill_one_goalkeeper_by_familiarity():
+    players = _two_goalkeepers()
+    result = normalize_roster(players, list(range(2, 12)), [], [], {}, {})
+    starter = next(item for item in result.players[:11] if is_goalkeeper(item))
+    assert starter["source_uid"] == 2
+
+
+def test_visible_attribute_41_contributes_to_ability_fallback():
+    visible = player(1, 7, 0)
+    visible.pop("ability")
+    visible["attributes"][7] = 10
+    visible["attributes"][41] = 20
+    hidden_only = player(2, 7, 0)
+    hidden_only.pop("ability")
+    hidden_only["attributes"][7] = 10
+    for index in (39, 40, 56, 59, 62, 63, 64):
+        hidden_only["attributes"][index] = 20
+    assert player_ability(hidden_only) == 10.0
+    assert player_ability(visible) > 10.0
+
+
+def test_non_identity_uid_references_are_remapped():
+    players = roster(23)
+    order = [5, 6, 7, 8, 9, 10, 0, 1, 2, 3, 4]
+    result = normalize_roster(
+        players,
+        order,
+        list(range(11, 23)),
+        captains=[players[5]["source_uid"]],
+        takers={"penalties": [players[6]["source_uid"]]},
+        setpiece_priorities={"corners": [players[7]["source_uid"]]},
+    )
+    assert result.captains == (0,)
+    assert result.takers["penalties"] == (1,)
+    assert result.setpiece_priorities["corners"] == (2,)
+
+
+def test_invalid_indices_do_not_replace_valid_starters():
+    players = roster(23)
+    result = normalize_roster(players, [999, -1, 0, 0, 1, 2, 3, 4, 5, 6, 7], [], [], {}, {})
+    assert [item["source_uid"] for item in result.players[:8]] == list(range(1, 9))
+
+
+def test_default_corner_taker_prefers_wide_position():
+    players = [player(1, 0, 10), player(2, 2, 10), player(3, 3, 20)]
+    players.extend(player(index + 4, 7, 10) for index in range(20))
+    result = normalize_roster(
+        players, list(range(11)), list(range(11, 23)), [], {"corners": []}, {}
+    )
+    first = result.players[result.takers["corners"][0]]
+    assert first["source_uid"] == 2
+
+
+def test_position_aliases_cover_composite_catalog_names():
+    from fm27lab.domain.roster import POSITION_ALIASES
+
+    assert POSITION_ALIASES["DCR"] == "DC"
+    assert POSITION_ALIASES["DMC"] == "DM"
+    assert POSITION_ALIASES["AMCL"] == "AMC"
+    assert POSITION_ALIASES["STR"] == "ST"
+
+
+def test_generated_uids_do_not_collide_with_source_uids():
+    players = [player(1, 0, 10)]
+    players.append({**player(99, 7, 10), "source_uid": "generated:1"})
+    players.extend(player(index + 10, 7, 10) for index in range(20))
+    result = normalize_roster(players, [0], [], [], {}, {})
+    uids = [item["source_uid"] for item in result.players]
+    assert len(uids) == len(set(uids))
+
+
+def test_roster_trim_includes_remapped_references():
+    players = roster(26)
+    result = normalize_roster(
+        players,
+        list(range(11)),
+        list(range(11, 26)),
+        captains=[players[0]["source_uid"]],
+        takers={"penalties": [players[1]["source_uid"]]},
+        setpiece_priorities={"corners": [players[2]["source_uid"]]},
+    )
+    assert result.roster_trim["captains"] == list(result.captains)
+    assert result.roster_trim["takers"]["penalties"] == list(result.takers["penalties"])
+    assert result.roster_trim["setpiece_priorities"]["corners"] == list(
+        result.setpiece_priorities["corners"]
+    )

@@ -74,6 +74,7 @@ VISIBLE_ATTRIBUTES = frozenset(
         36,
         37,
         38,
+        41,
         42,
         43,
         44,
@@ -126,6 +127,11 @@ class RosterResult:
             "source_size": self.source_size,
             "removed": list(self.removed),
             "generated": [player["source_uid"] for player in self.generated],
+            "captains": list(self.captains),
+            "takers": {key: list(values) for key, values in self.takers.items()},
+            "setpiece_priorities": {
+                key: list(values) for key, values in self.setpiece_priorities.items()
+            },
         }
 
 
@@ -207,7 +213,11 @@ def _fill(
         if not allow_goalkeeper and slots == {POSITION_INDEX["GK"]}:
             continue
         matched = [index for index in remaining if player_position(players[index]) in slots]
-        matched.sort(key=lambda index: _sort_key((index, players[index])))
+        if group == ("GK",):
+            matched.sort(key=lambda index: _gk_key((index, players[index])))
+            matched = matched[:1]
+        else:
+            matched.sort(key=lambda index: _sort_key((index, players[index])))
         for index in matched:
             if len(chosen) >= count:
                 break
@@ -224,13 +234,18 @@ def _fill(
     return chosen
 
 
-def _generated(index: int) -> dict[str, Any]:
+def _generated(index: int, used: set[Any]) -> dict[str, Any]:
     attributes = [10] * 69
     attributes[POSITION_INDEX["MC"]] = 15
     attributes[56] = 5
     attributes[63] = 5
+    uid = f"generated:{index}"
+    while uid in used:
+        index += 1
+        uid = f"generated:{index}"
+    used.add(uid)
     return {
-        "source_uid": f"generated:{index}",
+        "source_uid": uid,
         "name": f"占位球员 {index}",
         "attributes": attributes,
         "ability": 10,
@@ -299,19 +314,27 @@ def normalize_roster(
             raise ValueError("roster_missing_goalkeeper")
         starters[replace_at] = replacement
 
+    used_uids = set(_validate_uids(source))
+    generated_count = 0
+    starter_entries: list[tuple[int | None, dict[str, Any]]] = [
+        (index, source[index]) for index in starters
+    ]
+    while len(starter_entries) < STARTERS:
+        generated_count += 1
+        starter_entries.append((None, _generated(generated_count, used_uids)))
+
     bench = [index for index in _unique_indices(substitutes, len(source)) if index not in set(starters)]
     remaining = [
         index for index in range(len(source)) if index not in set(starters) and index not in set(bench)
     ]
     bench.extend(_fill(remaining, source, BENCH - len(bench), allow_goalkeeper=True))
-    selected_entries: list[tuple[int | None, dict[str, Any]]] = [(index, source[index]) for index in starters]
-    selected_entries.extend((index, source[index]) for index in bench)
-
-    generated_count = 0
-    while len(selected_entries) < MATCH_ROSTER_SIZE:
+    bench_entries: list[tuple[int | None, dict[str, Any]]] = [
+        (index, source[index]) for index in bench
+    ][:BENCH]
+    while len(bench_entries) < BENCH:
         generated_count += 1
-        selected_entries.append((None, _generated(generated_count)))
-    selected_entries = selected_entries[:MATCH_ROSTER_SIZE]
+        bench_entries.append((None, _generated(generated_count, used_uids)))
+    selected_entries = starter_entries + bench_entries
     selected = [player for _, player in selected_entries]
     index_to_new = {
         original: new for new, (original, _) in enumerate(selected_entries) if original is not None
