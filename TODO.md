@@ -12,6 +12,7 @@
 - [x] React/Tauri 壳层第五轮 PASS；Windows cargo build/test、NSIS 与 sidecar 资源断言在 Actions run 43252465016 全部通过。
 - [ ] 安装包内 sidecar 启动/退出/卸载真机 QA（发布门槛）。
 - [x] 23 人名单领域切片（31 项测试）第五轮审核 PASS；bench/显式多 GK/短名单规则闭环。
+- [x] 存档对战退役最终 PASS；核心 career 入口、旧 UI、测试与文档已删除。
 - [x] sidecar 基础切片：三轮审核 PASS；28 项测试；迁移/health/错误封套/连接/Origin/token repr/CLI env/入口/ACL 已闭环。
 - [x] PyInstaller onedir sidecar 构建成功，并通过 ready/health/shutdown 冒烟测试（Linux）。
 - [x] Rust 纯核心 crate：ready/token/backoff/connection，4 项 cargo test 通过。
@@ -46,8 +47,8 @@
 - [~] 替换映射：`library import/status/club/load/pool-import` 的旧服务仍有存档战术库实现，v2 sidecar 尚未暴露；旧 career 入口已删除。
 - [x] 删除旧文档中的存档对战与 `career_*` 段落；AGENT 三份文档、README 与发布说明已同步。
 - [x] 删除旧 career 测试与 schema，新增负向测试：Agent career 路径 404、旧 MCP 工具未知、旧 CLI 子命令不可用、旧 UI 资源不存在；静态路由检查保留。
-- [~] 更新 ADR-0006、TODO；CHANGELOG 待独立审核 PASS 后写入。
-- [~] 独立审核进行中：retirement-reviewer 与 retirement-reviewer-2。
+- [x] 更新 ADR-0006、CHANGELOG、TODO 与 REVIEWS。
+- [x] 独立审核 PASS：retirement-reviewer-2 最终确认。
 
 ## Phase 1 领域模块
 

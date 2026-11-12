@@ -8,7 +8,6 @@ import json
 import os
 import re
 import secrets
-import struct
 import subprocess
 import sys
 import threading

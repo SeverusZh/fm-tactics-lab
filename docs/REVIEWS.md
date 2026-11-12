@@ -32,6 +32,9 @@
 | 2026-11-12 | 23 人名单领域第三轮 | 同上 | FAIL | 第三轮：短名单 fallback 仍可把第二 GK 加回首發；测试未覆盖短名单。已修并补测试。 |
 | 2026-11-12 | 23 人名单领域第四轮 | 同上 | FAIL | 第四轮：bench fill 也限制 1 GK，23→23 时真实 GK 被 generated 替代；显式多 GK lineup 未归一化。已修。 |
 | 2026-11-12 | 23 人名单领域第五轮 | 同上 | PASS | bench 不限 GK、显式多 GK 归一化、短名单/23+3GK 保留、starter padding 均闭环；31 项领域测试（复审时 29）+ full 59；仅剩 Minor 断言/策略说明。 |
+| 2026-11-12 | 存档对战退役 | UI/HTTP/CLI/MCP/schema/docs | FAIL | 首轮：Launcher 自检仍请求 save-mode；workspace-controls 与 desktop-workspace 顶层 const 重名；squad 严格模式未声明赋值；根 tests 仍有 save 用例失败；文档残留。 |
+| 2026-11-12 | 存档对战退役第二轮 | 同上 | FAIL | 第二轮：核心修复通过，但工作树 manifest 未同步且 CI 会失败。已重新生成 manifest。 |
+| 2026-11-12 | 存档对战退役最终 | 同上 | PASS | Launcher/workspace 资源、跨脚本重声明、squad 严格模式、根 tests 281、v2 59、unittest 281、manifest 232、文档与死代码清理均闭环。 |
 
 ## 审核规则
 
@@ -40,6 +43,6 @@
 - 先列 findings，再列已验证项，最后给结论。
 - Critical 或 Important 未闭环时不得标记 PASS。
 - 审核通过不等于整体发布就绪；发布仍需最终验收与 Windows 真机验证。
-- 现有 276 项 Python 测试来自旧 `tests/` 基线，不是 v2 架构证据；新 `fm27lab/tests` 当前 59 项测试，覆盖包版本、CLI 环境继承、配置/路径边界、SQLite 迁移/事务、HTTP 健康、鉴权、错误封套、Origin、ACL 失败清理、sidecar serve 与 23 人名单；Vitest 当前 9 项。
+- 旧 `tests/` 当前 281 项通过，覆盖 legacy UI/HTTP/CLI/MCP、存档战术库、池与名单；新 `fm27lab/tests` 当前 59 项通过，覆盖包版本、CLI 环境继承、配置/路径边界、SQLite 迁移/事务、HTTP 健康、鉴权、错误封套、Origin、ACL 失败清理、sidecar serve 与 23 人名单；Vitest 当前 9 项。
 - Tauri sidecar supervisor 的静态实现已存在，但 Linux 无 WebKitGTK，Windows CI 的 `cargo build`/`cargo test`/安装包构建是唯一编译证据。PyInstaller onedir sidecar 已在 Linux 构建并通过 ready/health/shutdown 冒烟测试。
 - Rust 核心 crate 当前 4 项 cargo test 通过；React 壳当前 9 项 Vitest 通过、类型检查与生产构建通过。Windows CI 已通过 cargo build/test、NSIS 安装包与 sidecar 资源断言；Linux 本机仍无 WebKitGTK。合并、设计、sidecar、壳层、名单五个审核门均已 PASS。
