@@ -51,6 +51,7 @@ def inspect_saved_run(directory,run,scenario=None):
 
 class DesktopWarmRunner(BatchRunner):
     jobs_per_session=64
+    _capabilities_cache={}
     postprocess_workers=2
 
     def __init__(self,*args,**kwargs):
@@ -58,6 +59,23 @@ class DesktopWarmRunner(BatchRunner):
         self.session_diagnostics=[]
         self._abort=False
         self.host_sha256=sha(self.root/'fm27_native/FM27Simulator.exe')
+        if self.host_sha256 not in self._capabilities_cache:
+            result=subprocess.run([str(self.root/'fm27_native/FM27Simulator.exe'),'--worker-capabilities'],
+                capture_output=True,timeout=10,creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
+            try:value=json.loads(result.stdout)if result.returncode==0 else {}
+            except (ValueError,UnicodeError):value={}
+            self._capabilities_cache[self.host_sha256]=value
+        self.capabilities=self._capabilities_cache[self.host_sha256]
+        maximum=self.capabilities.get('max_jobs')
+        valid_limit=type(maximum)is int and 1<=maximum<=1000000
+        self.counted_sessions=(valid_limit and self.capabilities.get('protocol')==2 and
+            self.capabilities.get('execution_context_reset')is True and
+            self.capabilities.get('per_match_resource_release')is True)
+
+
+    def session_size(self, lanes, execution):
+        if self.counted_sessions:return min(max(map(len,lanes)),self.capabilities['max_jobs'])
+        return 1 if execution else self.jobs_per_session
 
     def postprocess(self,task,rows,receipt,path,ack,submitted,queued):
         began=time.perf_counter()
@@ -69,6 +87,7 @@ class DesktopWarmRunner(BatchRunner):
             if len(generated)!=2 or not all(r.get('staff_player_identity_and_attributes_verified')and r.get('native_adaptation_verified')for r in generated):raise ValueError('电脑生成战术或源身份未通过回读')
             if not any(r.get('event')=='native_fresh_duel_competition_context'and r.get('carrier_competition_discarded')for r in rows):raise ValueError('新对战赛事上下文未通过核实')
             if task.get('event_details',True)and not any(r.get('event')=='native_player_statistics_identity_verified'and r.get('verified')for r in rows):raise ValueError('球员统计未通过原生身份核对')
+        if self.counted_sessions and not any(r.get('event')=='native_execution_context_cleared'and r.get('team_bindings_cleared')for r in rows):raise ValueError('逐场执行力上下文未清除')
         released=next(r for r in rows if r['event']=='original_match_release_completed')
         if not released['tls_context_cleared']:raise ValueError('上一场原生线程上下文未清除')
         execution = execution_receipts(rows, task['scenario'])
@@ -105,7 +124,7 @@ class DesktopWarmRunner(BatchRunner):
                 'postprocess_seconds':time.perf_counter()-began,'postprocess_queue_seconds':began-queued,
                 'native_elapsed_seconds':timings['total_ms']/1000,'native_elapsed_scope':'job_pipeline_excludes_session_DLL_load_and_activation','engine_compatibility':receipt['compatibility'],
                 'engine_dll_sha256':receipt['dll_sha256'],'collector_sha256':self.host_sha256,
-                'runtime_mode':'isolated_execution_experiment' if execution is not None else 'reused_native_worker','event_details':event_details,
+                'runtime_mode':'reused_execution_worker' if execution is not None and self.counted_sessions else 'isolated_execution_experiment' if execution is not None else 'reused_native_worker','event_details':event_details,
                 'validation_scope':'native_match_score_team_statistics_and_player_events'if event_details else'native_match_score_and_team_statistics',
                 'worker_pid':ack['pid'],'worker_job_index':ack['index'],
                 'startup_receipt':str(receipt['_path'].relative_to(path.parent)),
@@ -120,8 +139,8 @@ class DesktopWarmRunner(BatchRunner):
         if any(t.get('episode')for t in tasks):raise ValueError('定位球片段须使用独立片段入口')
         messages=queue.Queue(maxsize=6)
         lanes=[tasks[i::self.workers]for i in range(min(self.workers,len(tasks)))]
-        # Execution hooks are process-scoped and must never leak to the next match.
-        session_size = 1 if any('experimental_execution' in task['scenario'] for task in tasks) else self.jobs_per_session
+        # New hosts reset per-match execution state; old hosts retain isolation.
+        session_size=self.session_size(lanes,any('experimental_execution'in task['scenario']for task in tasks))
         chunks=[lane[offset:offset+session_size]for offset in range(0,max(map(len,lanes)),session_size)for lane in lanes if lane[offset:offset+session_size]]
 
         def publish(message):
@@ -132,9 +151,9 @@ class DesktopWarmRunner(BatchRunner):
         def session(chunk):
             if self.stop.is_set():return
             root=Path(chunk[0]['path']).parent
-            require_space(root,additional_bytes=len(chunk)*3*1024**2)
+            require_space(root,additional_bytes=min(len(chunk),64)*3*1024**2)
             folder=root/'worker_sessions'/uuid.uuid4().hex;folder.mkdir(parents=True)
-            startup=folder/'session.jsonl';manifest=folder/'manifest.txt';fields=['FM27DW1']
+            startup=folder/'session.jsonl';manifest=folder/'manifest.txt';fields=['FM27DW2',str(len(chunk))]if self.counted_sessions else ['FM27DW1']
             for task in chunk:
                 path=Path(task['path'])
                 if path.exists():
@@ -185,6 +204,7 @@ class DesktopWarmRunner(BatchRunner):
                             receipt['_path']=folder/'startup_receipt.json';receipt['_sha256']=sha(receipt['_path'])
                         publish(('match',(task,rows,receipt,path,ack,began,time.perf_counter())))
                         completed+=1;last_progress=time.perf_counter()
+                        if completed%64==0 and completed<len(chunk):require_space(root,additional_bytes=min(len(chunk)-completed,64)*3*1024**2)
                     if process.poll()is not None:
                         if completed<len(chunk)and Path(str(chunk[completed]['path'])+'.worker_done').exists():continue
                         break

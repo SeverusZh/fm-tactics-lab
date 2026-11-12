@@ -1449,5 +1449,11 @@ window.FM27English = {
  "带存档名单的候选合计上限约": "Saved-squad candidates are capped at about",
  "A/B 对照与本地保存会占用更多空间": "A/B comparison and local saving need extra space",
  "模式草稿过大": "Mode draft too large",
- "对照与本地保存会占用更多空间": "comparison and local saving need extra space"
+ "对照与本地保存会占用更多空间": "comparison and local saving need extra space",
+ "建议": "Recommended",
+ "可自行设置": "Set manually",
+ "路": "workers",
+ "高并行会增加内存和处理器占用": "higher parallelism increases memory and CPU usage",
+ "并行数高于推荐值": "Worker count exceeds the recommendation",
+ "请留意内存和处理器占用": "monitor memory and CPU usage",
 };

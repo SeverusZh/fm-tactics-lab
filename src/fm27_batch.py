@@ -11,15 +11,23 @@ import uuid
 from fm27_simulator import inspect_log
 import fm27_match_events
 
+def resource_limits(logical_cpus,available_bytes):
+    # 2494687 tests measured about 332 MiB private/host. Budget 1 GiB per
+    # slot (including headroom), plus 2 GiB for the editor and other work.
+    slots=max(1,(available_bytes-2*1024**3)//1024**3)
+    maximum=max(1,min(8,max(1,logical_cpus//2),slots))
+    return {'maximum':256,'recommended':min(4,maximum),'resource_suggested_maximum':maximum,
+            'memory_budget_per_worker_mib':1024,'memory_reserve_mib':2048}
+
+
 def worker_limits():
-    # Reserve memory for the desktop/editor; allow roughly 2 GiB per native slot.
     class Memory(ctypes.Structure):
         _fields_=[('length',ctypes.c_ulong),('load',ctypes.c_ulong)]+[(n,ctypes.c_ulonglong)for n in ('total','available','page_total','page_available','virtual_total','virtual_available','extended')]
     memory=Memory();memory.length=ctypes.sizeof(memory)
-    available=8
-    if os.name=='nt'and ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(memory)):available=max(1,(memory.available//(1024**3)-1)//2)
-    maximum=max(1,min(4,max(1,(os.cpu_count()or 2)//2),available))
-    return {'maximum':maximum,'recommended':min(4,maximum)}
+    available=8*1024**3
+    if os.name=='nt'and ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(memory)):available=memory.available
+    return resource_limits(os.cpu_count()or 2,available)
+
 
 _owner_job=None
 _owner_job_pid=None
