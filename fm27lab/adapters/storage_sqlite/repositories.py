@@ -380,3 +380,407 @@ class DraftRepository:
             row["created_at"],
             row["updated_at"],
         )
+
+
+class JobRepository:
+    """SQLite job storage.
+
+    Caller-provided connections must already hold a write transaction when used for
+    update() or add_run(); otherwise the read-modify-write is not atomic.
+    """
+
+    STATUSES = frozenset({"queued", "running", "completed", "error", "cancelled", "interrupted"})
+
+    def __init__(self, database: Database):
+        self.database = database
+
+    @contextmanager
+    def _connection(self, connection: sqlite3.Connection | None):
+        if connection is not None:
+            yield connection, False
+        else:
+            with closing(self.database.connect()) as owned:
+                yield owned, True
+
+    def add(
+        self,
+        value: Mapping[str, Any],
+        connection: sqlite3.Connection | None = None,
+    ) -> dict[str, Any]:
+        normalized = self._validate_job(value)
+        with self._connection(connection) as (active, owned):
+            active.execute(
+                "INSERT INTO jobs(id, kind, status, name, config_json, summary_json, workers, "
+                "total, completed, created_at, started_at, finished_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                normalized,
+            )
+            if owned:
+                active.commit()
+        return self._job_from_tuple(normalized)
+
+    def get(
+        self,
+        job_id: str,
+        connection: sqlite3.Connection | None = None,
+    ) -> dict[str, Any] | None:
+        PoolRepository._validate_id(job_id)
+        with self._connection(connection) as (active, _):
+            row = active.execute(
+                "SELECT id, kind, status, name, config_json, summary_json, workers, total, "
+                "completed, created_at, started_at, finished_at FROM jobs WHERE id=?",
+                (job_id,),
+            ).fetchone()
+        return None if row is None else self._row(row)
+
+    def list(
+        self,
+        status: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+        connection: sqlite3.Connection | None = None,
+    ) -> list[dict[str, Any]]:
+        if type(limit) is not int or not 1 <= limit <= 256:
+            raise ValueError("任务分页大小无效")
+        if type(offset) is not int or offset < 0:
+            raise ValueError("任务分页偏移无效")
+        if status is not None and (not isinstance(status, str) or status not in self.STATUSES):
+            raise ValueError("任务状态无效")
+        statement = (
+            "SELECT id, kind, status, name, config_json, summary_json, workers, total, "
+            "completed, created_at, started_at, finished_at FROM jobs"
+        )
+        parameters: list[Any] = []
+        if status is not None:
+            statement += " WHERE status=?"
+            parameters.append(status)
+        statement += " ORDER BY created_at DESC, rowid DESC LIMIT ? OFFSET ?"
+        parameters.extend([limit, offset])
+        with self._connection(connection) as (active, _):
+            rows = active.execute(statement, parameters).fetchall()
+        return [self._row(row) for row in rows]
+
+    def update(
+        self,
+        job_id: str,
+        changes: Mapping[str, Any],
+        connection: sqlite3.Connection | None = None,
+    ) -> dict[str, Any] | None:
+        PoolRepository._validate_id(job_id)
+        if not isinstance(changes, Mapping) or not changes:
+            raise ValueError("任务更新字段无效")
+        allowed = {"status", "name", "summary", "workers", "total", "completed", "started_at", "finished_at"}
+        if set(changes) - allowed:
+            raise ValueError("任务更新字段无效")
+        with self._connection(connection) as (active, owned):
+            if owned:
+                active.execute("BEGIN IMMEDIATE")
+            row = active.execute(
+                "SELECT id, kind, status, name, config_json, summary_json, workers, total, "
+                "completed, created_at, started_at, finished_at FROM jobs WHERE id=?",
+                (job_id,),
+            ).fetchone()
+            if row is None:
+                if owned:
+                    active.rollback()
+                return None
+            current = self._row(row)
+            normalized = self._validate_job(
+                {
+                    **current,
+                    **dict(changes),
+                    "config": current["config"],
+                }
+            )
+            cursor = active.execute(
+                "UPDATE jobs SET status=?, name=?, config_json=?, summary_json=?, workers=?, "
+                "total=?, completed=?, created_at=?, started_at=?, finished_at=? WHERE id=?",
+                (
+                    normalized[2],
+                    normalized[3],
+                    normalized[4],
+                    normalized[5],
+                    normalized[6],
+                    normalized[7],
+                    normalized[8],
+                    normalized[9],
+                    normalized[10],
+                    normalized[11],
+                    job_id,
+                ),
+            )
+            if cursor.rowcount == 0:
+                if owned:
+                    active.rollback()
+                return None
+            if owned:
+                active.commit()
+        return self._job_from_tuple(normalized)
+
+    def delete(
+        self,
+        job_id: str,
+        connection: sqlite3.Connection | None = None,
+    ) -> bool:
+        PoolRepository._validate_id(job_id)
+        with self._connection(connection) as (active, owned):
+            cursor = active.execute("DELETE FROM jobs WHERE id=?", (job_id,))
+            if owned:
+                active.commit()
+            return cursor.rowcount > 0
+
+    def add_run(
+        self,
+        job_id: str,
+        value: Mapping[str, Any],
+        connection: sqlite3.Connection | None = None,
+    ) -> dict[str, Any]:
+        PoolRepository._validate_id(job_id)
+        with self._connection(connection) as (active, owned):
+            if owned:
+                active.execute("BEGIN IMMEDIATE")
+            if not isinstance(value, Mapping):
+                raise ValueError("任务比赛记录必须是对象")
+            sequence = value.get("sequence")
+            if sequence is None:
+                sequence = active.execute(
+                    "SELECT COALESCE(MAX(sequence), 0) + 1 FROM job_runs WHERE job_id=?",
+                    (job_id,),
+                ).fetchone()[0]
+            if type(sequence) is not int or not 1 <= sequence <= 1_000_000:
+                raise ValueError("比赛序号无效")
+            variant = value.get("variant")
+            if (
+                not isinstance(variant, str)
+                or not 1 <= len(variant) <= 64
+                or any(ord(c) < 32 or ord(c) == 127 for c in variant)
+            ):
+                raise ValueError("比赛变体无效")
+            seed = value.get("seed")
+            if type(seed) is not int or not 0 <= seed <= 0xFFFFFFFF:
+                raise ValueError("比赛种子无效")
+            score_home = value.get("score_home")
+            score_away = value.get("score_away")
+            if (score_home is None) != (score_away is None):
+                raise ValueError("比赛比分必须同时提供或同时为空")
+            for score in (score_home, score_away):
+                if score is not None and (type(score) is not int or score < 0):
+                    raise ValueError("比赛比分无效")
+            verified = value.get("verified", False)
+            if type(verified) is not bool:
+                raise ValueError("比赛核验标记无效")
+            stats = value.get("stats", {})
+            events = value.get("events")
+            log_path = value.get("log_path")
+            if not isinstance(stats, Mapping):
+                raise ValueError("比赛统计必须是对象")
+            if events is not None and not isinstance(events, Mapping):
+                raise ValueError("比赛事件必须是对象")
+            if log_path is not None and (not isinstance(log_path, str) or len(log_path) > 512):
+                raise ValueError("比赛日志路径无效")
+            stats_json = PoolRepository._dump(stats, "比赛统计")
+            events_json = None if events is None else PoolRepository._dump(events, "比赛事件")
+            stamp = datetime.now(UTC).isoformat()
+            active.execute(
+                "INSERT INTO job_runs(job_id, sequence, variant, seed, score_home, score_away, "
+                "verified, stats_json, events_json, log_path, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    job_id,
+                    sequence,
+                    variant,
+                    seed,
+                    score_home,
+                    score_away,
+                    int(verified),
+                    stats_json,
+                    events_json,
+                    log_path,
+                    stamp,
+                ),
+            )
+            if owned:
+                active.commit()
+        return self._run_entry(
+            job_id,
+            sequence,
+            variant,
+            seed,
+            score_home,
+            score_away,
+            verified,
+            stats_json,
+            events_json,
+            log_path,
+            stamp,
+        )
+
+    def runs(
+        self,
+        job_id: str,
+        limit: int = 50,
+        offset: int = 0,
+        connection: sqlite3.Connection | None = None,
+    ) -> list[dict[str, Any]]:
+        PoolRepository._validate_id(job_id)
+        if type(limit) is not int or not 1 <= limit <= 200:
+            raise ValueError("比赛分页大小无效")
+        if type(offset) is not int or offset < 0:
+            raise ValueError("比赛分页偏移无效")
+        with self._connection(connection) as (active, _):
+            rows = active.execute(
+                "SELECT job_id, sequence, variant, seed, score_home, score_away, verified, "
+                "stats_json, events_json, log_path, created_at FROM job_runs "
+                "WHERE job_id=? ORDER BY sequence LIMIT ? OFFSET ?",
+                (job_id, limit, offset),
+            ).fetchall()
+        return [self._run_row(row) for row in rows]
+
+    def get_run(
+        self,
+        job_id: str,
+        sequence: int,
+        connection: sqlite3.Connection | None = None,
+    ) -> dict[str, Any] | None:
+        PoolRepository._validate_id(job_id)
+        if type(sequence) is not int or sequence < 1:
+            raise ValueError("比赛序号无效")
+        with self._connection(connection) as (active, _):
+            row = active.execute(
+                "SELECT job_id, sequence, variant, seed, score_home, score_away, verified, "
+                "stats_json, events_json, log_path, created_at FROM job_runs "
+                "WHERE job_id=? AND sequence=?",
+                (job_id, sequence),
+            ).fetchone()
+        return None if row is None else self._run_row(row)
+
+    @classmethod
+    def _validate_job(cls, value: Mapping[str, Any]) -> tuple:
+        if not isinstance(value, Mapping):
+            raise ValueError("任务必须是对象")
+        job_id = value.get("id")
+        if job_id is None:
+            job_id = secrets.token_hex(8)
+        PoolRepository._validate_id(job_id)
+        kind = value.get("kind")
+        if (
+            not isinstance(kind, str)
+            or not 1 <= len(kind) <= 64
+            or any(ord(c) < 32 or ord(c) == 127 for c in kind)
+        ):
+            raise ValueError("任务类型无效")
+        status = value.get("status")
+        if not isinstance(status, str) or status not in cls.STATUSES:
+            raise ValueError("任务状态无效")
+        name = value.get("name")
+        if name is not None:
+            if (
+                not isinstance(name, str)
+                or not 1 <= len(name.strip()) <= 100
+                or any(ord(c) < 32 or ord(c) == 127 for c in name)
+            ):
+                raise ValueError("任务名称无效")
+            try:
+                name.encode("utf-8")
+            except UnicodeEncodeError as error:
+                raise ValueError("任务名称无效") from error
+            name = name.strip()
+        config = value.get("config", {})
+        summary = value.get("summary", {})
+        if not isinstance(config, Mapping) or not isinstance(summary, Mapping):
+            raise ValueError("任务配置必须是对象")
+        workers = value.get("workers", 1)
+        if type(workers) is not int or not 1 <= workers <= 256:
+            raise ValueError("任务并行数无效")
+        total = value.get("total", 0)
+        completed = value.get("completed", 0)
+        if type(total) is not int or total < 0 or type(completed) is not int or completed < 0:
+            raise ValueError("任务进度无效")
+        if completed > total:
+            raise ValueError("任务进度无效")
+        created_at = value.get("created_at")
+        if created_at is None:
+            created_at = datetime.now(UTC).isoformat()
+        started_at = value.get("started_at")
+        finished_at = value.get("finished_at")
+        for stamp in (created_at, started_at, finished_at):
+            if stamp is None:
+                continue
+            if (
+                not isinstance(stamp, str)
+                or not 1 <= len(stamp) <= 64
+                or any(ord(c) < 32 or ord(c) == 127 for c in stamp)
+            ):
+                raise ValueError("任务时间无效")
+            try:
+                datetime.fromisoformat(stamp)
+            except ValueError as error:
+                raise ValueError("任务时间无效") from error
+        return (
+            job_id,
+            kind,
+            status,
+            name,
+            PoolRepository._dump(config, "任务配置"),
+            PoolRepository._dump(summary, "任务摘要"),
+            workers,
+            total,
+            completed,
+            created_at,
+            started_at,
+            finished_at,
+        )
+
+    @staticmethod
+    def _job_from_tuple(value: tuple) -> dict[str, Any]:
+        return {
+            "id": value[0],
+            "kind": value[1],
+            "status": value[2],
+            "name": value[3],
+            "config": json.loads(value[4]),
+            "summary": json.loads(value[5]),
+            "workers": value[6],
+            "total": value[7],
+            "completed": value[8],
+            "created_at": value[9],
+            "started_at": value[10],
+            "finished_at": value[11],
+        }
+
+    @classmethod
+    def _row(cls, row: sqlite3.Row) -> dict[str, Any]:
+        return cls._job_from_tuple(tuple(row))
+
+    @staticmethod
+    def _run_entry(
+        job_id, sequence, variant, seed, home, away, verified, stats_json, events_json, log_path, created_at
+    ):
+        return {
+            "job_id": job_id,
+            "sequence": sequence,
+            "variant": variant,
+            "seed": seed,
+            "score": None if home is None or away is None else [home, away],
+            "verified": bool(verified),
+            "stats": json.loads(stats_json),
+            "events": None if events_json is None else json.loads(events_json),
+            "log_path": log_path,
+            "created_at": created_at,
+        }
+
+    @classmethod
+    def _run_row(cls, row: sqlite3.Row) -> dict[str, Any]:
+        return cls._run_entry(
+            row["job_id"],
+            row["sequence"],
+            row["variant"],
+            row["seed"],
+            row["score_home"],
+            row["score_away"],
+            row["verified"],
+            row["stats_json"],
+            row["events_json"],
+            row["log_path"],
+            row["created_at"],
+        )

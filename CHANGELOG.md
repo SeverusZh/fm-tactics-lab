@@ -16,6 +16,7 @@
 - 新增 sidecar `/api/pools` CRUD：Bearer/OpenAPI 契约、严格 body/query、分页、URL-safe id、409/204 与统一错误封套；已通过独立审核。
 - 新增 drafts 仓储与 DraftService：scenario 23 人归一化、JSON/事务、原子更新、updated_at 排序与分页摘要；已通过独立审核。
 - 新增 sidecar `/api/drafts` CRUD：严格 body、23 人归一化、分页、PATCH、CORS、OpenAPI 与错误封套；已通过独立审核。
+- 新增 jobs/job_runs 仓储：状态/进度不变量、逐场 run、级联删除、事务与分页过滤；已通过独立审核。
 
 - 上游 v1112 的原生 worker 复用、counted-session 协议与 1–256 并行输入已合并。
 - 本地分支已有的客队战术池轮战/真实名单与 Agent 接入层保留在合并基线中；v2 的模块化改造会逐步替换其接口。
