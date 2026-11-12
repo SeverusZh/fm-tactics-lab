@@ -1,10 +1,20 @@
 use serde::Serialize;
 
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Clone, Serialize, PartialEq, Eq)]
 pub struct ConnectionInfo {
     pub url: String,
     pub token: String,
     pub api: String,
+}
+
+impl std::fmt::Debug for ConnectionInfo {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "ConnectionInfo {{ url: {:?}, token: \"<redacted>\", api: {:?} }}",
+            self.url, self.api
+        )
+    }
 }
 
 pub fn connection_info(host: &str, port: u16, token: &str) -> ConnectionInfo {

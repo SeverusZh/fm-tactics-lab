@@ -194,8 +194,14 @@
   color: var(--on-accent);
 }
 
-.button.primary:hover {
+.button.primary:not(:disabled):hover {
   background: var(--accent-strong);
+}
+
+.button:disabled:hover {
+  border-color: var(--border);
+  background: var(--disabled-bg);
+  color: var(--text-subtle);
 }
 
 .button:disabled {

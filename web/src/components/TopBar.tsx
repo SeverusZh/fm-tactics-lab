@@ -4,13 +4,17 @@ import { useAppContext } from "../app-context";
 
 export function TopBar({ title }: { title: string }) {
   const { connection, health, connectionError, refresh } = useAppContext();
-  const tone = health?.status === "ok" ? "ok" : connectionError ? "error" : "warn";
-  const label = health?.status === "ok" ? "sidecar 正常" : connectionError ? "sidecar 未连接" : "正在连接";
+  const tone = connectionError ? "error" : health?.status === "ok" ? "ok" : "warn";
+  const label = connectionError
+    ? "sidecar 未连接"
+    : health?.status === "ok"
+      ? "sidecar 正常"
+      : "正在连接";
   return (
     <header className="topbar">
       <h1>{title}</h1>
       <div className="topbar-status">
-        <span className="badge" data-tone={tone}>
+        <span className="badge" data-tone={tone} role="status" aria-live="polite">
           {tone === "error" ? <WarningCircle size={14} aria-hidden="true" /> : null}
           {label}
         </span>
@@ -20,8 +24,8 @@ export function TopBar({ title }: { title: string }) {
             <span className="badge">v{health.version}</span>
           </>
         ) : null}
-        <button className="button" type="button" onClick={refresh} disabled={!connection}>
-          重新检查
+        <button className="button" type="button" onClick={refresh}>
+          {connection ? "重新检查" : "重启 sidecar"}
         </button>
       </div>
     </header>

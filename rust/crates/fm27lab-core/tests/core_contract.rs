@@ -45,4 +45,7 @@ fn connection_info_and_health_url_are_explicit() {
     assert_eq!(info.api, "fm27lab/v2");
     assert_eq!(health_url(&info.url), "http://127.0.0.1:43210/api/health");
     assert!(info.to_json().contains("\"token\":\"abc123\""));
+    let debug = format!("{info:?}");
+    assert!(!debug.contains("abc123"));
+    assert!(debug.contains("redacted"));
 }

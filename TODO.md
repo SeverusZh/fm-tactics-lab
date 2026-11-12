@@ -8,7 +8,7 @@
 - [x] 创建 `refactor/v2-modular` 分支。
 - [x] 合并上游 v1112 的 worker 复用与 1–256 并行。
 - [~] 合并提交 `0c24c66` 独立审核。
-- [~] 设计文档与 ADR，设计审核八轮 FAIL、第九轮待审；合并审核第三轮 PASS。
+- [~] 设计文档与 ADR，设计审核九轮 FAIL、第十轮待审；合并审核第三轮 PASS。
 - [x] sidecar 基础切片：三轮审核 PASS；28 项测试；迁移/health/错误封套/连接/Origin/token repr/CLI env/入口/ACL 已闭环。
 - [x] PyInstaller onedir sidecar 构建成功，并通过 ready/health/shutdown 冒烟测试（Linux）。
 - [x] Rust 纯核心 crate：ready/token/backoff/connection，4 项 cargo test 通过。
@@ -83,8 +83,8 @@
 
 - [~] Tauri 2 窗口、单实例、文件对话框、sidecar supervisor 已实现；托盘与自动更新待 Phase 4。
 - [~] sidecar PyInstaller 打包脚本与 Tauri resources 已接入；Windows 安装包构建待 CI。
-- [ ] sidecar 启动、ready 行、健康检查、重启、优雅退出。
-- [ ] token 生成、endpoint.json、Tauri `get_connection`。
+- [x] sidecar 启动、ready 行、健康检查、重启、优雅退出（静态实现；Windows CI 待运行）。
+- [x] token 生成、endpoint.json、Tauri `get_connection`、事件刷新。
 - [ ] 文件对话框、打开数据目录、外部链接。
 - [ ] 删除 Launcher.cs 与旧 C# 构建入口，并从 scripts/export_source.py 的 TOP 移除；同步 `docs/AGENT_INTEGRATION.md`、`docs/AGENT_VERIFICATION.md` 与 `THIRD_PARTY_NOTICES.md` 中的 Launcher 描述。
 - [ ] Windows 安装包与卸载清理；CI 需执行 `tauri build` 验证 sidecar resources。

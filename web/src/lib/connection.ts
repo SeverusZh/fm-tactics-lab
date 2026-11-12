@@ -12,7 +12,7 @@ export async function loadConnection(): Promise<Connection> {
   }
   return {
     url: import.meta.env.VITE_API_URL ?? "http://127.0.0.1:18765",
-    token: import.meta.env.VITE_API_TOKEN ?? "",
+    token: import.meta.env.DEV ? (import.meta.env.VITE_API_TOKEN ?? "") : "",
     api: "fm27lab/v2",
   };
 }

@@ -14,7 +14,7 @@ use std::{
 
 use fm27lab_core::{
     backoff::Backoff,
-    connection::{connection_info, health_url, ConnectionInfo},
+    connection::{connection_info, ConnectionInfo},
     ready::parse_ready_line,
     token::generate_token,
 };
@@ -22,14 +22,18 @@ use tauri::{AppHandle, Emitter, Manager, RunEvent, State};
 
 const MAX_RESTARTS: usize = 3;
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(30);
+const SHUTDOWN_WAIT: Duration = Duration::from_secs(10);
+const HEALTH_INTERVAL: Duration = Duration::from_secs(5);
 
 #[derive(Default)]
 struct SidecarState {
     child: Mutex<Option<Child>>,
     connection: Mutex<Option<ConnectionInfo>>,
-    shutting_down: AtomicBool,
+    lifecycle: Mutex<()>,
+    stopping: AtomicBool,
     manual_restart: AtomicBool,
     restarts: AtomicUsize,
+    data_dir: Mutex<Option<PathBuf>>,
 }
 
 fn project_root() -> PathBuf {
@@ -78,8 +82,12 @@ fn parse_port(url: &str) -> Option<u16> {
     url.rsplit_once(':')?.1.parse().ok()
 }
 
+fn is_status(line: &str, code: &str) -> bool {
+    line.contains(&format!(" {code} ")) || line.ends_with(&format!(" {code}"))
+}
+
 fn is_success_status(line: &str) -> bool {
-    line.contains(" 200 ") || line.ends_with(" 200")
+    is_status(line, "200")
 }
 
 fn http_probe(connection: &ConnectionInfo, request_path: &str) -> Option<String> {
@@ -105,23 +113,30 @@ fn health_ok(connection: &ConnectionInfo) -> bool {
     http_probe(connection, "/api/health").is_some_and(|line| is_success_status(&line))
 }
 
-fn post_shutdown(connection: &ConnectionInfo) {
+fn post_shutdown(connection: &ConnectionInfo) -> bool {
     let Some(port) = parse_port(&connection.url) else {
-        return;
+        return false;
     };
     let Ok(address) = format!("127.0.0.1:{port}").parse() else {
-        return;
+        return false;
     };
     let Ok(mut stream) = TcpStream::connect_timeout(&address, Duration::from_secs(2)) else {
-        return;
+        return false;
     };
     let _ = stream.set_write_timeout(Some(Duration::from_secs(2)));
+    let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
     let request = format!(
         "POST /api/shutdown HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nAuthorization: Bearer {}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
         connection.token
     );
-    let _ = stream.write_all(request.as_bytes());
-    let _ = stream.read_to_end(&mut Vec::new());
+    if stream.write_all(request.as_bytes()).is_err() {
+        return false;
+    }
+    let mut status = String::new();
+    if BufReader::new(stream).read_line(&mut status).is_err() {
+        return false;
+    }
+    is_status(&status, "202")
 }
 
 fn clear_connection(state: &SidecarState) {
@@ -139,9 +154,35 @@ fn kill_child(state: &SidecarState) {
     }
 }
 
+fn child_running(state: &SidecarState) -> bool {
+    let mut guard = match state.child.lock() {
+        Ok(guard) => guard,
+        Err(_) => return false,
+    };
+    match guard.as_mut() {
+        Some(child) => matches!(child.try_wait(), Ok(None)),
+        None => false,
+    }
+}
+
+fn take_dead_child(state: &SidecarState) -> Option<Child> {
+    let mut guard = state.child.lock().ok()?;
+    let exited = guard
+        .as_mut()
+        .is_some_and(|child| !matches!(child.try_wait(), Ok(None)));
+    if exited {
+        guard.take()
+    } else {
+        None
+    }
+}
+
 fn start_sidecar(app: &AppHandle) -> Result<ConnectionInfo, String> {
     let state = app.state::<SidecarState>();
-    state.manual_restart.store(false, Ordering::SeqCst);
+    let _lifecycle = state
+        .lifecycle
+        .lock()
+        .map_err(|_| "lifecycle lock poisoned")?;
     clear_connection(&state);
     kill_child(&state);
     let (program, args, cwd) = launch_spec(app)?;
@@ -208,8 +249,7 @@ fn start_sidecar(app: &AppHandle) -> Result<ConnectionInfo, String> {
             }
         }
     };
-    let health_deadline = Instant::now() + STARTUP_TIMEOUT;
-    while Instant::now() < health_deadline {
+    while Instant::now() < deadline {
         if health_ok(&connection) {
             if let Ok(mut guard) = state.child.lock() {
                 *guard = Some(child);
@@ -217,7 +257,9 @@ fn start_sidecar(app: &AppHandle) -> Result<ConnectionInfo, String> {
             if let Ok(mut guard) = state.connection.lock() {
                 *guard = Some(connection.clone());
             }
-            let _ = app.emit("sidecar-ready", &connection);
+            if let Ok(mut guard) = state.data_dir.lock() {
+                *guard = Some(data_dir.clone());
+            }
             return Ok(connection);
         }
         if matches!(child.try_wait(), Ok(Some(_))) {
@@ -232,51 +274,92 @@ fn start_sidecar(app: &AppHandle) -> Result<ConnectionInfo, String> {
 }
 
 fn monitor(app: AppHandle) {
-    let mut attempts = 0usize;
+    let mut health_failures = 0usize;
+    let mut last_health = Instant::now();
+    let mut stable_since = Instant::now();
     loop {
+        thread::sleep(Duration::from_millis(500));
         let state = app.state::<SidecarState>();
-        if state.shutting_down.load(Ordering::SeqCst) {
+        if state.stopping.load(Ordering::SeqCst) {
             return;
         }
         if state.manual_restart.swap(false, Ordering::SeqCst) {
+            stable_since = Instant::now();
             continue;
         }
-        let child = state.child.lock().ok().and_then(|mut guard| guard.take());
-        if let Some(mut child) = child {
+        if let Some(mut child) = take_dead_child(&state) {
             let _ = child.wait();
-            if state.shutting_down.load(Ordering::SeqCst) {
-                return;
-            }
-            if state.manual_restart.swap(false, Ordering::SeqCst) {
-                continue;
-            }
             clear_connection(&state);
             let _ = app.emit("sidecar-down", "sidecar exited");
-            attempts += 1;
-            state.restarts.store(attempts, Ordering::SeqCst);
-            if attempts > MAX_RESTARTS {
+            let attempt = state.restarts.fetch_add(1, Ordering::SeqCst) + 1;
+            if attempt > MAX_RESTARTS {
                 let _ = app.emit("sidecar-failed", "restart limit reached");
                 return;
             }
             let delay = Backoff::new(500, MAX_RESTARTS)
                 .delays()
-                .get(attempts - 1)
+                .get(attempt - 1)
                 .copied()
                 .unwrap_or(4_000);
             thread::sleep(Duration::from_millis(delay));
-        } else {
-            thread::sleep(Duration::from_millis(500));
-        }
-        match start_sidecar(&app) {
-            Ok(connection) => {
-                let _ = app.emit("sidecar-ready", connection);
+            if state.stopping.load(Ordering::SeqCst) {
+                return;
             }
-            Err(error) => {
-                let _ = app.emit("sidecar-error", error);
-                attempts += 1;
-                if attempts > MAX_RESTARTS {
-                    let _ = app.emit("sidecar-failed", "restart limit reached");
-                    return;
+            match start_sidecar(&app) {
+                Ok(connection) => {
+                    stable_since = Instant::now();
+                    let _ = app.emit("sidecar-ready", connection);
+                }
+                Err(error) => {
+                    let _ = app.emit("sidecar-error", error);
+                }
+            }
+            continue;
+        }
+        if !child_running(&state) {
+            let attempt = state.restarts.fetch_add(1, Ordering::SeqCst) + 1;
+            if attempt > MAX_RESTARTS {
+                let _ = app.emit("sidecar-failed", "restart limit reached");
+                return;
+            }
+            let delay = Backoff::new(500, MAX_RESTARTS)
+                .delays()
+                .get(attempt - 1)
+                .copied()
+                .unwrap_or(4_000);
+            thread::sleep(Duration::from_millis(delay));
+            if state.stopping.load(Ordering::SeqCst) {
+                return;
+            }
+            match start_sidecar(&app) {
+                Ok(connection) => {
+                    stable_since = Instant::now();
+                    let _ = app.emit("sidecar-ready", connection);
+                }
+                Err(error) => {
+                    let _ = app.emit("sidecar-error", error);
+                }
+            }
+            continue;
+        }
+        if stable_since.elapsed() > Duration::from_secs(30)
+            && state.restarts.load(Ordering::SeqCst) > 0
+        {
+            state.restarts.store(0, Ordering::SeqCst);
+        }
+        if last_health.elapsed() >= HEALTH_INTERVAL {
+            last_health = Instant::now();
+            let connection = state.connection.lock().ok().and_then(|guard| guard.clone());
+            if let Some(connection) = connection {
+                if health_ok(&connection) {
+                    health_failures = 0;
+                } else {
+                    health_failures += 1;
+                    if health_failures >= 3 {
+                        let _ = app.emit("sidecar-down", "sidecar health check failed");
+                        kill_child(&state);
+                        health_failures = 0;
+                    }
                 }
             }
         }
@@ -284,13 +367,38 @@ fn monitor(app: AppHandle) {
 }
 
 fn stop_sidecar(state: &SidecarState) {
-    state.shutting_down.store(true, Ordering::SeqCst);
+    state.stopping.store(true, Ordering::SeqCst);
+    let _lifecycle = match state.lifecycle.lock() {
+        Ok(guard) => guard,
+        Err(_) => return,
+    };
     if let Ok(guard) = state.connection.lock() {
         if let Some(connection) = guard.as_ref() {
             post_shutdown(connection);
         }
     }
-    kill_child(state);
+    let mut child = state.child.lock().ok().and_then(|mut guard| guard.take());
+    if let Some(child) = child.as_mut() {
+        let deadline = Instant::now() + SHUTDOWN_WAIT;
+        while Instant::now() < deadline {
+            match child.try_wait() {
+                Ok(Some(_)) => break,
+                Ok(None) => thread::sleep(Duration::from_millis(100)),
+                Err(_) => break,
+            }
+        }
+        if let Some(child) = child.as_mut() {
+            if matches!(child.try_wait(), Ok(None)) {
+                let _ = child.kill();
+            }
+            let _ = child.wait();
+        }
+    }
+    if let Some(data_dir) = state.data_dir.lock().ok().and_then(|guard| guard.clone()) {
+        let endpoint = data_dir.join("agent").join("endpoint.json");
+        let _ = std::fs::remove_file(&endpoint);
+        let _ = std::fs::remove_file(endpoint.with_extension("json.tmp"));
+    }
     clear_connection(state);
 }
 
@@ -311,12 +419,7 @@ fn sidecar_status(state: State<SidecarState>) -> Result<serde_json::Value, Strin
         .lock()
         .map_err(|_| "connection lock poisoned")?
         .clone();
-    let running = state
-        .child
-        .lock()
-        .map_err(|_| "sidecar lock poisoned")?
-        .as_mut()
-        .is_some_and(|child| matches!(child.try_wait(), Ok(None)));
+    let running = child_running(&state);
     Ok(serde_json::json!({
         "running": running,
         "url": connection.as_ref().map(|item| item.url.clone()),
@@ -330,7 +433,9 @@ fn restart_sidecar(app: AppHandle, state: State<SidecarState>) -> Result<Connect
     state.manual_restart.store(true, Ordering::SeqCst);
     kill_child(&state);
     clear_connection(&state);
-    start_sidecar(&app)
+    let connection = start_sidecar(&app)?;
+    let _ = app.emit("sidecar-ready", &connection);
+    Ok(connection)
 }
 
 #[tauri::command]
@@ -346,20 +451,20 @@ pub fn run() {
                 let _ = window.set_focus();
             }
         }))
-        .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_opener::init())
         .manage(SidecarState::default())
         .setup(|app| {
             let handle = app.handle().clone();
-            match start_sidecar(&handle) {
-                Ok(connection) => {
-                    let _ = handle.emit("sidecar-ready", connection);
+            thread::spawn(move || {
+                match start_sidecar(&handle) {
+                    Ok(connection) => {
+                        let _ = handle.emit("sidecar-ready", connection);
+                    }
+                    Err(error) => {
+                        let _ = handle.emit("sidecar-error", &error);
+                    }
                 }
-                Err(error) => {
-                    let _ = handle.emit("sidecar-error", &error);
-                }
-            }
-            thread::spawn(move || monitor(handle));
+                monitor(handle);
+            });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -381,6 +486,7 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::net::TcpListener;
 
     #[test]
     fn parses_success_status_lines() {
@@ -398,5 +504,64 @@ mod tests {
     #[test]
     fn restart_backoff_is_bounded() {
         assert_eq!(Backoff::new(500, 3).delays(), vec![500, 1000, 2000]);
+    }
+
+    #[test]
+    fn health_probe_accepts_200() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut buffer = [0u8; 512];
+            let _ = stream.read(&mut buffer);
+            let _ = stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n");
+        });
+        let connection = connection_info("127.0.0.1", port, "token");
+        assert!(health_ok(&connection));
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn stop_sidecar_removes_endpoint_and_child() {
+        let data_dir = std::env::temp_dir().join(format!("fm27lab-stop-{}", std::process::id()));
+        let agent = data_dir.join("agent");
+        std::fs::create_dir_all(&agent).unwrap();
+        let endpoint = agent.join("endpoint.json");
+        std::fs::write(&endpoint, "{}").unwrap();
+        let state = SidecarState::default();
+        *state.data_dir.lock().unwrap() = Some(data_dir.clone());
+        let mut command = if cfg!(windows) {
+            let mut command = Command::new("cmd");
+            command.args(["/C", "exit", "0"]);
+            command
+        } else {
+            let mut command = Command::new("sh");
+            command.args(["-c", "exit 0"]);
+            command
+        };
+        *state.child.lock().unwrap() = Some(command.spawn().unwrap());
+        stop_sidecar(&state);
+        assert!(!endpoint.exists());
+        assert!(state.child.lock().unwrap().is_none());
+        let _ = std::fs::remove_dir_all(data_dir);
+    }
+
+    #[test]
+    fn shutdown_posts_bearer_token() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut buffer = [0u8; 1024];
+            let read = stream.read(&mut buffer).unwrap();
+            let request = String::from_utf8_lossy(&buffer[..read]).to_string();
+            let _ = stream.write_all(b"HTTP/1.1 202 Accepted\r\nContent-Length: 0\r\n\r\n");
+            request
+        });
+        let connection = connection_info("127.0.0.1", port, "secret-token");
+        assert!(post_shutdown(&connection));
+        let request = server.join().unwrap();
+        assert!(request.contains("POST /api/shutdown"));
+        assert!(request.contains("Bearer secret-token"));
     }
 }

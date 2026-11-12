@@ -1,4 +1,8 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { invoke, isTauri } from "@tauri-apps/api/core";
+import type { UnlistenFn } from "@tauri-apps/api/event";
+import { listen } from "@tauri-apps/api/event";
+import { useEffect, useState } from "react";
 import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 
 import { AppContext } from "./app-context";
@@ -6,6 +10,7 @@ import { Rail } from "./components/Rail";
 import { RunBar } from "./components/RunBar";
 import { TopBar } from "./components/TopBar";
 import { apiJson, type Health } from "./lib/api";
+import type { Connection } from "./lib/connection";
 import { loadConnection } from "./lib/connection";
 import { LibraryPage } from "./pages/LibraryPage";
 import { PlayersPage } from "./pages/PlayersPage";
@@ -27,6 +32,8 @@ function titleFor(pathname: string): string {
 
 export function App() {
   const location = useLocation();
+  const queryClient = useQueryClient();
+  const [lifecycleError, setLifecycleError] = useState<string | null>(null);
   const connection = useQuery({
     queryKey: ["connection"],
     queryFn: loadConnection,
@@ -39,15 +46,65 @@ export function App() {
     enabled: connection.data != null,
     retry: 1,
   });
+
+  useEffect(() => {
+    if (!isTauri()) return;
+    let disposed = false;
+    const unlisteners: UnlistenFn[] = [];
+    const subscribe = async () => {
+      const ready = await listen<Connection>("sidecar-ready", (event) => {
+        setLifecycleError(null);
+        queryClient.setQueryData(["connection"], event.payload);
+        void queryClient.invalidateQueries({ queryKey: ["health"] });
+      });
+      if (disposed) ready();
+      else unlisteners.push(ready);
+      const degraded = await listen<string>("sidecar-down", (event) => {
+        setLifecycleError(String(event.payload));
+        queryClient.setQueryData(["connection"], null);
+        queryClient.removeQueries({ queryKey: ["health"] });
+      });
+      if (disposed) degraded();
+      else unlisteners.push(degraded);
+      const failed = await listen<string>("sidecar-error", (event) => {
+        setLifecycleError(String(event.payload));
+        queryClient.setQueryData(["connection"], null);
+        queryClient.removeQueries({ queryKey: ["health"] });
+      });
+      if (disposed) failed();
+      else unlisteners.push(failed);
+      const stopped = await listen<string>("sidecar-failed", (event) => {
+        setLifecycleError(String(event.payload));
+        queryClient.setQueryData(["connection"], null);
+        queryClient.removeQueries({ queryKey: ["health"] });
+      });
+      if (disposed) stopped();
+      else unlisteners.push(stopped);
+    };
+    void subscribe();
+    return () => {
+      disposed = true;
+      for (const unlisten of unlisteners) unlisten();
+    };
+  }, [queryClient]);
+
   const connectionError =
-    connection.error instanceof Error
+    lifecycleError ??
+    (connection.error instanceof Error
       ? connection.error.message
       : health.error instanceof Error
         ? health.error.message
-        : null;
-  const refresh = () => {
-    void connection.refetch();
-    void health.refetch();
+        : null);
+  const refresh = async () => {
+    if (isTauri()) {
+      try {
+        await invoke("restart_sidecar");
+      } catch (error) {
+        setLifecycleError(String(error));
+      }
+    }
+    await queryClient.invalidateQueries({ queryKey: ["connection"] });
+    await queryClient.invalidateQueries({ queryKey: ["health"] });
   };
 
   return (
@@ -56,7 +113,9 @@ export function App() {
         connection: connection.data ?? null,
         health: health.data ?? null,
         connectionError,
-        refresh,
+        refresh: () => {
+          void refresh();
+        },
       }}
     >
       <div className="app-shell">

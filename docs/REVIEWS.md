@@ -16,9 +16,10 @@
 | 2026-11-12 | sidecar 基础切片 | fm27lab/ 与 pyproject.toml | FAIL | 首轮：迁移非原子、health 误报空库、404/405/500 错误封套缺失、SQLite 连接未确定性关闭、缺少服务端 Origin 校验、测试覆盖不足、Settings repr 泄露 token。已修复。 |
 | 2026-11-12 | 设计文档第七轮 | 同上 | FAIL | 第七轮：`::1` 合法但 sidecar 只绑定 IPv4；Windows endpoint ACL 未收紧；radius-tag/text-wrap/数字输入等 Minor。已修复。 |
 | 2026-11-12 | 设计文档第八轮 | 同上 | FAIL | 第八轮：Tauri 安装包无 sidecar 资源/构建；supervisor 无健康检查/自动重启/退出清理；window minWidth 与 1024 断点冲突；CSP null；无 Cargo.lock 与 src-tauri 测试；ACL 失败残留。已修复，待第九轮复审。 |
-| 2026-11-12 | 设计文档第九轮 | 同上 | 待审 | 等待 design-reviewer 第九轮结果。 |
+| 2026-11-12 | 设计文档第九轮 | 同上 | FAIL | 第九轮：manifest 仍缺 5 个新文件；React 未监听 Tauri 事件；重复 ready/计数；src-tauri 进程测试不足；Windows CI 未运行。已修复/待复审。 |
+| 2026-11-12 | 设计文档第十轮 | 同上 | 待审 | 等待 design-reviewer 第十轮结果。 |
 | 2026-11-12 | sidecar 基础切片复审 | 同上 | FAIL | 复审：CLI 丢弃 FM27LAB_DEV、空 FM27LAB_DATA 落到 CWD、迁移拆分不支持一行多语句、wheel 无 fm27lab 入口；另有 upsert/错误封套测试不足。已修复。 |
-| 2026-11-12 | sidecar 基础切片第三轮 | 同上 | PASS | 27 项测试通过；I1-I4 全闭环；剩余路径别名/CLI host-port/迁移排序/测试超时等 Minor，已继续修复。 |
+| 2026-11-12 | sidecar 基础切片第三轮 | 同上 | PASS | 27 项测试通过；I1-I4 全闭环；剩余路径别名/CLI host-port/迁移排序/测试超时等 Minor，已继续修复；当前 28 项。 |
 
 ## 审核规则
 
