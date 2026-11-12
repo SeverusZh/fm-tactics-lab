@@ -52,8 +52,8 @@
 
 ## Phase 1 领域模块
 
-- [~] scenario 23 人归一化已实现并 PASS；catalog 与完整 schema 校验待后续。
-- [ ] tactics 双阶段与职责校验。
+- [x] catalog 快照与 scenario 23 人归一化；完整 schema 修复待 service 接入。
+- [x] tactics 双阶段、角色阶段/资格上下文、职责与指令校验。
 - [ ] setpieces 模型与编码。
 - [x] pool 抽签、轮战与真实名单应用已实现并 PASS。
 - [x] roster 统一 23 人策略、确定性重映射与真实名单应用。
