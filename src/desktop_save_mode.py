@@ -17,13 +17,10 @@ import shutil
 from functools import lru_cache
 import collections
 import desktop_cache_index
-import desktop_saved_fixtures
 import desktop_opponent_scope
 import desktop_recovery_sources
 import desktop_ai_state
-import desktop_generation_catalog
 import desktop_static_plans
-import desktop_observed_plans
 import desktop_real_generation
 import desktop_real_library
 import desktop_coach_presets
@@ -262,20 +259,6 @@ class SaveLibrary:
             finally:
                 if r.poll()is None:r.terminate();r.wait(timeout=10)
         if r.returncode or not request.with_suffix('.done.json').exists():raise ValueError('所选对手球员属性读取失败，详情见 '+request.with_suffix('.log').name)
-
-    def club(self, key, club):
-        folder=self.folder(key)
-        data = dataset(folder/'dataset.json')
-        club = int(club)
-        self.ensure_rosters(folder,[club])
-        players = [p for p in read(folder/'rosters'/f'{club}.json') if p.get('unique_id')is not None]
-        if len(players)<11:
-            raise ValueError('该队不足11名已解析球员')
-        return {'players':[{'uid':p['unique_id'],'name':p['name'],'positions':p['positions'],'ca':p['ability']['current']} for p in players],
-                'tactics':[{'index':i,'name':t['name'],'team_id':t['team_id'],'available':bool(t.get('raw_plan'))}
-                           for i,t in enumerate(data['tactics']) if t.get('club_uid')==club and t.get('team_slot')==0],
-                'selections':[s for s in data['selections'] if s.get('club_uid')==club and s.get('team_slot')==0],
-                'source_date':data['date']}
 
     def _source(self, key, folder, data):
         path=read(folder/'selected_source.json')['path']if(folder/'selected_source.json').exists()else data['source']
@@ -1107,56 +1090,6 @@ class SaveLibrary:
             'match_roster_count':scenario['teams'][side].get('roster_size',0),
             'notice':'主队球员名单与属性已覆盖为该存档球队的当前一线队；战术、定位球套路与球队名称保持不变。'}}
 
-    def load_team(self, key, club, index, selected, side, scenario, substitutes=None):
-        folder=self.folder(key);data=dataset(folder/'dataset.json')
-        app=self.app
-        scenario=app.validate_scenario(scenario)
-        side=app.integer(side,0,1,'球队')
-        club=int(club)
-        people={p['unique_id']:p for p in read(folder/'rosters'/f'{club}.json') if p.get('unique_id') is not None}
-        tactic=data['tactics'][index] if type(index) is int and 0<=index<len(data['tactics']) else None
-        if not tactic or tactic.get('club_uid')!=club or tactic.get('team_slot')!=0:
-            raise ValueError('请选择该队已解析的一线队存储战术')
-        if selected is None:
-            starts=sorted((s for s in data['selections'] if s.get('club_uid')==club and s.get('team_slot')==0 and not s['substitute']),key=lambda s:s['slot'])
-            automatic=copy.deepcopy(scenario['teams'][side])
-            self.apply_plan(automatic,self.parsed_plan(key,index))
-            desktop_static_plans.roster(self,key,club,automatic,[s.get('source_uid') for s in starts])
-            selected=[p['source_uid'] for p in automatic['players'][:11]]
-            if substitutes is None:substitutes=[p['source_uid'] for p in automatic['players'][11:automatic['roster_size']]]
-        if len(selected)!=11 or len(set(selected))!=11 or any(u not in people for u in selected):
-            raise ValueError('首发必须是该队11名不同的已解析球员')
-        team=scenario['teams'][side]
-        self.apply_plan(team,self.parsed_plan(key,index))
-        setpiece_count=0
-        setpiece_warnings=[]
-        for kind, rows in data.get('setpieces',{}).get(str(tactic['team_id']),{}).items():
-            label=app.setpieces.TYPE_NAMES[int(kind)]
-            variants=[{**row,'name':row['name'] or f'{label} {i+1}'} for i,row in enumerate(rows)]
-            current=team['setpieces']
-            candidate={**current,'routines':{**current['routines'],kind:variants}}
-            try:
-                team['setpieces']=app.setpieces.normalize(candidate,side,len(team['players']))
-            except ValueError as error:
-                setpiece_warnings.append(f'{label}保留战术板原设置（{error}）')
-            else:
-                setpiece_count+=len(variants)
-        team['squad']=[]
-        for p in people.values():
-            values,profile=self.player_values(p)
-            team['squad'].append({'name':p['name'],'source_uid':p['unique_id'],'attributes':values,'initial_attributes':values[:],'native_profile':profile})
-        team.update(captains=[],takers={k:[] for k in app.TAKER_KEYS},tactic_name=tactic['name'])
-        c=next(c for c in data['clubs'] if c['uid']==club)
-        team['name']=c.get('short_name') or c['name']
-        result=self.select_squad(scenario,side,selected,substitutes or [],initial=True)
-        setpiece_notice=f'已载入 {setpiece_count} 套存档定位球套路。' if setpiece_count else '定位球套路沿用战术板设置。'
-        return {'scenario':result,'source':{'save_id':key,'club_uid':club,'date':data['date'],
-            'tactic_index':index,'tactic_name':tactic['name'],'selected_tactic_confirmed':False,
-            'notice':'战术来自存档保存方案，名单按当前球队和位置补齐。属性为存档当天，体能、士气等使用统一开赛条件。'
-                     +setpiece_notice+' '+'。'.join(setpiece_warnings),
-            'setpiece_routine_count':setpiece_count,
-            'roster_count':len(people),'match_roster_count':result['teams'][side]['roster_size']}}
-
     def select_squad(self, scenario, side, starters, substitutes, initial=False):
         app=self.app
         if not initial:scenario=app.validate_scenario(scenario)
@@ -1184,161 +1117,3 @@ class SaveLibrary:
 
     OPPONENT_PROFILE='coach-preference-presets-v20'
 
-    def opponent_report(self, path):
-        if not path.exists():return None
-        value=read(path)
-        if value.get('recovery_profile')!=self.OPPONENT_PROFILE:return None
-        return value if value.get('binding')==desktop_coach_presets.binding(self,path.parent) else None
-
-    def inspect_opponents(self, key, club):
-        folder=self.folder(key);self.check_binding(folder);club=int(club)
-        retained=self.opponent_report(folder/f'opponents_{club}.json')
-        return retained if retained is not None else desktop_coach_presets.report(self,key,club)
-
-    def begin_opponents(self, key, club):
-        folder=self.folder(key);club=int(club)
-        self.check_binding(folder)
-        path=folder/f'opponents_{club}.json'
-        progress=folder/f'opponent_progress_{club}.json'
-        retained=self.opponent_report(path)
-        if retained is not None:return {'status':'complete',**retained}
-        if progress.exists():
-            state=read(progress)
-            if state.get('status')=='cancelled':
-                progress.unlink()
-            elif state.get('status')=='error'and state.get('profile')==self.OPPONENT_PROFILE:
-                return state
-        with self.lock:
-            if self.active:
-                stage=folder/'coach_presets/static_coaches/progress.json'
-                if not stage.exists():stage=folder/'coach_presets/progress.json'
-                try:current=read(stage)['stage']if stage.exists()else'正在读取同联赛教练偏好'
-                except (ValueError,KeyError):current='正在读取同联赛教练偏好'
-                return {'status':'reading','stage':current}
-            self.active=key
-            self.active_kind='opponents'
-            self.write(progress,{'status':'reading','profile':self.OPPONENT_PROFILE,'stage':'正在读取同联赛教练偏好'})
-            def scan():
-                try:
-                    if self.opponent_is_cancelled(key):raise CancelledError('已取消对手扫描')
-                    self.inspect_opponents(key,club)
-                    if self.opponent_is_cancelled(key):
-                        self.write(progress,{'status':'cancelled','profile':self.OPPONENT_PROFILE,'stage':'已取消对手扫描'})
-                    else:
-                        self.write(progress,{'status':'complete','profile':self.OPPONENT_PROFILE})
-                except CancelledError:
-                    self.write(progress,{'status':'cancelled','profile':self.OPPONENT_PROFILE,'stage':'已取消对手扫描'})
-                except Exception as error:
-                    self.write(progress,{'status':'error','profile':self.OPPONENT_PROFILE,'stage':str(error)})
-                finally:
-                    with self.lock:
-                        self.active=None
-                        self.active_kind=None
-                    with self.opponent_cancel_lock:self.opponent_cancelled.discard(key)
-            self.pool.submit(scan)
-        return {'status':'reading','stage':'正在读取教练偏好并匹配原装预设，不模拟比赛'}
-
-    def opponent_is_cancelled(self, key):
-        with self.opponent_cancel_lock:
-            return key in self.opponent_cancelled
-
-    def cancel_opponents(self, key, club):
-        club = int(club)
-        with self.lock:
-            if self.active_kind != 'opponents' or self.active != key:
-                raise ValueError('没有正在扫描的对手列表')
-        with self.opponent_cancel_lock:
-            self.opponent_cancelled.add(key)
-        return {'accepted': True, 'id': key, 'club_uid': club}
-
-    def cancel_import(self, key=None):
-        with self.lock:
-            if self.active_kind != 'import':
-                raise ValueError('没有正在解析的存档')
-            if key and key != self.active:
-                raise ValueError('存档标识不匹配')
-            self.import_cancelled = True
-            process = self.reader_process
-            active = self.active
-        if process is not None and process.poll() is None:
-            try:
-                process.kill()
-            except OSError:
-                pass
-        return {'accepted': True, 'id': active}
-
-    def opponent_team(self, key, candidate, side, own_team):
-        if str(candidate).startswith('coach:'):
-            return desktop_coach_presets.team(self,key,candidate)
-        if str(candidate).startswith('observed:'):
-            return desktop_observed_plans.team(self,key,candidate,own_team)
-        if str(candidate).startswith(('frozen:','generated:')):
-            raise ValueError('生成方案不能作为电脑球队实际使用的战术')
-        if str(candidate).startswith('stored:'):
-            return desktop_saved_fixtures.team(self,key,candidate,side,own_team)
-        folder=self.folder(key);data=dataset(folder/'dataset.json')
-        self.check_binding(folder)
-        if not re.fullmatch('[0-9a-f]{64}',str(candidate)):
-            raise ValueError('未知历史方案')
-        if not any(c['key']==candidate for c in data['caches']):
-            extra=next((e for e in desktop_recovery_sources.entries(self,folder,data) if e['key']==candidate),None)
-            if extra is None or self.app.desktop_engine.sha(folder/extra['path'])!=candidate:raise ValueError('历史方案不属于此存档或已核实的同生涯来源')
-            self.ensure_snapshot(folder,extra)
-        snapshot=read(folder/(candidate+'_input.json'))
-        original=snapshot['teams'][side]
-        team=copy.deepcopy(self.app.DEFAULT['teams'][1])
-        raw=bytes.fromhex(original['manager_tactical_hex'])
-        plan={'team_bits':original['creator_hex'][:32],'mentality':bytes.fromhex(original['creator_hex'])[37],
-              'mapping':list(raw[0x1fb4-0x2e0:0x1fb4-0x2e0+11]),'phases':[]}
-        for phase in range(2):
-            cells=[]
-            for j,h in enumerate(original['tactical_slots'][phase]):
-                b=bytes.fromhex(h);pi=original['personal_instructions'][phase][j]
-                cells.append({'position':struct.unpack_from('<I',b)[0],'role_flags':str(struct.unpack_from('<Q',b,64)[0]),
-                    'pi_flags':pi['flags'],'target_player':pi['target_player'],'target_position':pi['target_position']})
-            plan['phases'].append(cells)
-        self.apply_plan(team,plan)
-        native_club=struct.unpack_from('<I',bytes.fromhex(original['header_hex']),0x2c)[0]
-        _,_,native_to_local=self.native_club_map(folder,data)
-        club=native_to_local.get(native_club)
-        c=next(c for c in data['clubs'] if c['uid']==club)
-        desktop_static_plans.roster(self,key,club,team,[p['id'] for p in original['players']])
-        active_count=team['roster_size']
-        team.update(name=c.get('short_name') or c['name'],tactic_name='历史比赛方案 '+candidate[:8])
-        # Retarget historical individual opposition instructions by source UID,
-        # never by the carrier's unrelated native player IDs.
-        own_index={p.get('source_uid'):i for i,p in enumerate(own_team['players'][:own_team.get('roster_size',26)]) if p.get('source_uid') is not None}
-        prior_own=snapshot['teams'][1-side]['players']
-        for i,p in enumerate(prior_own):
-            current=own_index.get(p['id'])
-            if current is not None: team['opposition']['players'][current]=self.app.unpack_oi(original['opposition'][i])
-        stored_positions={r['position']:r['packed'] for r in original['opposition_positions']}
-        team['opposition']['positions']={p['id']:self.app.unpack_oi(stored_positions.get(p['mask'],0x80000)) for p in self.app.POSITIONS.values()}
-        for cells in team['phases']:
-            for cell in cells:
-                target=cell['target_player']
-                if target!=255:
-                    cell['target_player']=own_index.get(prior_own[target]['id'],255) if target<len(prior_own) else 255
-        indices={p.get('source_uid'):i for i,p in enumerate(team['players'][:active_count])}
-        keys={p['person_key']:indices[p['id']] for p in original['players'] if p['id'] in indices}
-        lists={r['offset']:r['players'] for r in original['taker_lists']}
-        def indices(offset):
-            if offset not in lists: raise ValueError('历史快照缺少主罚名单字段，请重新解析')
-            return [keys[k] for k in lists[offset] if k in keys]
-        team['captains']=indices(0x1c8)
-        team['takers']={name:indices(0x1e0 if i==0 else (i-1)*24) for i,name in enumerate(self.app.TAKER_KEYS)}
-        team['setpieces']['role_priorities']={str(g):indices(0xf0+24*g) for g in range(8)}
-        # Preserve the native historical set-piece routines, including opaque flags.
-        for variants in original['routine_variants']:
-            if not variants: continue
-            routines=[]
-            for i,r in enumerate(variants):
-                groups=[[] for _ in range(8)]
-                for g in r['groups']: groups[g['id']]=g['values'][:]
-                backups=[[0]*len(g) for g in groups]
-                for g,j,v in r['backups']: backups[g][j]=v
-                routines.append({'name':'历史套路 '+str(i+1),'opaque_flags':r['opaque_flags'],
-                    **{k:r[k] for k in ['frequency','strategy','swing','priority']},'groups':groups,'backups':backups})
-            team['setpieces']['routines'][str(variants[0]['type'])]=routines
-        team['setpieces']['throw_styles']=list(raw[0x16f0-0x2e0:0x16f3-0x2e0])
-        return team

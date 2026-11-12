@@ -97,8 +97,8 @@ async function deleteExperiment(button){
  render();
  toast('实验已删除');
 }
-const workspaceBindPrevious=bind;
-bind=function(){workspaceBindPrevious();
+const experimentBindPrevious=bind;
+bind=function(){experimentBindPrevious();
  if($('#lineup-player'))[...$('#lineup-player').options].forEach(o=>o.disabled=Number(o.value)>=team().roster_size);
  if($('#sp-strategy')&&view==='setpieces'){const select=$('#sp-strategy'),value=spCurrent().strategy;if(![...select.options].some(o=>+o.value===value)){select.add(new Option('原版存储策略（代码 '+value+'）',value));select.value=value;}}
  $$('[data-job]').forEach(b=>{const h=history.find(h=>h.id===b.dataset.job);if(h){b.textContent=(h.name||'实验 '+h.id)+' · '+h.completed+'/'+h.total;b.title=new Date(h.created*1000).toLocaleString(window.FM27I18n.language);}});

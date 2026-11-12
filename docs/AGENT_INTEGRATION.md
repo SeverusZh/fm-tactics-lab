@@ -218,6 +218,7 @@ fm27lab mcp                    以 stdio 启动 MCP sidecar
 | POST | /api/agent/v1/runs | scenario、reference、seeds、workers、event_details、name | 202 id、total、workers、mode、queued、queue_position |
 | POST | /api/agent/v1/engine/select | game_root | 引擎兼容状态 |
 | POST | /api/agent/v1/validate | scenario | scenario、records |
+| POST | /api/agent/v1/selection | scenario、lineup、bench | scenario |
 | POST | /api/agent/v1/repair | scenario | scenario、changes |
 | POST | /api/agent/v1/phase-plan | scenario | schema 4 |
 | GET | /api/agent/v1/jobs/{id}/logs/{name} | 无 | 原始 JSONL，供诊断 |
@@ -238,10 +239,10 @@ manifest 示例：
   "scenario_schema": 3,
   "scenario_view_schema": 4,
   "batch_schema": 1,
+  "capabilities": ["free_run", "comparison", "fmf", "repair", "resume", "cancel", "idempotency"],
   "limits": {
     "max_seeds": 10000,
     "max_workers": 256,
-    "max_opponents": 40,
     "max_body_bytes": 8000000,
     "max_import_bytes": 8000000,
     "max_draft_bytes": 5242880
@@ -698,7 +699,7 @@ results_summary job_id
 | --- | --- | --- |
 | A1 | 发现与鉴权 | 无 token 访问 Agent 端点返回 401；错误 Host 返回 403；UI 页面正常 |
 | A2 | 清单与 schema | manifest 字段齐全；schema 包可解析；主版本不匹配时 CLI 与 MCP 明确报错 |
-| A3 | 草案 | 六种来源均可创建；单步与批量编辑、校验、删除、列表、选项查询均通过；非法编辑不落盘 |
+| A3 | 草案 | 五种来源均可创建；单步与批量编辑、校验、删除、列表、选项查询均通过；非法编辑不落盘 |
 | A4 | 自由模式 | 通过 CLI 与 MCP 各完成一次 A/B 对比；多候选提交进入队列并按序执行；结果含 metrics 与 paired |
 | A6 | 任务 | 列表分页、详情分页、取消、续跑、删除、重命名、导出均通过 |
 | A7 | 结果 | 汇总、逐场分页、单场事件、跨任务配对、CSV 双方列与进球时间线正确 |
@@ -720,7 +721,7 @@ results_summary job_id
 | --- | --- | --- |
 | P0 服务端契约 | endpoint.json、Host 与 token、Agent 命名空间、manifest 与 schema、错误封套、分页、幂等、health、shutdown、save cancel、headless | A1、A2、A6 的分页部分、A9、A10、A11、A12 通过 |
 | P1 CLI 与草案 | src/fm27_agent 客户端、草案存储、CLI 命令、mock server 契约测试 | A3、A4 的 CLI 链路、A7、A8 的 CLI 链路通过 |
-| P2 MCP | stdio sidecar、tools、resources、prompts、进度与取消、配置生成 | A4 的 MCP 链路、A5、A14 通过 |
+| P2 MCP | stdio sidecar、tools、resources、prompts、进度与取消、配置生成 | A4 的 MCP 链路、A14 通过 |
 | P3 收尾 | 打包与入口脚本、文档、Windows 端到端验收 | A13、A15 与全量回归通过 |
 
 改动清单：

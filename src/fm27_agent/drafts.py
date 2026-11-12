@@ -170,7 +170,7 @@ class DraftService:
             origin = {"kind": "inline", "scenario_path": params.get("scenario_path")}
         else:
             raise AgentError("validation_failed",
-                             "source 必须是 default、save、fmf、job、inline 或 draft")
+                             "source 必须是 default、fmf、job、inline 或 draft")
         scenario = self._normalize(scenario)
         draft = {
             "schema": 1,

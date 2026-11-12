@@ -197,7 +197,7 @@ class _Handler(BaseHTTPRequestHandler):
                     "message": "ok", "disposition": "verified",
                     "profile": "fm27_desktop_2493426_adapter_v1",
                 },
-                "active_job": None,
+                "active_job": None, "save_active": None,
                 "server": {"pid": 1, "port": self.state.port, "api": "fm27lab/v1"},
             })
         if path == "/api/agent/v1/catalog":

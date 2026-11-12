@@ -42,7 +42,7 @@ playersView=function(){
  const bulk=fragment.querySelector('.team-bulk-controls')?.outerHTML||'';
  return `${toolbar()}<div class="player-layout"><aside class="card player-list"><div style="padding:12px"><b>完整一线队 · ${t.squad.length}人</b><p class="tiny muted">未入选球员保留在这里，不参与模拟。</p><button class="button small" id="squad-selection">排首发／选替补</button></div>${t.squad.map((p,i)=>`<button data-squad-player="${i}" class="player-item ${i===squadPlayer?'active':''}"><span class="number">${i+1}</span><span>${esc(p.name)}<small>${esc(squadStatus(p,t))}</small></span></button>`).join('')}</aside><section class="card"><div class="card-body">${bulk}<h2>${esc(p.name)}</h2><p class="tiny muted">${esc(squadStatus(p,t))} · CA ${p.native_profile?.current_ability??'未知'} · 所有属性可编辑，未入选球员的修改不会进入本场模拟。</p><label>姓名 <input id="squad-name" maxlength="48" value="${esc(p.name)}"></label><label class="raw-toggle"><input id="raw" type="checkbox" ${raw?'checked':''}>内部原值</label><div class="squad-attributes">${catalog.attributes.map(a=>`<label>${esc(a.label)}<input type="number" data-squad-attribute="${a.id}" value="${a.id<15||raw?p.attributes[a.id]:p.attributes[a.id]/5}" min="0" max="${a.id<15||!raw?20:100}" step="${a.id<15||raw?1:0.2}"></label>`).join('')}</div><button class="button small" id="squad-attribute-reset">恢复该球员导入属性</button></div></section></div>`;
 };
-showSquadSelection=function(){
+function showSquadSelection(){
  const t=state.teams[0];
  if(!t.squad){toast('当前方案没有完整一线队名单');return;}
  syncSquadFromMatch(t);
@@ -63,7 +63,7 @@ showSquadSelection=function(){
    dialog.close();toast(`比赛名单：11名首发、${substitutes.length}名替补；其余球员不参与模拟`);
   }catch(e){toast(e.message);}
  };dialog.onclose=()=>dialog.remove();dialog.showModal();
-};
+}
 const squadBindPrevious=bind;
 bind=function(){squadBindPrevious();
  if($('#board-match-squad'))$('#board-match-squad').onclick=showSquadSelection;

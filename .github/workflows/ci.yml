@@ -43,6 +43,8 @@ jobs:
       - run: pnpm --dir web run typecheck
       - run: pnpm --dir web test
       - run: pnpm --dir web run build
+      - run: node tests/test_i18n.cjs
+      - run: node tests/test_workspace_scripts.cjs
 
   rust-core:
     runs-on: ubuntu-latest

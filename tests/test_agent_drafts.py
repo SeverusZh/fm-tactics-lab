@@ -90,11 +90,13 @@ class DraftTests(unittest.TestCase):
         stored = self.drafts.scenario(inline["draft_id"])
         self.assertEqual(len(stored["away_tactic_pool"]["entries"]), 2)
 
-    def test_create_from_save_fmf_job_inline(self):
-        saved = self.drafts.create("save", save_id="a" * 16, club_uid=1, tactic_index=0)
-        self.assertEqual(saved["source"]["kind"], "save")
+    def test_create_from_fmf_job_inline_and_reject_save(self):
+        with self.assertRaises(AgentError) as caught:
+            self.drafts.create("save", save_id="a" * 16, club_uid=1, tactic_index=0)
+        self.assertIn("default", str(caught.exception))
+        base = self.drafts.create("default")
         fmf = self.drafts.create("fmf", side=0, file_base64="QUFB",
-                                 base_draft_id=saved["draft_id"])
+                                 base_draft_id=base["draft_id"])
         self.assertEqual(fmf["source"]["kind"], "fmf")
         job = self.client.run(self.client.defaults()["scenario"], seeds=[1])
         from_job = self.drafts.create("job", job_id=job["id"], variant="B")

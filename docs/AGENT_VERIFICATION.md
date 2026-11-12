@@ -35,7 +35,7 @@ python3 -m unittest discover -s tests -v
 
 - test_agent_contract：token、Host、Cookie、错误封套、分页、幂等、发现文件与启动脚本。
 - test_agent_client：发现、请求、错误映射、任务等待、分页、种子展开。
-- test_agent_drafts：六种来源、语义编辑、校验回滚、列表与删除。
+- test_agent_drafts：五种来源、语义编辑、校验回滚、列表与删除。
 - test_agent_server：路由、清单、分页、幂等、忙碌冲突、shutdown；队列位置、排队取消与全局串行闸门。
 - test_tactics_server_queue：离线加载服务端，验证 UI 409、Agent FIFO 串行、排队取消立即落 cancelled、池展开与 provenance、续跑忙时冲突。
 - test_tactics_server_queue 与 test_tactic_pool 覆盖池场景：A/B 同抽签、逐场抽签记录、CSV 抽签列、跨任务配对保护。
@@ -123,7 +123,7 @@ python3 -m unittest discover -s tests
 
 ## 8. 已知限制
 
-- A4、A5、A8、A16–A18 已在 Windows 实机完成；A15 的 4/8/16 场完整基线仍未单独测量。
+- A4、A8、A16–A18 已在 Windows 实机完成；A15 的 4/8/16 场完整基线仍未单独测量。
 - 存档读取依赖 fmsave 0.9.0；不同构建或损坏存档仍需按 TROUBLESHOOTING.md 排查。
 - MCP 协议版本支持 2025-06-18 与 2024-11-05；其他版本按客户端协商处理。
 - 定位球片段实验、实验执行力与原生 AI 生成对手暂以完整场景字段提交，不提供独立 MCP 工具。

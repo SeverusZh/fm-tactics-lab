@@ -32,7 +32,6 @@ import fm27_match_events
 import desktop_generation_protocol
 import desktop_locale
 import desktop_source_plans
-from desktop_storage import require_space
 import fm27_agent_contract as agent_contract
 import fm27_agent_server as agent_server
 

@@ -143,8 +143,8 @@ endpoint.json 包含：
 能力面：
 
 - 21 个工具：状态、引擎、草案、运行、任务、结果与战术文件。
-- 3 个静态资源与 5 个资源模板：manifest、catalog、status、draft、job、save。
-- 3 个 prompt：单变量战术实验、基线对比、多对手扫描。
+- 5 个静态资源与 4 个资源模板：manifest、catalog、status、paths、free-mode 工作流，以及 draft、job、job export、job logs。
+- 2 个 prompt：单变量战术实验、基线对比。
 - 支持进度通知、取消与结构化错误。
 
 ## 7. 典型工作流
@@ -174,13 +174,6 @@ results_summary
 
 同一任务的 A/B 共享一次抽签；summary 的 tactic_pool.draws 给出每套客队战术的抽中次数。跨任务 results_compare 会核对抽签，抽中不同战术时返回 comparable=false。
 
-
-```text
-draft_create source=save save_id club_uid tactic_index
-draft_validate
-job_wait
-results_summary
-```
 
 ## 8. 数据、日志与安全
 

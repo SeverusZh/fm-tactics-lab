@@ -12,7 +12,6 @@ import re
 import secrets
 import sys
 import threading
-import time
 from pathlib import Path
 from urllib import parse as urlparse
 
@@ -969,9 +968,8 @@ class McpServer:
 
     def _tool_draft_create(self, args):
         source = args["source"]
-        keys = ("save_id", "club_uid", "tactic_index", "lineup", "bench", "side",
-                "file_base64", "file_path", "base_scenario", "base_draft_id", "job_id",
-                "variant", "scenario", "scenario_path")
+        keys = ("side", "file_base64", "file_path", "base_scenario", "base_draft_id",
+                "job_id", "variant", "scenario", "scenario_path")
         extra = {key: args[key] for key in keys if key in args}
 
         def operation(client):
