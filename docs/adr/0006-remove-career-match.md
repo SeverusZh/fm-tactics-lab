@@ -40,3 +40,11 @@
 
 - 保留隐藏入口：违背单一入口与解耦目标。
 - 保留 CLI/MCP 兼容别名：会延长双 owner 生命周期，维护者明确不需要。
+
+## 实现状态
+
+- UI 的存档对战模式、HTTP 的存档批次路由、CLI 的 career 子命令、MCP 的 career_* 工具与 schema、旧 Agent 文档段落已删除。
+- `/api/save/selection` 保留为通用比赛名单选择能力，供存档战术库名单编辑使用；它不是 career 批次入口。
+- `/api/save/apply-roster`、存档战术库导入/联赛/真实战术/入池、FMF 与自由推演保留。
+- 负向契约：旧 career 路径返回 404，旧 MCP 工具为未知工具，旧 CLI 子命令不可用，旧 UI 资源不再提供。
+- 战术执行力实验控件已拆到 `workspace-controls.js`，不再依赖存档对战状态。

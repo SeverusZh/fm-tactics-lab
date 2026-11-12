@@ -39,15 +39,15 @@
 
 目标：在新建接口与 UI 之前完成 delete-first，避免旧任务模型继续存活。
 
-- [ ] 删除 UI：`save-mode.js` 的存档对战模式、`save-mode.css` 相关样式、页面入口与 i18n 文案；保留并拆出战术执行力实验控件。
-- [ ] 删除 HTTP：`/api/save/load`、`/api/save/selection`、`/api/save/opponents`、`/api/save/preview`、`/api/save/run`、`/api/save/club`，以及 `/api/agent/v1/career/import`、`status`、`team`、`load`、`selection`、`opponents`、`preview`、`run`、`import/cancel`、`opponents/cancel` 及其任务准备路径。
-- [ ] 删除 CLI：`fm27lab career *` 全部命令。
-- [ ] 删除 MCP：`career_import`、`career_status`、`career_team`、`career_opponents`、`career_preview`、`career_cancel`、`career_run`。
-- [ ] 提供替换映射：`career_import` → `library import`；`career_status` → `library status`；`career_team` → `library club`；`career_cancel` → `library cancel`；`career_opponents`、`career_preview`、`career_run` 删除；存档球队入池走 `library pool-import`；草案来源 `save` 改走 `library load`。
-- [ ] 删除旧文档中的存档对战与 `career_*` 段落：`docs/AGENT_INTEGRATION.md`、`docs/AGENT_QUICKSTART.md`、`docs/AGENT_VERIFICATION.md`、README 截图说明；对 `docs/` 执行残留 grep 检查。
-- [ ] 删除旧测试与 schema 快照中的 `career_*`，新增负向测试：`/api/save/*` 与 `/api/agent/v1/career/*` 旧路径返回 404、旧 MCP 工具不存在、旧 CLI 子命令不存在、旧 UI 入口不存在。
-- [ ] 更新 ADR-0006、CHANGELOG 与 TODO 状态。
-- [ ] 独立审核 PASS。
+- [x] 删除 UI：`save-mode.js` 的存档对战模式、`save-mode.css` 相关样式、页面入口与 i18n 文案；战术执行力实验控件拆到 `workspace-controls.js`。
+- [x] 删除 HTTP 的 career 批次路径：`/api/save/load`、`opponents`、`preview`、`run`、`club`，以及 `/api/agent/v1/career/*` 全部路径。`/api/save/selection` 作为通用名单选择保留，并新增 `/api/agent/v1/selection`。
+- [x] 删除 CLI：`fm27lab career *` 全部命令与 `draft create --from save`。
+- [x] 删除 MCP：`career_import`、`career_status`、`career_team`、`career_opponents`、`career_preview`、`career_cancel`、`career_run` 及 save source/schema。
+- [~] 替换映射：`library import/status/club/load/pool-import` 的旧服务仍有存档战术库实现，v2 sidecar 尚未暴露；旧 career 入口已删除。
+- [x] 删除旧文档中的存档对战与 `career_*` 段落；AGENT 三份文档、README 与发布说明已同步。
+- [x] 删除旧 career 测试与 schema，新增负向测试：Agent career 路径 404、旧 MCP 工具未知、旧 CLI 子命令不可用、旧 UI 资源不存在；静态路由检查保留。
+- [~] 更新 ADR-0006、TODO；CHANGELOG 待独立审核 PASS 后写入。
+- [~] 独立审核进行中：retirement-reviewer 与 retirement-reviewer-2。
 
 ## Phase 1 领域模块
 

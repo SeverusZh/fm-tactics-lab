@@ -450,6 +450,37 @@ class ServerQueueTests(unittest.TestCase):
             module.Handler.send = original_send
             module.AGENT_TOKEN = original_token
 
+    def test_retired_career_routes_return_404(self):
+        module = self.module
+        token = "t" * 64
+        port = 8765
+        captured = []
+        original_send = module.Handler.send
+        original_token = module.AGENT_TOKEN
+        module.AGENT_TOKEN = token
+        module.Handler.send = lambda handler, value, status=200, kind=None, headers=None: \
+            captured.append((status, value))
+        try:
+            for path in ("/api/save/run", "/api/save/load", "/api/save/club",
+                         "/api/save/opponents", "/api/save/preview"):
+                body = json.dumps({}, ensure_ascii=False).encode("utf8")
+                handler = object.__new__(module.Handler)
+                handler.path = path
+                handler.headers = {
+                    "Host": f"127.0.0.1:{port}",
+                    "Origin": f"http://127.0.0.1:{port}",
+                    "Cookie": f"fm27_session={token}",
+                    "Content-Length": str(len(body)),
+                }
+                handler.rfile = io.BytesIO(body)
+                handler.wfile = io.BytesIO()
+                handler.server = types.SimpleNamespace(server_address=("127.0.0.1", port))
+                handler.do_POST()
+                self.assertEqual(captured[-1][0], 404, path)
+        finally:
+            module.Handler.send = original_send
+            module.AGENT_TOKEN = original_token
+
 
 if __name__ == "__main__":
     unittest.main()
