@@ -201,3 +201,182 @@ class PoolRepository:
             "roster": None if row["roster_json"] is None else json.loads(row["roster_json"]),
             "created_at": row["created_at"],
         }
+
+
+class DraftRepository:
+    @staticmethod
+    def _validate_name(name: Any) -> str:
+        if (
+            not isinstance(name, str)
+            or not 1 <= len(name.strip()) <= 80
+            or any(ord(c) < 32 or ord(c) == 127 for c in name)
+        ):
+            raise ValueError("草案名称无效")
+        try:
+            name.encode("utf-8")
+        except UnicodeEncodeError as error:
+            raise ValueError("草案名称无效") from error
+        return name.strip()
+
+    def __init__(self, database: Database):
+        self.database = database
+
+    @contextmanager
+    def _connection(self, connection: sqlite3.Connection | None):
+        if connection is not None:
+            yield connection, False
+        else:
+            with closing(self.database.connect()) as owned:
+                yield owned, True
+
+    def add(
+        self,
+        value: Mapping[str, Any],
+        connection: sqlite3.Connection | None = None,
+        created_at: str | None = None,
+    ) -> dict[str, Any]:
+        name, scenario_json, source_json, entry_id, stamp = self._parts(value, created_at)
+        with self._connection(connection) as (active, owned):
+            active.execute(
+                "INSERT INTO drafts(id, name, scenario_json, source_json, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (entry_id, name, scenario_json, source_json, stamp, stamp),
+            )
+            if owned:
+                active.commit()
+        return self._entry(entry_id, name, scenario_json, source_json, stamp, stamp)
+
+    def get(
+        self,
+        entry_id: str,
+        connection: sqlite3.Connection | None = None,
+    ) -> dict[str, Any] | None:
+        PoolRepository._validate_id(entry_id)
+        with self._connection(connection) as (active, _):
+            row = active.execute(
+                "SELECT id, name, scenario_json, source_json, created_at, updated_at FROM drafts WHERE id=?",
+                (entry_id,),
+            ).fetchone()
+        return None if row is None else self._row(row)
+
+    def list(self, connection: sqlite3.Connection | None = None) -> list[dict[str, Any]]:
+        with self._connection(connection) as (active, _):
+            rows = active.execute(
+                "SELECT id, name, scenario_json, source_json, created_at, updated_at "
+                "FROM drafts ORDER BY updated_at DESC, rowid DESC"
+            ).fetchall()
+        return [self._row(row) for row in rows]
+
+    def update(
+        self,
+        entry_id: str,
+        changes: Mapping[str, Any],
+        connection: sqlite3.Connection | None = None,
+    ) -> dict[str, Any] | None:
+        PoolRepository._validate_id(entry_id)
+        if not isinstance(changes, Mapping):
+            raise ValueError("草案更新必须是对象")
+        allowed = {"name", "scenario", "source"}
+        if not changes or set(changes) - allowed:
+            raise ValueError("草案更新字段无效")
+        with self._connection(connection) as (active, owned):
+            if owned:
+                active.execute("BEGIN IMMEDIATE")
+            row = active.execute(
+                "SELECT id, name, scenario_json, source_json, created_at, updated_at FROM drafts WHERE id=?",
+                (entry_id,),
+            ).fetchone()
+            if row is None:
+                if owned:
+                    active.rollback()
+                return None
+            current = self._row(row)
+            name = self._validate_name(changes.get("name", current["name"]))
+            scenario = changes.get("scenario", current["scenario"])
+            source = changes.get("source", current["source"])
+            if not isinstance(scenario, Mapping):
+                raise ValueError("草案场景必须是对象")
+            if not isinstance(source, Mapping):
+                raise ValueError("草案来源必须是对象")
+            scenario_json = PoolRepository._dump(scenario, "草案场景")
+            source_json = PoolRepository._dump(source, "草案来源")
+            stamp = datetime.now(UTC).isoformat()
+            cursor = active.execute(
+                "UPDATE drafts SET name=?, scenario_json=?, source_json=?, updated_at=? WHERE id=?",
+                (name, scenario_json, source_json, stamp, entry_id),
+            )
+            if cursor.rowcount == 0:
+                if owned:
+                    active.rollback()
+                return None
+            if owned:
+                active.commit()
+        return self._entry(entry_id, name, scenario_json, source_json, current["created_at"], stamp)
+
+    def delete(
+        self,
+        entry_id: str,
+        connection: sqlite3.Connection | None = None,
+    ) -> bool:
+        PoolRepository._validate_id(entry_id)
+        with self._connection(connection) as (active, owned):
+            cursor = active.execute("DELETE FROM drafts WHERE id=?", (entry_id,))
+            if owned:
+                active.commit()
+            return cursor.rowcount > 0
+
+    @staticmethod
+    def _parts(value: Mapping[str, Any], created_at: str | None):
+        if not isinstance(value, Mapping):
+            raise ValueError("草案必须是对象")
+        name = DraftRepository._validate_name(value.get("name"))
+        scenario = value.get("scenario")
+        source = value.get("source", {})
+        if not isinstance(scenario, Mapping):
+            raise ValueError("草案场景必须是对象")
+        if not isinstance(source, Mapping):
+            raise ValueError("草案来源必须是对象")
+        entry_id = value.get("id")
+        if entry_id is None:
+            entry_id = secrets.token_hex(8)
+        PoolRepository._validate_id(entry_id)
+        stamp = datetime.now(UTC).isoformat() if created_at is None else created_at
+        if (
+            not isinstance(stamp, str)
+            or not 1 <= len(stamp) <= 64
+            or any(ord(c) < 32 or ord(c) == 127 for c in stamp)
+        ):
+            raise ValueError("草案时间无效")
+        try:
+            datetime.fromisoformat(stamp)
+        except ValueError as error:
+            raise ValueError("草案时间无效") from error
+        return (
+            name,
+            PoolRepository._dump(scenario, "草案场景"),
+            PoolRepository._dump(source, "草案来源"),
+            entry_id,
+            stamp,
+        )
+
+    @staticmethod
+    def _entry(entry_id, name, scenario_json, source_json, created_at, updated_at):
+        return {
+            "id": entry_id,
+            "name": name,
+            "scenario": json.loads(scenario_json),
+            "source": json.loads(source_json),
+            "created_at": created_at,
+            "updated_at": updated_at,
+        }
+
+    @classmethod
+    def _row(cls, row: sqlite3.Row) -> dict[str, Any]:
+        return cls._entry(
+            row["id"],
+            row["name"],
+            row["scenario_json"],
+            row["source_json"],
+            row["created_at"],
+            row["updated_at"],
+        )

@@ -63,7 +63,7 @@
 
 ## Phase 2 存储与引擎
 
-- [~] SQLite 连接、迁移与仓储：settings、pool_entries 与 `/api/pools` CRUD 已实现；saves/jobs/job_runs/drafts/artifacts/idempotency 待后续。
+- [~] SQLite 连接、迁移与仓储：settings、pool_entries、drafts 与 `/api/pools` 已实现；drafts HTTP、saves/jobs/job_runs/artifacts/idempotency 待后续。
 - [ ] 空库启动与只读旧目录探测。
 - [ ] 原生宿主适配器与 counted-session 能力协商。
 - [ ] 1–256 路调度、取消、续跑、磁盘/内存预检。
