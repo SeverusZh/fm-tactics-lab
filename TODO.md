@@ -57,7 +57,7 @@
 - [ ] setpieces 模型与编码。
 - [x] pool 抽签、轮战与真实名单应用已实现并 PASS。
 - [x] roster 统一 23 人策略、确定性重映射与真实名单应用。
-- [ ] results 指标、配对、分布与 CSV。
+- [x] results 胜平负、Wilson、进失球、xG/xGA、控球、射门、传球与同种子配对差值；分布/CSV 待 service。
 - [ ] 每个模块的单元测试与性质测试。
 - [ ] 独立审核 PASS。
 
