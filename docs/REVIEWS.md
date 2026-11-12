@@ -23,7 +23,8 @@
 | 2026-11-12 | sidecar 基础切片第三轮 | 同上 | PASS | 27 项测试通过；I1-I4 全闭环；剩余路径别名/CLI host-port/迁移排序/测试超时等 Minor，已继续修复；当前 28 项。 |
 | 2026-11-12 | React/Tauri 壳层 | web/、src-tauri/、CI | FAIL | 首轮：CSP 阻断 IPC、Child 移出共享状态、退出不等待、前端未监听事件、before 命令工作目录、resources 映射、启动超时、运行期健康、stderr、CI 与前端测试不足。 |
 | 2026-11-12 | React/Tauri 壳层第二轮 | 同上 | FAIL | 第二轮：CSP IPC 与前端事件已修；但 stop_sidecar 有确定的 Rust 编译错误、stopping/restart 竞态、健康检查误杀新 child、启动失败 endpoint 残留、TopBar 无条件重启、双重启动、minWidth 与测试缺口。已修复。 |
-| 2026-11-12 | React/Tauri 壳层第三轮 | 同上 | 待审 | 等待 shell-reviewer 第三轮结果。 |
+| 2026-11-12 | React/Tauri 壳层第三轮 | 同上 | FAIL | 第三轮：stop 编译错误已修、stopping/健康误杀/TopBar/minWidth/CSP/endpoint 主路径已闭环；但 dead-child 上限仍 return、restart 与 monitor backoff 仍可能双启、supervisor 竞态测试与 Windows 编译证据缺失。已修复并发问题，待复审。 |
+| 2026-11-12 | React/Tauri 壳层第四轮 | 同上 | 待审 | 等待 shell-reviewer 第四轮结果。 |
 
 ## 审核规则
 
@@ -32,6 +33,6 @@
 - 先列 findings，再列已验证项，最后给结论。
 - Critical 或 Important 未闭环时不得标记 PASS。
 - 审核通过不等于整体发布就绪；发布仍需最终验收与 Windows 真机验证。
-- 现有 276 项 Python 测试来自旧 `tests/` 基线，不是 v2 架构证据；新 `fm27lab/tests` 当前 28 项测试，覆盖包版本、CLI 环境继承、配置/路径边界、SQLite 迁移/事务、HTTP 健康、鉴权、错误封套、Origin、ACL 失败清理与 sidecar serve 集成；Vitest 当前 4 项。
+- 现有 276 项 Python 测试来自旧 `tests/` 基线，不是 v2 架构证据；新 `fm27lab/tests` 当前 28 项测试，覆盖包版本、CLI 环境继承、配置/路径边界、SQLite 迁移/事务、HTTP 健康、鉴权、错误封套、Origin、ACL 失败清理与 sidecar serve 集成；Vitest 当前 8 项。
 - Tauri sidecar supervisor 的静态实现已存在，但 Linux 无 WebKitGTK，Windows CI 的 `cargo build`/`cargo test`/安装包构建是唯一编译证据。PyInstaller onedir sidecar 已在 Linux 构建并通过 ready/health/shutdown 冒烟测试。
 - Rust 核心 crate 当前 4 项 cargo test 通过；React 壳当前 8 项 Vitest 通过、类型检查与生产构建通过。Tauri 壳在 Linux 无 WebKit 依赖，Windows 构建仍是发布门槛。

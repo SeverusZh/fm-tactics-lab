@@ -174,6 +174,13 @@ fn child_running(state: &SidecarState) -> bool {
     }
 }
 
+fn should_start(state: &SidecarState) -> bool {
+    !state.stopping.load(Ordering::SeqCst)
+        && !state.paused.load(Ordering::SeqCst)
+        && !state.restart_in_progress.load(Ordering::SeqCst)
+        && !child_running(state)
+}
+
 fn take_dead_child(state: &SidecarState) -> Option<Child> {
     let mut guard = state.child.lock().ok()?;
     let exited = guard
@@ -329,8 +336,9 @@ fn monitor(app: AppHandle) {
             let _ = app.emit("sidecar-down", "sidecar exited");
             let attempt = state.restarts.fetch_add(1, Ordering::SeqCst) + 1;
             if attempt > MAX_RESTARTS {
+                state.paused.store(true, Ordering::SeqCst);
                 let _ = app.emit("sidecar-failed", "restart limit reached");
-                return;
+                continue;
             }
             let delay = Backoff::new(500, MAX_RESTARTS)
                 .delays()
@@ -338,8 +346,8 @@ fn monitor(app: AppHandle) {
                 .copied()
                 .unwrap_or(4_000);
             thread::sleep(Duration::from_millis(delay));
-            if state.stopping.load(Ordering::SeqCst) {
-                return;
+            if !should_start(&state) {
+                continue;
             }
             match start_sidecar(&app) {
                 Ok(connection) => {
@@ -368,8 +376,8 @@ fn monitor(app: AppHandle) {
                 .copied()
                 .unwrap_or(4_000);
             thread::sleep(Duration::from_millis(delay));
-            if state.stopping.load(Ordering::SeqCst) {
-                return;
+            if !should_start(&state) {
+                continue;
             }
             match start_sidecar(&app) {
                 Ok(connection) => {
@@ -566,6 +574,20 @@ mod tests {
         let connection = connection_info("127.0.0.1", port, "token");
         assert!(health_ok(&connection));
         server.join().unwrap();
+    }
+
+    #[test]
+    fn start_gate_blocks_stopping_paused_and_restarting() {
+        let state = SidecarState::default();
+        assert!(should_start(&state));
+        state.stopping.store(true, Ordering::SeqCst);
+        assert!(!should_start(&state));
+        state.stopping.store(false, Ordering::SeqCst);
+        state.paused.store(true, Ordering::SeqCst);
+        assert!(!should_start(&state));
+        state.paused.store(false, Ordering::SeqCst);
+        state.restart_in_progress.store(true, Ordering::SeqCst);
+        assert!(!should_start(&state));
     }
 
     #[test]

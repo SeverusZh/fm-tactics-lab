@@ -31,7 +31,6 @@
     "active": true,
     "targets": ["nsis"],
     "resources": {
-      "../sidecar-dist/fm27lab-sidecar/*": "sidecar/",
       "../sidecar-dist/fm27lab-sidecar/**/*": "sidecar/"
     },
     "icon": [

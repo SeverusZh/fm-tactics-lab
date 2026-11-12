@@ -84,8 +84,8 @@
 
 - [~] Tauri 2 窗口、单实例、sidecar supervisor 已实现；文件对话框、打开数据目录、外部链接、托盘与自动更新待 Phase 4。
 - [~] sidecar PyInstaller 打包脚本与 Tauri resources 已接入；Windows 安装包构建待 CI。
-- [x] sidecar 启动、ready 行、健康检查、重启、优雅退出（静态实现；Windows CI 待运行）。
-- [x] token 生成、endpoint.json、Tauri `get_connection`、事件刷新。
+- [~] sidecar 启动、ready 行、健康检查、重启、优雅退出（静态实现；shell 复审与 Windows CI 待通过）。
+- [~] token 生成、endpoint.json、Tauri `get_connection`、事件刷新（静态实现；待复审）。
 - [ ] 文件对话框、打开数据目录、外部链接。
 - [ ] 删除 Launcher.cs 与旧 C# 构建入口，并从 scripts/export_source.py 的 TOP 移除；同步 `docs/AGENT_INTEGRATION.md`、`docs/AGENT_VERIFICATION.md` 与 `THIRD_PARTY_NOTICES.md` 中的 Launcher 描述。
 - [ ] Windows 安装包与卸载清理；CI 需执行 `tauri build` 验证 sidecar resources。

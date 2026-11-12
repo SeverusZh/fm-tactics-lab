@@ -46,6 +46,7 @@ export function RunBar() {
             max={4294967295}
             value={seed}
             aria-invalid={!seedValid}
+            aria-describedby="runbar-status"
             onChange={(event) => setSeed(event.target.value)}
           />
         </label>
@@ -58,6 +59,7 @@ export function RunBar() {
             max={10000}
             value={count}
             aria-invalid={!countValid}
+            aria-describedby="runbar-status"
             onChange={(event) => setCount(event.target.value)}
           />
         </label>
@@ -70,6 +72,7 @@ export function RunBar() {
             max={256}
             value={workers}
             aria-invalid={!workersValid}
+            aria-describedby="runbar-status"
             onChange={(event) => setWorkers(event.target.value)}
             title="1–256 路；硬件只决定推荐值"
           />
@@ -83,7 +86,7 @@ export function RunBar() {
           允许资源覆盖
         </label>
         {Number(workers) > 8 ? <span className="badge" data-tone="warn">高于 8 路未实测</span> : null}
-        <span className="field" role="status" aria-live="polite">
+        <span id="runbar-status" className="field" role="status" aria-live="polite">
           {invalid ? reason : allowOversubscription ? "资源覆盖已允许" : "资源预检按默认值"}
         </span>
         <button className="button primary" type="button" disabled title={reason}>
