@@ -33,6 +33,8 @@ struct SidecarState {
     lifecycle: Mutex<()>,
     stopping: AtomicBool,
     manual_restart: AtomicBool,
+    paused: AtomicBool,
+    restart_in_progress: AtomicBool,
     restarts: AtomicUsize,
     data_dir: Mutex<Option<PathBuf>>,
 }
@@ -140,6 +142,12 @@ fn post_shutdown(connection: &ConnectionInfo) -> bool {
     is_status(&status, "202")
 }
 
+fn remove_endpoint(data_dir: &std::path::Path) {
+    let endpoint = data_dir.join("agent").join("endpoint.json");
+    let _ = std::fs::remove_file(&endpoint);
+    let _ = std::fs::remove_file(endpoint.with_extension("json.tmp"));
+}
+
 fn clear_connection(state: &SidecarState) {
     if let Ok(mut guard) = state.connection.lock() {
         *guard = None;
@@ -184,6 +192,9 @@ fn start_sidecar(app: &AppHandle) -> Result<ConnectionInfo, String> {
         .lifecycle
         .lock()
         .map_err(|_| "lifecycle lock poisoned")?;
+    if state.stopping.load(Ordering::SeqCst) {
+        return Err("sidecar is stopping".to_string());
+    }
     clear_connection(&state);
     kill_child(&state);
     let (program, args, cwd) = launch_spec(app)?;
@@ -227,10 +238,12 @@ fn start_sidecar(app: &AppHandle) -> Result<ConnectionInfo, String> {
             }
         });
     }
-    let stdout = child
-        .stdout
-        .take()
-        .ok_or_else(|| "sidecar stdout is unavailable".to_string())?;
+    let Some(stdout) = child.stdout.take() else {
+        let _ = child.kill();
+        let _ = child.wait();
+        remove_endpoint(&data_dir);
+        return Err("sidecar stdout is unavailable".to_string());
+    };
     let (sender, receiver) = mpsc::channel();
     thread::spawn(move || {
         for line in BufReader::new(stdout).lines().map_while(Result::ok) {
@@ -245,6 +258,7 @@ fn start_sidecar(app: &AppHandle) -> Result<ConnectionInfo, String> {
         if now >= deadline {
             let _ = child.kill();
             let _ = child.wait();
+            remove_endpoint(&data_dir);
             return Err("sidecar did not report readiness within 30 seconds".to_string());
         }
         match receiver.recv_timeout(deadline - now) {
@@ -256,6 +270,7 @@ fn start_sidecar(app: &AppHandle) -> Result<ConnectionInfo, String> {
             Err(_) => {
                 let _ = child.kill();
                 let _ = child.wait();
+                remove_endpoint(&data_dir);
                 return Err("sidecar closed before readiness".to_string());
             }
         }
@@ -280,6 +295,7 @@ fn start_sidecar(app: &AppHandle) -> Result<ConnectionInfo, String> {
     }
     let _ = child.kill();
     let _ = child.wait();
+    remove_endpoint(&data_dir);
     clear_connection(&state);
     Err("sidecar health check did not become ready".to_string())
 }
@@ -293,6 +309,15 @@ fn monitor(app: AppHandle) {
         let state = app.state::<SidecarState>();
         if state.stopping.load(Ordering::SeqCst) {
             return;
+        }
+        if state.paused.load(Ordering::SeqCst) {
+            if state.manual_restart.swap(false, Ordering::SeqCst) {
+                state.paused.store(false, Ordering::SeqCst);
+                state.restarts.store(0, Ordering::SeqCst);
+                stable_since = Instant::now();
+            } else {
+                continue;
+            }
         }
         if state.manual_restart.swap(false, Ordering::SeqCst) {
             stable_since = Instant::now();
@@ -328,10 +353,14 @@ fn monitor(app: AppHandle) {
             continue;
         }
         if !child_running(&state) {
+            if state.restart_in_progress.load(Ordering::SeqCst) {
+                continue;
+            }
             let attempt = state.restarts.fetch_add(1, Ordering::SeqCst) + 1;
             if attempt > MAX_RESTARTS {
+                state.paused.store(true, Ordering::SeqCst);
                 let _ = app.emit("sidecar-failed", "restart limit reached");
-                return;
+                continue;
             }
             let delay = Backoff::new(500, MAX_RESTARTS)
                 .delays()
@@ -360,16 +389,18 @@ fn monitor(app: AppHandle) {
         }
         if last_health.elapsed() >= HEALTH_INTERVAL {
             last_health = Instant::now();
-            let connection = state.connection.lock().ok().and_then(|guard| guard.clone());
-            if let Some(connection) = connection {
-                if health_ok(&connection) {
-                    health_failures = 0;
-                } else {
-                    health_failures += 1;
-                    if health_failures >= 3 {
-                        let _ = app.emit("sidecar-down", "sidecar health check failed");
-                        kill_child(&state);
+            if let Ok(_guard) = state.lifecycle.try_lock() {
+                let connection = state.connection.lock().ok().and_then(|guard| guard.clone());
+                if let Some(connection) = connection {
+                    if health_ok(&connection) {
                         health_failures = 0;
+                    } else {
+                        health_failures += 1;
+                        if health_failures >= 3 {
+                            let _ = app.emit("sidecar-down", "sidecar health check failed");
+                            kill_child(&state);
+                            health_failures = 0;
+                        }
                     }
                 }
             }
@@ -398,17 +429,13 @@ fn stop_sidecar(state: &SidecarState) {
                 Err(_) => break,
             }
         }
-        if let Some(child) = child.as_mut() {
-            if matches!(child.try_wait(), Ok(None)) {
-                let _ = child.kill();
-            }
-            let _ = child.wait();
+        if matches!(child.try_wait(), Ok(None)) {
+            let _ = child.kill();
         }
+        let _ = child.wait();
     }
     if let Some(data_dir) = state.data_dir.lock().ok().and_then(|guard| guard.clone()) {
-        let endpoint = data_dir.join("agent").join("endpoint.json");
-        let _ = std::fs::remove_file(&endpoint);
-        let _ = std::fs::remove_file(endpoint.with_extension("json.tmp"));
+        remove_endpoint(&data_dir);
     }
     clear_connection(state);
 }
@@ -441,12 +468,21 @@ fn sidecar_status(state: State<SidecarState>) -> Result<serde_json::Value, Strin
 
 #[tauri::command]
 fn restart_sidecar(app: AppHandle, state: State<SidecarState>) -> Result<ConnectionInfo, String> {
+    if state.stopping.load(Ordering::SeqCst) {
+        return Err("sidecar is stopping".to_string());
+    }
+    state.restart_in_progress.store(true, Ordering::SeqCst);
     state.manual_restart.store(true, Ordering::SeqCst);
+    state.paused.store(false, Ordering::SeqCst);
+    state.restarts.store(0, Ordering::SeqCst);
     kill_child(&state);
     clear_connection(&state);
-    let connection = start_sidecar(&app)?;
-    let _ = app.emit("sidecar-ready", &connection);
-    Ok(connection)
+    let result = start_sidecar(&app);
+    state.restart_in_progress.store(false, Ordering::SeqCst);
+    if let Ok(connection) = &result {
+        let _ = app.emit("sidecar-ready", connection);
+    }
+    result
 }
 
 #[tauri::command]
@@ -530,6 +566,19 @@ mod tests {
         let connection = connection_info("127.0.0.1", port, "token");
         assert!(health_ok(&connection));
         server.join().unwrap();
+    }
+
+    #[test]
+    fn endpoint_cleanup_removes_token_file() {
+        let data_dir =
+            std::env::temp_dir().join(format!("fm27lab-endpoint-{}", std::process::id()));
+        let agent = data_dir.join("agent");
+        std::fs::create_dir_all(&agent).unwrap();
+        let endpoint = agent.join("endpoint.json");
+        std::fs::write(&endpoint, "secret").unwrap();
+        remove_endpoint(&data_dir);
+        assert!(!endpoint.exists());
+        let _ = std::fs::remove_dir_all(data_dir);
     }
 
     #[test]

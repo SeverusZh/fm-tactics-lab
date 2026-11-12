@@ -34,6 +34,7 @@ export function App() {
   const location = useLocation();
   const queryClient = useQueryClient();
   const [lifecycleError, setLifecycleError] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
   const connection = useQuery({
     queryKey: ["connection"],
     queryFn: loadConnection,
@@ -96,15 +97,19 @@ export function App() {
         ? health.error.message
         : null);
   const refresh = async () => {
-    if (isTauri()) {
-      try {
+    if (refreshing) return;
+    setRefreshing(true);
+    try {
+      if (connection.data == null && isTauri()) {
         await invoke("restart_sidecar");
-      } catch (error) {
-        setLifecycleError(String(error));
       }
+      await queryClient.invalidateQueries({ queryKey: ["connection"] });
+      await queryClient.invalidateQueries({ queryKey: ["health"] });
+    } catch (error) {
+      setLifecycleError(String(error));
+    } finally {
+      setRefreshing(false);
     }
-    await queryClient.invalidateQueries({ queryKey: ["connection"] });
-    await queryClient.invalidateQueries({ queryKey: ["health"] });
   };
 
   return (
@@ -113,6 +118,7 @@ export function App() {
         connection: connection.data ?? null,
         health: health.data ?? null,
         connectionError,
+        refreshing,
         refresh: () => {
           void refresh();
         },

@@ -7,6 +7,7 @@ export type AppContextValue = {
   connection: Connection | null;
   health: Health | null;
   connectionError: string | null;
+  refreshing: boolean;
   refresh: () => void;
 };
 

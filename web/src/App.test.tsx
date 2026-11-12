@@ -3,6 +3,8 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { invoke } from "@tauri-apps/api/core";
+
 const { listeners } = vi.hoisted(() => ({
   listeners: {} as Record<string, (event: { payload: unknown }) => void>,
 }));
@@ -59,6 +61,7 @@ function renderApp(initial = "/tactics") {
 describe("App shell", () => {
   beforeEach(() => {
     for (const key of Object.keys(listeners)) delete listeners[key];
+    vi.mocked(invoke).mockClear();
     vi.mocked(loadConnection).mockResolvedValue({
       url: "http://127.0.0.1:43210",
       token: "test-token",
@@ -87,7 +90,25 @@ describe("App shell", () => {
     renderApp();
     await waitFor(() => expect(screen.getByRole("alert")).toBeInTheDocument(), { timeout: 4000 });
     expect(screen.getByRole("alert").textContent).toContain("offline");
-    expect(screen.getByRole("button", { name: "重启 sidecar" })).toBeEnabled();
+    const restart = screen.getByRole("button", { name: "重启 sidecar" });
+    expect(restart).toBeEnabled();
+    fireEvent.click(restart);
+    await waitFor(() => expect(invoke).toHaveBeenCalledWith("restart_sidecar"));
+  });
+
+  it("clears the connection after a sidecar-down event", async () => {
+    renderApp();
+    await waitFor(() => expect(listeners["sidecar-down"]).toBeDefined());
+    await screen.findByText("sidecar 正常");
+    listeners["sidecar-down"]({ payload: "crashed" });
+    await waitFor(() => expect(screen.getAllByText("sidecar 未连接").length).toBeGreaterThan(0));
+  });
+
+  it("does not restart a connected sidecar when checking again", async () => {
+    renderApp();
+    await screen.findByText("sidecar 正常");
+    fireEvent.click(screen.getByRole("button", { name: "重新检查" }));
+    await waitFor(() => expect(invoke).not.toHaveBeenCalled());
   });
 
   it("applies a sidecar-ready event to the connection cache", async () => {

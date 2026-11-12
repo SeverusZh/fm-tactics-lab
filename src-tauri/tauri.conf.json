@@ -16,7 +16,7 @@
         "title": "FM 战术实验室",
         "width": 1540,
         "height": 1000,
-        "minWidth": 1024,
+        "minWidth": 1000,
         "minHeight": 720,
         "resizable": true,
         "fullscreen": false

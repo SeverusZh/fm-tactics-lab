@@ -3,7 +3,7 @@ import { WarningCircle } from "@phosphor-icons/react";
 import { useAppContext } from "../app-context";
 
 export function TopBar({ title }: { title: string }) {
-  const { connection, health, connectionError, refresh } = useAppContext();
+  const { connection, health, connectionError, refreshing, refresh } = useAppContext();
   const tone = connectionError ? "error" : health?.status === "ok" ? "ok" : "warn";
   const label = connectionError
     ? "sidecar 未连接"
@@ -24,7 +24,7 @@ export function TopBar({ title }: { title: string }) {
             <span className="badge">v{health.version}</span>
           </>
         ) : null}
-        <button className="button" type="button" onClick={refresh}>
+        <button className="button" type="button" onClick={refresh} disabled={refreshing}>
           {connection ? "重新检查" : "重启 sidecar"}
         </button>
       </div>

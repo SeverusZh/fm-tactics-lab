@@ -17,10 +17,13 @@
 | 2026-11-12 | 设计文档第七轮 | 同上 | FAIL | 第七轮：`::1` 合法但 sidecar 只绑定 IPv4；Windows endpoint ACL 未收紧；radius-tag/text-wrap/数字输入等 Minor。已修复。 |
 | 2026-11-12 | 设计文档第八轮 | 同上 | FAIL | 第八轮：Tauri 安装包无 sidecar 资源/构建；supervisor 无健康检查/自动重启/退出清理；window minWidth 与 1024 断点冲突；CSP null；无 Cargo.lock 与 src-tauri 测试；ACL 失败残留。已修复，待第九轮复审。 |
 | 2026-11-12 | 设计文档第九轮 | 同上 | FAIL | 第九轮：manifest 仍缺 5 个新文件；React 未监听 Tauri 事件；重复 ready/计数；src-tauri 进程测试不足；Windows CI 未运行。已修复/待复审。 |
-| 2026-11-12 | 设计文档第十轮 | 同上 | FAIL | 第十轮：tauri.conf.json 重复 frontendDist 导致无效 JSON；文档声称文件对话框已实现但代码无插件/权限；minWidth 1000 与 1024 不一致；测试计数滞后；Windows CI 未运行。JSON 已修复，其余修复中。 |
-| 2026-11-12 | 设计文档第十一轮 | 同上 | 待审 | 等待 design-reviewer 第十一轮结果。 |
+| 2026-11-12 | 设计文档第十轮 | 同上 | FAIL | 第十轮：tauri.conf.json 重复 frontendDist 导致无效 JSON；文档声称文件对话框已实现但代码无插件/权限；minWidth 1000 与 1024 不一致；测试计数滞后；Windows CI 未运行。已修复。 |
+| 2026-11-12 | 设计文档第十一轮 | 同上 | PASS | JSON/CI/manifest/React 事件/supervisor/CSP/资源/构建命令/ACL 均闭环；无 Critical/Important。Windows CI 与 Tauri 编译/NSIS/真机仍为发布门槛。 |
 | 2026-11-12 | sidecar 基础切片复审 | 同上 | FAIL | 复审：CLI 丢弃 FM27LAB_DEV、空 FM27LAB_DATA 落到 CWD、迁移拆分不支持一行多语句、wheel 无 fm27lab 入口；另有 upsert/错误封套测试不足。已修复。 |
 | 2026-11-12 | sidecar 基础切片第三轮 | 同上 | PASS | 27 项测试通过；I1-I4 全闭环；剩余路径别名/CLI host-port/迁移排序/测试超时等 Minor，已继续修复；当前 28 项。 |
+| 2026-11-12 | React/Tauri 壳层 | web/、src-tauri/、CI | FAIL | 首轮：CSP 阻断 IPC、Child 移出共享状态、退出不等待、前端未监听事件、before 命令工作目录、resources 映射、启动超时、运行期健康、stderr、CI 与前端测试不足。 |
+| 2026-11-12 | React/Tauri 壳层第二轮 | 同上 | FAIL | 第二轮：CSP IPC 与前端事件已修；但 stop_sidecar 有确定的 Rust 编译错误、stopping/restart 竞态、健康检查误杀新 child、启动失败 endpoint 残留、TopBar 无条件重启、双重启动、minWidth 与测试缺口。已修复。 |
+| 2026-11-12 | React/Tauri 壳层第三轮 | 同上 | 待审 | 等待 shell-reviewer 第三轮结果。 |
 
 ## 审核规则
 
@@ -31,4 +34,4 @@
 - 审核通过不等于整体发布就绪；发布仍需最终验收与 Windows 真机验证。
 - 现有 276 项 Python 测试来自旧 `tests/` 基线，不是 v2 架构证据；新 `fm27lab/tests` 当前 28 项测试，覆盖包版本、CLI 环境继承、配置/路径边界、SQLite 迁移/事务、HTTP 健康、鉴权、错误封套、Origin、ACL 失败清理与 sidecar serve 集成；Vitest 当前 4 项。
 - Tauri sidecar supervisor 的静态实现已存在，但 Linux 无 WebKitGTK，Windows CI 的 `cargo build`/`cargo test`/安装包构建是唯一编译证据。PyInstaller onedir sidecar 已在 Linux 构建并通过 ready/health/shutdown 冒烟测试。
-- Rust 核心 crate 当前 4 项 cargo test 通过；React 壳当前 2 项 Vitest 通过、类型检查与生产构建通过。Tauri 壳在 Linux 无 WebKit 依赖，Windows 构建仍是发布门槛。
+- Rust 核心 crate 当前 4 项 cargo test 通过；React 壳当前 8 项 Vitest 通过、类型检查与生产构建通过。Tauri 壳在 Linux 无 WebKit 依赖，Windows 构建仍是发布门槛。

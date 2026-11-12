@@ -7,13 +7,14 @@
 - [x] 开启 fork 的 Issues 功能。
 - [x] 创建 `refactor/v2-modular` 分支。
 - [x] 合并上游 v1112 的 worker 复用与 1–256 并行。
-- [~] 合并提交 `0c24c66` 独立审核。
-- [~] 设计文档与 ADR，设计审核十轮 FAIL、第十一轮待审；合并审核第三轮 PASS。
+- [x] 合并提交 `0c24c66` 独立审核（合并第三轮 PASS）。
+- [x] 设计文档与 ADR，第十一轮审核 PASS；合并审核第三轮 PASS。
+- [~] React/Tauri 壳层第三轮审核待审。
 - [x] sidecar 基础切片：三轮审核 PASS；28 项测试；迁移/health/错误封套/连接/Origin/token repr/CLI env/入口/ACL 已闭环。
 - [x] PyInstaller onedir sidecar 构建成功，并通过 ready/health/shutdown 冒烟测试（Linux）。
 - [x] Rust 纯核心 crate：ready/token/backoff/connection，4 项 cargo test 通过。
-- [ ] Python 3.12 sidecar 可独立启动与自检。
-- [ ] Tauri 2 壳、React 前端与打包链路。
+- [x] Python 3.12 sidecar 可独立启动与自检；PyInstaller onedir 冒烟通过。
+- [~] Tauri 2 壳、React 前端与打包链路：代码与 CI 已存在，Windows 编译/安装包待实际运行。
 
 ## Phase 0 基础设施
 

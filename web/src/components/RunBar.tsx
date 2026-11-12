@@ -3,6 +3,7 @@ import { useState } from "react";
 import { useAppContext } from "../app-context";
 
 function integerInRange(value: string, minimum: number, maximum: number): boolean {
+  if (value.trim() === "") return false;
   const number = Number(value);
   return Number.isInteger(number) && number >= minimum && number <= maximum;
 }
