@@ -8,7 +8,7 @@
 - [x] 创建 `refactor/v2-modular` 分支。
 - [x] 合并上游 v1112 的 worker 复用与 1–256 并行。
 - [~] 合并提交 `0c24c66` 独立审核。
-- [~] 设计文档与 ADR，设计审核九轮 FAIL、第十轮待审；合并审核第三轮 PASS。
+- [~] 设计文档与 ADR，设计审核十轮 FAIL、第十一轮待审；合并审核第三轮 PASS。
 - [x] sidecar 基础切片：三轮审核 PASS；28 项测试；迁移/health/错误封套/连接/Origin/token repr/CLI env/入口/ACL 已闭环。
 - [x] PyInstaller onedir sidecar 构建成功，并通过 ready/health/shutdown 冒烟测试（Linux）。
 - [x] Rust 纯核心 crate：ready/token/backoff/connection，4 项 cargo test 通过。
@@ -24,7 +24,7 @@
 - [x] 建立 DESIGN.md、TODO.md、ADR 与设计系统文档。
 - [ ] 修复设计审核 findings 并复审 PASS。
 - [x] Rust 工具链与纯核心 crate（ready/token/backoff/connection），4 项 cargo test 通过。
-- [~] CI：Linux Python/前端/Rust core 与 Windows Tauri `cargo check` 工作流已写入；等待 GitHub Actions 首次运行。
+- [~] CI：Linux Python/前端/Rust core 与 Windows sidecar 构建、`cargo build/test`、`tauri build --bundles nsis` 工作流已写入；等待 GitHub Actions 首次运行。
 - [ ] Rust 核心 crate 补齐 sidecar 进程监督测试。
 - [ ] Windows sidecar 打包、Tauri 安装包构建与真机验证。
 - [ ] Python 3.12 sidecar 打包与自检。
@@ -81,7 +81,7 @@
 
 ## Phase 4 桌面壳
 
-- [~] Tauri 2 窗口、单实例、文件对话框、sidecar supervisor 已实现；托盘与自动更新待 Phase 4。
+- [~] Tauri 2 窗口、单实例、sidecar supervisor 已实现；文件对话框、打开数据目录、外部链接、托盘与自动更新待 Phase 4。
 - [~] sidecar PyInstaller 打包脚本与 Tauri resources 已接入；Windows 安装包构建待 CI。
 - [x] sidecar 启动、ready 行、健康检查、重启、优雅退出（静态实现；Windows CI 待运行）。
 - [x] token 生成、endpoint.json、Tauri `get_connection`、事件刷新。

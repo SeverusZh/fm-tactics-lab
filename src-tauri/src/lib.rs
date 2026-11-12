@@ -1,5 +1,6 @@
 use std::{
     env,
+    fs::File,
     io::{BufRead, BufReader, Read, Write},
     net::{SocketAddr, TcpStream},
     path::PathBuf,
@@ -194,6 +195,8 @@ fn start_sidecar(app: &AppHandle) -> Result<ConnectionInfo, String> {
     let engine_root = env::var("FM27_ENGINE_ROOT")
         .map(PathBuf::from)
         .unwrap_or_else(|_| data_dir.join("engine"));
+    let log_dir = data_dir.join("logs");
+    let _ = std::fs::create_dir_all(&log_dir);
     let mut command = Command::new(&program);
     command
         .args(&args)
@@ -204,7 +207,7 @@ fn start_sidecar(app: &AppHandle) -> Result<ConnectionInfo, String> {
         .env("FM27LAB_PORT", "0")
         .env("PYTHONUTF8", "1")
         .stdout(Stdio::piped())
-        .stderr(Stdio::inherit());
+        .stderr(Stdio::piped());
     if cfg!(debug_assertions) {
         command.env("FM27LAB_DEV", "1");
     }
@@ -216,6 +219,14 @@ fn start_sidecar(app: &AppHandle) -> Result<ConnectionInfo, String> {
     let mut child = command
         .spawn()
         .map_err(|error| format!("cannot start sidecar {program:?}: {error}"))?;
+    if let Some(mut stderr) = child.stderr.take() {
+        let log_path = log_dir.join(format!("sidecar-{}.stderr.log", child.id()));
+        thread::spawn(move || {
+            if let Ok(mut file) = File::create(log_path) {
+                let _ = std::io::copy(&mut stderr, &mut file);
+            }
+        });
+    }
     let stdout = child
         .stdout
         .take()

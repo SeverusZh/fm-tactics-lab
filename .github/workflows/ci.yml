@@ -26,6 +26,7 @@ jobs:
       - run: python -m pytest -q
       - run: python -m unittest discover -s tests
       - run: python scripts/check_manifest.py
+      - run: python -c "import json; json.load(open('src-tauri/tauri.conf.json', encoding='utf-8')); json.load(open('src-tauri/capabilities/default.json', encoding='utf-8'))"
       - run: ruff check fm27lab
 
   frontend:

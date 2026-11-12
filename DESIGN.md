@@ -59,7 +59,7 @@ Windows x64
 
 Rust 不持有足球领域逻辑，不直接读写 SQLite。Python sidecar 是领域、引擎、存储、CLI 与 MCP 的唯一所有者。前端只通过带 token 的 loopback API 访问 sidecar，不经过 Rust 代理。
 
-Phase 0 的桌面壳覆盖窗口、单实例、文件对话框、sidecar 启动/健康检查/退避重启/退出清理与连接信息注入；托盘与自动更新在 Phase 4 接入，不以当前分支的 `cargo check` 作为完成证据。
+Phase 0 的桌面壳覆盖窗口、单实例、sidecar 启动/健康检查/退避重启/退出清理与连接信息注入；文件对话框、打开数据目录、外部链接、托盘与自动更新在 Phase 4 接入，不以当前分支的 `cargo check` 作为完成证据。
 
 sidecar supervisor 在 ready 行后轮询 `/api/health`，失败或进程退出时按 500/1000/2000ms 退避重启，最多 3 次；重启前清空旧连接并发送 `sidecar-down`/`sidecar-ready`/`sidecar-error`/`sidecar-failed` Tauri events；应用退出时调用 `/api/shutdown`，随后 kill child。
 
