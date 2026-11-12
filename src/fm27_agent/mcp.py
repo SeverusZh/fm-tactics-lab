@@ -23,7 +23,6 @@ from .drafts import DraftService
 SERVER_NAME = schemas.SERVER_NAME
 PROTOCOL_VERSIONS = schemas.PROTOCOL_VERSIONS
 LATEST_PROTOCOL = schemas.LATEST_PROTOCOL
-CAREER_TERMINAL = ("complete", "error", "empty", "cancelled")
 # The app rotates its token on restart; retry once after reloading endpoint.json.
 RECONNECT_CODES = ("app_unavailable", "unauthorized")
 MAX_WAIT_SECONDS = 300.0
@@ -61,7 +60,6 @@ BASE_CSV_COLUMNS = [
     "opponent_passes", "opponent_completed_passes", "score_changes", "goal_minutes",
     "elapsed_seconds", "attempts", "log",
 ]
-CAREER_CSV_COLUMNS = ["opponent_key", "venue", "tested_side"]
 EVENT_CSV_COLUMNS = ["goals", "cards"]
 
 
@@ -540,14 +538,7 @@ class McpServer:
             "draft_list": self._tool_draft_list,
             "draft_options": self._tool_draft_options,
             "draft_delete": self._tool_draft_delete,
-            "career_import": self._tool_career_import,
-            "career_status": self._tool_career_status,
-            "career_team": self._tool_career_team,
-            "career_opponents": self._tool_career_opponents,
-            "career_preview": self._tool_career_preview,
-            "career_cancel": self._tool_career_cancel,
             "experiment_run": self._tool_experiment_run,
-            "career_run": self._tool_career_run,
             "job_get": self._tool_job_get,
             "job_wait": self._tool_job_wait,
             "job_list": self._tool_job_list,
@@ -755,7 +746,7 @@ class McpServer:
             "serverInfo": {"name": SERVER_NAME, "version": __version__},
             "instructions": (
                 "FM Tactics Lab 本机接入层。先用 lab_status 检查应用与引擎，"
-                "再用 draft_* 准备场景、experiment_run 或 career_run 提交批次，"
+                "再用 draft_* 准备场景、experiment_run 提交批次，"
                 "job_wait 等待结果，results_summary 读取汇总，results_csv 导出明细。"
             ),
         }
@@ -873,7 +864,7 @@ class McpServer:
             return _json_text(data)
         if name == "draft_delete":
             return _json_text(data)
-        if name in ("experiment_run", "career_run"):
+        if name == "experiment_run":
             return _json_text({
                 "job_id": data.get("job_id"),
                 "total": data.get("total"),
@@ -942,8 +933,6 @@ class McpServer:
                 "runs": rows,
             })
         if name in ("fmf_import", "fmf_export", "setpiece_export"):
-            return _json_text(data)
-        if name == "career_import":
             return _json_text(data)
         return _json_text(data)
 
@@ -1118,68 +1107,6 @@ class McpServer:
         return self._with_client(
             lambda client: self._drafts(client).delete(args["draft_id"]))
 
-    def _tool_career_import(self, args):
-        save_path = args["save_path"]
-        accepted = self._with_client(lambda client: client.career_import(save_path), retry=False)
-        save_id = accepted.get("save_id") or accepted.get("id")
-        result = {"save_id": save_id, "reused": accepted.get("reused")}
-        if bool(args.get("wait", False)) and save_id:
-            status = self._wait_career(save_id, float(args.get("timeout_seconds", 60)))
-            result["status"] = status.get("status")
-            result["progress"] = status
-            result["timed_out"] = bool(status.get("timed_out"))
-        else:
-            result["status"] = accepted.get("status") or "reading"
-            result["timed_out"] = False
-        return result
-
-    def _tool_career_status(self, args):
-        return self._with_client(lambda client: client.career_status(args.get("save_id")))
-
-    def _tool_career_team(self, args):
-        save_id = args["save_id"]
-        club_uid = int(args["club_uid"])
-        return self._with_client(lambda client: client.career_team(save_id, club_uid))
-
-    def _tool_career_opponents(self, args):
-        save_id = args["save_id"]
-        club_uid = int(args["club_uid"])
-        accepted = self._with_client(
-            lambda client: client.career_opponents(save_id, club_uid), retry=False)
-        result = {
-            "save_id": save_id,
-            "club_uid": club_uid,
-            "status": accepted.get("status") or "reading",
-            "opponents": accepted.get("opponents"),
-            "reading": accepted.get("reading"),
-            "timed_out": False,
-        }
-        if bool(args.get("wait", False)) and result["status"] not in ("complete", "error"):
-            report = self._wait_opponents(save_id, club_uid, float(args.get("timeout_seconds", 60)))
-            result.update(report)
-        return result
-
-    def _tool_career_preview(self, args):
-        save_id = args["save_id"]
-        club_uid = int(args["club_uid"])
-        key = args["key"]
-
-        def operation(client):
-            scenario = self._drafts(client).scenario(args["draft_id"])
-            return client.career_preview(save_id, club_uid, key, scenario)
-        return self._with_client(operation)
-
-    def _tool_career_cancel(self, args):
-        kind = args["kind"]
-        save_id = args["save_id"]
-        if kind == "import":
-            return self._with_client(lambda client: client.career_import_cancel(save_id), retry=False)
-        if kind == "opponents" and args.get("club_uid") is not None:
-            club_uid = int(args["club_uid"])
-            return self._with_client(
-                lambda client: client.career_opponents_cancel(save_id, club_uid), retry=False)
-        raise AgentError("validation_failed", "取消对手扫描需要 club_uid")
-
     def _tool_experiment_run(self, args):
         baseline_id = args.get("baseline_draft_id")
         seeds = expand_seeds(args["seeds"])
@@ -1238,39 +1165,6 @@ class McpServer:
             job = submit(client, drafts, args["draft_id"], name, submission_keys[0])
             job["seeds"] = seed_summary
             return job
-        return self._with_client(operation)
-
-    def _tool_career_run(self, args):
-        save_id = args["save_id"]
-        club_uid = int(args["club_uid"])
-        opponents = []
-        for item in args["opponents"]:
-            opponents.append(item.get("key") if isinstance(item, dict) else item)
-        baseline_id = args.get("baseline_draft_id")
-        workers = args.get("workers")
-        event_details = bool(args.get("event_details", True))
-        name = args.get("name")
-        count = int(args["count"])
-        first_seed = int(args["first_seed"])
-        idempotency_key = "mcp-career-run-" + secrets.token_hex(12)
-
-        def operation(client):
-            drafts = self._drafts(client)
-            scenario = drafts.scenario(args["draft_id"])
-            reference = drafts.scenario(baseline_id) if baseline_id else None
-            created = client.career_run(save_id, club_uid, scenario, opponents, count, first_seed,
-                                        reference=reference, workers=workers,
-                                        event_details=event_details, name=name,
-                                        idempotency_key=idempotency_key)
-            total = created.get("total")
-            return {
-                "job_id": created.get("id"),
-                "total": total if isinstance(total, int) else len(opponents) * count * (2 if baseline_id else 1),
-                "workers": created.get("workers", workers or 1),
-                "mode": created.get("mode") or ("comparison" if baseline_id else "single"),
-                "queued": created.get("queued"),
-                "queue_position": created.get("queue_position"),
-            }
         return self._with_client(operation)
 
     def _tool_job_get(self, args):
@@ -1583,35 +1477,6 @@ class McpServer:
 
     # Waiting helpers
 
-    def _wait_career(self, save_id, timeout):
-        deadline = time.monotonic() + max(0.0, timeout)
-        status = {}
-        while True:
-            status = dict(self._with_client(lambda client: client.career_status(save_id)))
-            if status.get("status") in CAREER_TERMINAL:
-                status["timed_out"] = False
-                return status
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                status["timed_out"] = True
-                return status
-            time.sleep(min(0.5, remaining))
-
-    def _wait_opponents(self, save_id, club_uid, timeout):
-        deadline = time.monotonic() + max(0.0, timeout)
-        report = {}
-        while True:
-            report = dict(self._with_client(
-                lambda client: client.career_opponents(save_id, club_uid), retry=False))
-            report["timed_out"] = False
-            if report.get("status") in ("complete", "error"):
-                return report
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                report["timed_out"] = True
-                return report
-            time.sleep(min(0.5, remaining))
-
     # Job helpers
 
     def _pool_draws(self, client, job):
@@ -1740,9 +1605,6 @@ class McpServer:
                 name = _quote("/".join(parts[2:]))
                 text = self._with_client(lambda client: client.job_logs(job_id, name))
                 return {"contents": [{"uri": uri, "mimeType": "application/jsonl", "text": text}]}
-        if host == "saves" and len(parts) == 1:
-            data = self._with_client(lambda client: client.career_status(parts[0]))
-            return self._resource_json(uri, data)
         raise JsonRpcError(RESOURCE_NOT_FOUND, f"资源不存在：{uri}")
 
     def _resource_json(self, uri, data):
@@ -1812,31 +1674,11 @@ def _prompt_text(name, arguments):
             f"若 paired.n 为 0，说明没有同种子配对，可用 results_matches 逐场核对。"
             f"两个独立种子块合并后用 results_compare 计算 ΔWin、ΔPts、ΔGD、ΔxGD 与 95%CI。"
         )
-    if name == "opponent_sweep":
-        save_id = arguments.get("save_id")
-        club_uid = arguments.get("club_uid")
-        count = arguments.get("count") or 6
-        return (
-            f"对存档 {save_id} 的俱乐部 {club_uid} 用草案 {draft_id} 做多对手扫描。"
-            f"先 career_import save_path=<存档路径> wait=true 确认导入完成，"
-            f"career_team 读取战术列表并 draft_create source=save 建立草案，"
-            f"draft_validate 后 career_opponents wait=true 取得对手 key；"
-            f"career_preview 逐个预览后 career_run save_id={save_id} club_uid={club_uid} "
-            f"draft_id={draft_id} opponents=[key,...] count={count} first_seed=100 workers=2。"
-            f"count 为每对手总场数，必须偶数且主客场各半。"
-        )
     raise JsonRpcError(INVALID_PARAMS, f"未知 prompt：{name}")
 
 
 def _csv_columns(job):
-    runs = job.get("runs") or []
-    mode = str(job.get("mode") or "")
-    career = mode == "career" or any(isinstance(run, dict) and
-                                     any(key in run for key in CAREER_CSV_COLUMNS)
-                                     for run in runs)
     columns = list(BASE_CSV_COLUMNS)
-    if career:
-        columns.extend(CAREER_CSV_COLUMNS)
     if job.get("event_details"):
         columns.extend(EVENT_CSV_COLUMNS)
     return columns

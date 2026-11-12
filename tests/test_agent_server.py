@@ -202,11 +202,14 @@ class RouterTests(unittest.TestCase):
             self.router.get("/api/agent/v1/nope", {})
         self.assertEqual(caught.exception.status, 404)
 
-    def test_career_cancel(self):
-        status, payload, _ = self.router.post("/api/agent/v1/career/import/cancel",
-                                              {"id": "a" * 16}, {})
-        self.assertTrue(payload["accepted"])
-        self.assertEqual(self.app.SAVE_LIBRARY.cancelled[0][0], "import")
+    def test_career_endpoints_are_gone(self):
+        for path in ("/api/agent/v1/career/import", "/api/agent/v1/career/run"):
+            with self.assertRaises(agent_server.AgentHttpError) as caught:
+                self.router.post(path, {}, {})
+            self.assertEqual(caught.exception.status, 404)
+        with self.assertRaises(agent_server.AgentHttpError) as caught:
+            self.router.get("/api/agent/v1/career/status", {})
+        self.assertEqual(caught.exception.status, 404)
 
 
 class RunQueueTests(unittest.TestCase):

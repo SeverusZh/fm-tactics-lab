@@ -24,8 +24,7 @@ SRC = ROOT / "src"
 TOOL_NAMES = {
     "lab_status", "engine_select", "draft_create", "draft_get", "draft_edit",
     "draft_validate", "draft_list", "draft_options", "draft_delete",
-    "career_import", "career_status", "career_team", "career_opponents",
-    "career_preview", "career_cancel", "experiment_run", "career_run", "job_get",
+    "experiment_run", "job_get",
     "job_wait", "job_list", "job_action", "results_summary", "results_compare",
     "results_matches", "results_csv", "fmf_import", "fmf_export", "setpiece_export",
 }
@@ -202,7 +201,7 @@ class McpSidecarTests(unittest.TestCase):
             "pid": os.getpid(),
             "data_dir": str(cls.data_dir),
             "versions": {"server": "test"},
-            "capabilities": ["free_run", "career_save", "cancel"],
+            "capabilities": ["free_run", "cancel"],
             "limits": {"max_seeds": 10000, "max_workers": 256},
         }
         (agent_dir / "endpoint.json").write_text(
@@ -254,11 +253,10 @@ class McpSidecarTests(unittest.TestCase):
         response = self.sidecar.request("tools/list")
         tools = response["result"]["tools"]
         names = {tool["name"] for tool in tools}
-        self.assertEqual(len(tools), 28)
+        self.assertEqual(len(tools), 21)
         self.assertEqual(names, TOOL_NAMES)
         for key in ("lab_status", "draft_create", "experiment_run", "job_wait",
-                    "results_csv", "results_compare", "draft_options", "career_run",
-                    "setpiece_export"):
+                    "results_csv", "results_compare", "draft_options", "setpiece_export"):
             self.assertIn(key, names)
         by_name = {tool["name"]: tool for tool in tools}
         for tool in tools:
@@ -268,7 +266,7 @@ class McpSidecarTests(unittest.TestCase):
             self.assertIn("required", tool["inputSchema"])
         self.assertEqual(by_name["engine_select"]["inputSchema"]["required"], ["game_root"])
         source = by_name["draft_create"]["inputSchema"]["properties"]["source"]
-        self.assertEqual(source["enum"], ["default", "save", "fmf", "job", "inline", "draft"])
+        self.assertEqual(source["enum"], ["default", "fmf", "job", "inline", "draft"])
         self.assertEqual(by_name["job_wait"]["inputSchema"]["properties"]["timeout_seconds"]["default"],
                          45)
         self.assertEqual(by_name["experiment_run"]["inputSchema"]["properties"]["workers"]["maximum"],
@@ -550,7 +548,7 @@ class McpSidecarTests(unittest.TestCase):
         finally:
             self.mock.release_job(job_id)
 
-    def test_resources_prompts_and_career_smoke(self):
+    def test_resources_and_prompts_without_career(self):
         resources = self.sidecar.request("resources/list")["result"]["resources"]
         uris = {resource["uri"] for resource in resources}
         self.assertIn("fm27://manifest", uris)
@@ -563,7 +561,7 @@ class McpSidecarTests(unittest.TestCase):
         template_uris = {template["uriTemplate"] for template in templates}
         self.assertIn("fm27://drafts/{draft_id}", template_uris)
         self.assertIn("fm27://jobs/{job_id}/logs/{name}", template_uris)
-        self.assertIn("fm27://saves/{save_id}", template_uris)
+        self.assertNotIn("fm27://saves/{save_id}", template_uris)
 
         contents = self.sidecar.request(
             "resources/read", {"uri": "fm27://manifest"})["result"]["contents"]
@@ -579,13 +577,10 @@ class McpSidecarTests(unittest.TestCase):
             "resources/read", {"uri": "fm27://workflow/free-mode"})["result"]["contents"][0]
         self.assertEqual(workflow["mimeType"], "text/markdown")
         self.assertIn("results_compare", workflow["text"])
-        save = self.sidecar.request(
-            "resources/read", {"uri": "fm27://saves/" + "a" * 16})["result"]["contents"][0]
-        self.assertEqual(json.loads(save["text"])["id"], "a" * 16)
 
         prompts = self.sidecar.request("prompts/list")["result"]["prompts"]
         self.assertEqual({prompt["name"] for prompt in prompts},
-                         {"test_tactic_change", "compare_baseline_vs_current", "opponent_sweep"})
+                         {"test_tactic_change", "compare_baseline_vs_current"})
         prompt = self.sidecar.request("prompts/get", {
             "name": "test_tactic_change",
             "arguments": {"draft_id": "dr_0123456789ab", "instruction": "提高逼抢强度"},
@@ -594,15 +589,10 @@ class McpSidecarTests(unittest.TestCase):
         self.assertIn("dr_0123456789ab", text)
         self.assertIn("experiment_run", text)
 
-        imported = self.call_tool("career_import", {"save_path": "/tmp/career.fm", "wait": True,
-                                                    "timeout_seconds": 10})
-        self.assertFalse(imported.get("isError"), imported)
-        self.assertTrue(imported["structuredContent"]["save_id"])
-        self.assertEqual(imported["structuredContent"]["status"], "complete")
-
-        team = self.call_tool("career_team", {"save_id": "a" * 16, "club_uid": 7})
-        self.assertIn("players", team["structuredContent"])
-        self.assertIn("tactics", team["structuredContent"])
+        retired = self.sidecar.request("tools/call", {
+            "name": "career_import", "arguments": {"save_path": "/tmp/career.fm"}})
+        self.assertIn("error", retired)
+        self.assertEqual(retired["error"]["code"], -32602)
 
     def test_unknown_tool_and_invalid_arguments(self):
         unknown = self.sidecar.request("tools/call", {"name": "not_a_tool", "arguments": {}})

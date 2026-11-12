@@ -133,12 +133,6 @@ class AgentCliTests(unittest.TestCase):
 
     def test_draft_create_alternate_sources(self):
         draft_id = self.create_draft()
-        code, data, stderr = self.invoke_json(
-            *self.base, "draft", "create", "--from", "save", "--save-id", "a" * 16,
-            "--club", "1", "--tactic", "0", "--lineup", ",".join(map(str, range(11))))
-        self.assertEqual(code, 0, stderr)
-        self.assertEqual(data["source"]["kind"], "save")
-        self.assertEqual(data["source"]["tactic_index"], 0)
         scenario_file = self.dir / "scenario.json"
         scenario_file.write_text(json.dumps(agent_mock.make_scenario()), encoding="utf-8")
         code, data, stderr = self.invoke_json(
@@ -373,30 +367,9 @@ class AgentCliTests(unittest.TestCase):
         self.assertEqual(code, 0, stderr)
         self.assertIn(log_name, stdout)
 
-    def test_career_import_and_status(self):
-        save = self.dir / "career.fm"
-        save.write_bytes(b"fm-save")
-        code, data, stderr = self.invoke_json(
-            *self.base, "career", "import", "--save", str(save))
-        self.assertEqual(code, 0, stderr)
-        self.assertEqual(data["save_id"], "a" * 16)
-        self.assertFalse(data["reused"])
-        code, data, stderr = self.invoke_json(
-            *self.base, "career", "status", "--save-id", "a" * 16)
-        self.assertEqual(code, 0, stderr)
-        self.assertEqual(data["status"], "complete")
-        request = next(call for call in reversed(self.server.calls)
-                       if call["path"] == "/api/agent/v1/career/import")
-        self.assertEqual(request["body"]["path"], str(save))
-
-    def test_career_opponents(self):
-        code, data, stderr = self.invoke_json(
-            *self.base, "career", "opponents", "--save-id", "a" * 16, "--club", "7")
-        self.assertEqual(code, 0, stderr)
-        self.assertEqual(data["status"], "complete")
-        self.assertEqual(data["save_id"], "a" * 16)
-        self.assertEqual(data["club_uid"], 7)
-        self.assertEqual(data["opponents"][0]["key"], "coach:1")
+    def test_career_command_is_removed(self):
+        code, _, _ = self.invoke(*self.base, "career", "status")
+        self.assertNotEqual(code, 0)
 
     def test_fmf_export(self):
         draft_id = self.create_draft()

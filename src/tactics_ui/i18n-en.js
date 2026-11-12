@@ -63,7 +63,6 @@ window.FM27English = {
  "士气": "Morale",
  "实验名称": "Experiment name",
  "留空自动命名": "Leave blank to name automatically",
- "存档对战": "Save match mode",
  "自由推演": "Free simulation",
  "存档": "Save",
  "我的球队": "My team",
@@ -1455,4 +1454,5 @@ window.FM27English = {
  "高并行会增加内存和处理器占用": "higher parallelism increases memory and CPU usage",
  "并行数高于推荐值": "Worker count exceeds the recommendation",
  "请留意内存和处理器占用": "monitor memory and CPU usage",
+ "当前方案没有完整一线队名单": "No full first-team squad in the current scenario",
 };

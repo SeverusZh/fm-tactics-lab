@@ -117,8 +117,6 @@ class Router:
         return {
             "max_seeds": 10000,
             "max_workers": int(self.app.BATCH_LIMITS.get("maximum", 4)),
-            "max_opponents": 40,
-            "max_career_count": 10000,
             "max_body_bytes": 8000000,
             "max_import_bytes": 8000000,
             "max_draft_bytes": 5242880,
@@ -139,7 +137,7 @@ class Router:
             "scenario_schema": 3,
             "scenario_view_schema": 4,
             "batch_schema": 1,
-            "capabilities": ["free_run", "career_save", "comparison", "fmf", "repair",
+            "capabilities": ["free_run", "comparison", "fmf", "repair",
                              "resume", "cancel", "idempotency"],
             "limits": self.limits(),
             "schemas": contract.PREFIX + "/schemas",
@@ -276,8 +274,6 @@ class Router:
                 if len(parts) == 4 and parts[2] == "logs":
                     content = self._call(self.job_logs, job, parts[3])
                     return self._ok(content, headers={"Content-Type": "application/x-ndjson; charset=utf-8"})
-            if len(parts) == 2 and parts[0] == "career" and parts[1] == "status":
-                return self._ok(self._call(self.app.SAVE_LIBRARY.status, query.get("id")))
             raise AgentHttpError(404, "unknown_endpoint", f"未知路径：{path}")
         except AgentHttpError:
             raise
@@ -289,7 +285,7 @@ class Router:
     # ---------- POST ----------
 
     def _idempotent(self, path):
-        return path in ("/runs", "/career/import", "/career/run") or path.endswith("/resume")
+        return path == "/runs" or path.endswith("/resume")
 
     def post(self, path, data, headers=None):
         headers = headers or {}
@@ -331,36 +327,11 @@ class Router:
             if parts == ["engine", "select"]:
                 self._ensure_idle()
                 return self._ok(self._call(self.app.select_engine, data["game_root"]))
-            if parts == ["career", "import"]:
-                return self._ok(self._call(self.app.SAVE_LIBRARY.start, data["path"]), 202)
-            if parts == ["career", "import", "cancel"]:
-                return self._ok(self._call(self.app.SAVE_LIBRARY.cancel_import, data.get("id")))
-            if parts == ["career", "team"]:
-                return self._ok(self._call(self.app.SAVE_LIBRARY.club,
-                                           data["save_id"], data["club_uid"]))
-            if parts == ["career", "load"]:
-                self._ensure_idle()
-                return self._ok(self._call(
-                    self.app.SAVE_LIBRARY.load_team,
-                    data["save_id"], data["club_uid"], data["tactic_index"],
-                    data.get("lineup"), 0, data["scenario"], data.get("bench")))
-            if parts == ["career", "selection"]:
+            if parts == ["selection"]:
                 self._ensure_idle()
                 return self._ok(self._call(
                     self.app.SAVE_LIBRARY.select_squad,
                     data["scenario"], 0, data["lineup"], data["bench"]))
-            if parts == ["career", "opponents"]:
-                self._ensure_idle()
-                return self._ok(self._call(self.app.SAVE_LIBRARY.begin_opponents,
-                                           data["save_id"], data["club_uid"]))
-            if parts == ["career", "opponents", "cancel"]:
-                return self._ok(self._call(self.app.SAVE_LIBRARY.cancel_opponents,
-                                           data["save_id"], data["club_uid"]))
-            if parts == ["career", "preview"]:
-                return self._ok(self._career_preview(data))
-            if parts == ["career", "run"]:
-                self._ensure_idle()
-                return self._ok(self._call(self.app.create_save_job, data), 202)
             if parts == ["fmf", "import"]:
                 return self._ok(self._call(self.app.import_fmf, data))
             if parts == ["fmf", "export"]:
@@ -394,24 +365,6 @@ class Router:
             raise AgentHttpError(500, "internal_error", str(error)) from None
         except Exception as error:
             raise AgentHttpError(500, "internal_error", str(error)) from None
-
-    def _career_preview(self, data):
-        report = self.app.SAVE_LIBRARY.inspect_opponents(data["save_id"], data["club_uid"])
-        opponent = next((row for row in report["opponents"] if row["key"] == data["key"]), None)
-        if opponent is None:
-            raise ValueError("对手方案未通过核实")
-        scenario = self.app.validate_scenario(data["scenario"])
-        if opponent.get("source_kind") == "original_ai_generation":
-            return self.app.desktop_generation_catalog.preview(
-                self.app.SAVE_LIBRARY, data["save_id"], int(data["club_uid"]), opponent, scenario)
-        team = self.app.SAVE_LIBRARY.opponent_team(
-            data["save_id"], opponent.get("fixture_key", opponent["key"]),
-            opponent["side"], scenario["teams"][0])
-        return {"team": team, "source": {
-            **opponent,
-            "match_roster_count": team.get("roster_size", len(team["players"])),
-            "roster_pending": False,
-        }}
 
     def _export_archive(self, function, data):
         result = function(data)

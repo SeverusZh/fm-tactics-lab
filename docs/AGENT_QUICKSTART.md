@@ -1,15 +1,15 @@
 # FM Tactics Lab Agent 快速启动
 
-> **v2 重构提示**：`career_*` 命令与“存档对战”已计划在 Phase 0.5 删除；本文件中的 `career_*` 示例不是 v2 契约。以 [DESIGN.md](../DESIGN.md) 与 [TODO.md](../TODO.md) 为准。
+v2 已删除存档对战；本文只描述自由推演、战术文件、战术池与存档战术库。
+
 
 本文面向“在本机运行 FM Tactics Lab，并让 AI Agent 通过 CLI 或 MCP 调用”的通用部署。适用于 Windows x64，FM27 已安装，且本机已准备好工具运行时或源码构建环境。
 
 ## 1. 能做什么
 
 - 查询引擎兼容状态与批次限制。
-- 从默认场景、FM27 存档、FMF 战术文件或已有实验创建草案。
+- 从默认场景、FMF 战术文件或已有实验创建草案。
 - 语义化修改双阶段战术、角色、职责、定位球之外的战术层设置。
-- 提交自由推演或存档对战批次，按种子运行并对比；自由模式支持随机客队战术池与 A/B 共享抽签。
 - 等待、取消、续跑、分页读取结果与导出 CSV；排队中的批次可立即取消。
 - 通过 MCP 暴露同一套能力给任意支持 stdio 的 Agent 客户端。
 
@@ -89,7 +89,6 @@ endpoint.json 包含：
 | run | 自由推演批次，可带 baseline 对照 |
 | job list/get/wait/action/logs/export | 任务管理 |
 | results summary/matches/match/csv | 结果读取；随机模式含每套客队战术抽中次数与逐场抽签列 |
-| career import/status/team/opponents/preview/cancel/run | 存档对战 |
 | fmf import/export、setpiece export | 战术文件往返 |
 
 退出码：
@@ -143,7 +142,7 @@ endpoint.json 包含：
 
 能力面：
 
-- 28 个工具：状态、引擎、草案、存档、运行、任务、结果与战术文件。
+- 21 个工具：状态、引擎、草案、运行、任务、结果与战术文件。
 - 3 个静态资源与 5 个资源模板：manifest、catalog、status、draft、job、save。
 - 3 个 prompt：单变量战术实验、基线对比、多对手扫描。
 - 支持进度通知、取消与结构化错误。
@@ -175,17 +174,10 @@ results_summary
 
 同一任务的 A/B 共享一次抽签；summary 的 tactic_pool.draws 给出每套客队战术的抽中次数。跨任务 results_compare 会核对抽签，抽中不同战术时返回 comparable=false。
 
-存档对战：
 
 ```text
-career_import save_path="<存档路径>" wait=true
-career_status
-career_team save_id club_uid
 draft_create source=save save_id club_uid tactic_index
 draft_validate
-career_opponents save_id club_uid wait=true
-career_preview save_id club_uid key draft_id
-career_run save_id club_uid draft_id opponents=[key] count=2 first_seed=1 workers=1
 job_wait
 results_summary
 ```
@@ -216,7 +208,6 @@ results_summary
 ## 10. 已知限制
 
 - 同一时刻只允许一个批次任务，按创建顺序串行执行。
-- 随机客队战术池只支持自由推演；定位球片段与存档对战不支持。
 - 定位球片段实验、实验执行力与原生 AI 生成对手只作为场景字段提交，暂无独立 MCP 工具。
 - 仅本机回环访问。
 - 不同 FM27 构建需要匹配的适配器；升级后重新执行兼容预检。

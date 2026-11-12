@@ -183,10 +183,10 @@ class _Handler(BaseHTTPRequestHandler):
             return self._send(200, {
                 "api": "fm27lab/v1", "server_version": "test", "adapter_version": "test",
                 "scenario_schema": 3, "scenario_view_schema": 4, "batch_schema": 1,
-                "capabilities": ["free_run", "career_save", "comparison", "fmf",
+                "capabilities": ["free_run", "comparison", "fmf",
                                  "repair", "resume", "cancel", "idempotency"],
-                "limits": {"max_seeds": 10000, "max_workers": 256, "max_opponents": 40,
-                           "max_career_count": 10000, "max_body_bytes": 8000000,
+                "limits": {"max_seeds": 10000, "max_workers": 256,
+                           "max_body_bytes": 8000000,
                            "max_import_bytes": 8000000, "max_draft_bytes": 5242880},
                 "schemas": "/api/agent/v1/schemas",
             })
@@ -197,7 +197,7 @@ class _Handler(BaseHTTPRequestHandler):
                     "message": "ok", "disposition": "verified",
                     "profile": "fm27_desktop_2493426_adapter_v1",
                 },
-                "active_job": None, "save_active": None,
+                "active_job": None,
                 "server": {"pid": 1, "port": self.state.port, "api": "fm27lab/v1"},
             })
         if path == "/api/agent/v1/catalog":
@@ -250,10 +250,6 @@ class _Handler(BaseHTTPRequestHandler):
             if len(parts) == 7 and parts[5] == "logs":
                 return self._send_raw(200, json.dumps({"event": "native_timings",
                                                        "log": parts[6]}) + "\n")
-        if parts[:4] == ["api", "agent", "v1", "career"] and parts[4:] == ["status"]:
-            return self._send(200, {"status": "complete", "id": query.get("id") or "a" * 16,
-                                    "date": "2026-01-01", "build": "test",
-                                    "managed": [], "clubs": []})
         return self._error(404, "unknown_endpoint", "路径不存在")
 
     def do_POST(self):
@@ -282,37 +278,8 @@ class _Handler(BaseHTTPRequestHandler):
         if path == "/api/agent/v1/engine/select":
             return self._send(200, {"compatible": True, "can_simulate": True,
                                     "message": "ok", "selected_game_root": body.get("game_root")})
-        if path == "/api/agent/v1/career/import":
-            return self._send(202, {"id": "a" * 16, "reused": False})
-        if path == "/api/agent/v1/career/status":
-            return self._send(200, {"status": "complete", "id": "a" * 16,
-                                    "date": "2026-01-01", "build": "test",
-                                    "managed": [], "clubs": []})
-        if path == "/api/agent/v1/career/team":
-            return self._send(200, {
-                "players": [{"uid": 1, "name": "球员一", "positions": [1], "ca": 120}],
-                "tactics": [{"index": 0, "name": "战术一", "team_id": 1, "available": True}],
-                "selections": [], "source_date": "2026-01-01",
-            })
-        if path == "/api/agent/v1/career/load":
-            return self._send(200, {"scenario": make_scenario(), "source": {
-                "save_id": body.get("save_id"), "club_uid": body.get("club_uid"),
-                "tactic_index": body.get("tactic_index"), "tactic_name": "战术一"}})
-        if path == "/api/agent/v1/career/selection":
+        if path == "/api/agent/v1/selection":
             return self._send(200, {"scenario": body.get("scenario")})
-        if path == "/api/agent/v1/career/opponents":
-            return self._send(200, {"status": "complete", "opponents": [{
-                "key": "coach:1", "name": "对手", "side": 1, "available": True,
-                "source_kind": "coach_preference_preset"}]})
-        if path in ("/api/agent/v1/career/opponents/cancel",
-                    "/api/agent/v1/career/import/cancel"):
-            return self._send(200, {"accepted": True})
-        if path == "/api/agent/v1/career/preview":
-            return self._send(200, {"team": make_scenario()["teams"][1],
-                                    "source": {"key": body.get("key")}})
-        if path == "/api/agent/v1/career/run":
-            status, payload = self.state.create_job(body, "career")
-            return self._send(status, payload)
         if path == "/api/agent/v1/fmf/import":
             return self._send(200, {"scenario": body.get("scenario"),
                                     "report": {"native_roundtrip_verified": True}})
@@ -391,10 +358,7 @@ class MockAgentServer:
                           for index, (entry, row) in enumerate(zip(
                               pool["entries"], fm27_tactic_pool.probabilities(pool["entries"])))]
             draws = fm27_tactic_pool.draws(pool, seeds, job_id)
-        if mode == "career":
-            total = len(body.get("opponents") or []) * int(body.get("count") or 0)
-        else:
-            total = len(seeds) * (2 if body.get("reference") else 1)
+        total = len(seeds) * (2 if body.get("reference") else 1)
         scenarios = [("B", body.get("scenario"))]
         if body.get("reference"):
             scenarios.insert(0, ("A", body.get("reference")))
@@ -417,7 +381,7 @@ class MockAgentServer:
             "total": total or len(runs),
             "runs": runs,
             "failures": [],
-            "mode": "comparison" if body.get("reference") or mode == "career" else "single",
+            "mode": "comparison" if body.get("reference") else "single",
             "created": time.time(),
             "workers": body.get("workers") or 1,
             "event_details": body.get("event_details", True),

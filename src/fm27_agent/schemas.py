@@ -10,8 +10,6 @@ DRAFT_ID = {
     "description": "草案标识，格式为 dr_ 加 12 位十六进制",
 }
 JOB_ID = {"type": "string", "minLength": 1, "description": "任务标识"}
-SAVE_ID = {"type": "string", "minLength": 1, "description": "存档标识"}
-CLUB_UID = {"type": "integer", "minimum": 0, "description": "俱乐部 UID"}
 SIDE = {"type": "integer", "enum": [0, 1], "description": "球队侧 0 或 1，对应 scenario.teams 下标"}
 PHASE = {
     "type": "string",
@@ -75,24 +73,10 @@ SCENARIO_PATH = {
 _DRAFT_CREATE_PROPERTIES = {
     "source": {
         "type": "string",
-        "enum": ["default", "save", "fmf", "job", "inline", "draft"],
+        "enum": ["default", "fmf", "job", "inline", "draft"],
         "description": "草案来源：draft 表示从 base_draft_id 克隆",
     },
     "name": {"type": "string", "maxLength": 100, "description": "草案名称"},
-    "save_id": SAVE_ID,
-    "club_uid": CLUB_UID,
-    "tactic_index": {"type": "integer", "minimum": 0, "description": "存档战术序号"},
-    "lineup": {
-        "type": "array",
-        "items": {"type": "integer", "minimum": 0},
-        "description": "存档来源的可选首发列表",
-    },
-    "bench": {
-        "type": "array",
-        "items": {"type": "integer", "minimum": 0},
-        "maxItems": 12,
-        "description": "存档来源的可选替补列表",
-    },
     "side": SIDE,
     "file_base64": {"type": "string", "description": "FMF 文件内容的 base64"},
     "file_path": {"type": "string", "minLength": 1, "description": "FMF 文件本机路径"},
@@ -172,7 +156,7 @@ _FMF_IMPORT_PROPERTIES = {
 TOOLS = [
     _tool(
         "lab_status",
-        "读取应用清单、引擎兼容状态、活动任务与存档活动状态。",
+        "读取应用清单、引擎兼容状态与活动任务状态。",
         _object({}),
     ),
     _tool(
@@ -183,7 +167,7 @@ TOOLS = [
     ),
     _tool(
         "draft_create",
-        "从默认场景、存档、战术文件、任务导出、内联场景或已有草案创建草案。"
+        "从默认场景、战术文件、任务导出、内联场景或已有草案创建草案。"
         "inline 来源可用 scenario 对象或 scenario_path 文件路径，大场景建议用文件路径。"
         "场景中的 away_tactic_pool 在所有来源（draft、job、fmf、inline）间保持不变。",
         _object(_DRAFT_CREATE_PROPERTIES, required=("source",)),
@@ -259,68 +243,6 @@ TOOLS = [
         },
     ),
     _tool(
-        "career_import",
-        "导入 .fm 存档并返回 save_id；wait 为真时等待到终态或超时。",
-        _object(
-            {
-                "save_path": {"type": "string", "minLength": 1, "description": "存档文件路径"},
-                "wait": WAIT,
-                "timeout_seconds": TIMEOUT_SECONDS,
-            },
-            required=("save_path",),
-        ),
-    ),
-    _tool(
-        "career_status",
-        "读取存档导入进度与元数据；省略 save_id 时返回当前存档状态。",
-        _object({"save_id": SAVE_ID}),
-    ),
-    _tool(
-        "career_team",
-        "读取存档球队的球员、战术列表与选择。",
-        _object({"save_id": SAVE_ID, "club_uid": CLUB_UID},
-                required=("save_id", "club_uid")),
-    ),
-    _tool(
-        "career_opponents",
-        "扫描同联赛对手；wait 为真时等待完整报告或超时。",
-        _object({"save_id": SAVE_ID, "club_uid": CLUB_UID, "wait": WAIT,
-                 "timeout_seconds": TIMEOUT_SECONDS},
-                required=("save_id", "club_uid")),
-    ),
-    _tool(
-        "career_preview",
-        "用草案场景预览指定对手，返回对手球队与来源。",
-        _object(
-            {
-                "save_id": SAVE_ID,
-                "club_uid": CLUB_UID,
-                "key": {"type": "string", "minLength": 1, "description": "对手 key"},
-                "draft_id": DRAFT_ID,
-            },
-            required=("save_id", "club_uid", "key", "draft_id"),
-        ),
-    ),
-    _tool(
-        "career_cancel",
-        "取消存档导入或对手扫描。",
-        {
-            "type": "object",
-            "properties": {
-                "kind": {"type": "string", "enum": ["import", "opponents"],
-                         "description": "取消类型"},
-                "save_id": SAVE_ID,
-                "club_uid": CLUB_UID,
-            },
-            "required": ["kind", "save_id"],
-            "allOf": [{
-                "if": {"properties": {"kind": {"const": "opponents"}},
-                       "required": ["kind"]},
-                "then": {"required": ["club_uid"]},
-            }],
-        },
-    ),
-    _tool(
         "experiment_run",
         "提交自由模式批次；单草案或 candidates 多草案均可，提供 baseline_draft_id 时每个草案做同种子 A/B 对照。"
         "场景启用 away_tactic_pool 时，同一任务的 A/B 共用同一套客队战术分配；轮战模式要求种子数等于条目数乘轮数。"
@@ -352,33 +274,6 @@ TOOLS = [
             "required": ["seeds"],
             "oneOf": [{"required": ["draft_id"]}, {"required": ["candidates"]}],
         },
-    ),
-    _tool(
-        "career_run",
-        "提交存档对战批次；count 为每对手总场数，必须偶数且主客场各半。",
-        _object(
-            {
-                "save_id": SAVE_ID,
-                "club_uid": CLUB_UID,
-                "draft_id": DRAFT_ID,
-                "opponents": {
-                    "type": "array",
-                    "items": {"type": "string", "minLength": 1},
-                    "minItems": 1,
-                    "maxItems": 40,
-                    "description": "对手 key 列表，来自 career_opponents",
-                },
-                "count": {"type": "integer", "minimum": 2, "maximum": 10000,
-                          "multipleOf": 2, "description": "每对手总场数，必须偶数"},
-                "first_seed": {"type": "integer", "minimum": 0, "maximum": 4294967295,
-                               "description": "首场种子"},
-                "baseline_draft_id": DRAFT_ID,
-                "workers": WORKERS,
-                "event_details": EVENT_DETAILS,
-                "name": {"type": "string", "maxLength": 100, "description": "批次名称"},
-            },
-            required=("save_id", "club_uid", "draft_id", "opponents", "count", "first_seed"),
-        ),
     ),
     _tool(
         "job_get",
@@ -560,7 +455,7 @@ RESOURCES = [
     {
         "uri": "fm27://status",
         "name": "status",
-        "description": "引擎兼容、活动任务与存档状态",
+        "description": "引擎兼容与活动任务状态",
         "mimeType": "application/json",
     },
     {
@@ -602,12 +497,6 @@ RESOURCE_TEMPLATES = [
         "description": "单场原始 JSONL 日志",
         "mimeType": "application/jsonl",
     },
-    {
-        "uriTemplate": "fm27://saves/{save_id}",
-        "name": "save",
-        "description": "存档导入状态与元数据",
-        "mimeType": "application/json",
-    },
 ]
 
 PROMPTS = [
@@ -627,16 +516,6 @@ PROMPTS = [
             {"name": "baseline_draft_id", "description": "基线草案标识", "required": True},
             {"name": "draft_id", "description": "当前草案标识", "required": True},
             {"name": "seeds", "description": "起始种子与场数，格式 101:10", "required": False},
-        ],
-    },
-    {
-        "name": "opponent_sweep",
-        "description": "引导存档多对手扫描与批次提交。",
-        "arguments": [
-            {"name": "save_id", "description": "存档标识", "required": True},
-            {"name": "club_uid", "description": "俱乐部 UID", "required": True},
-            {"name": "draft_id", "description": "待测草案标识", "required": True},
-            {"name": "count", "description": "每个对手的场数，必须偶数", "required": False},
         ],
     },
 ]

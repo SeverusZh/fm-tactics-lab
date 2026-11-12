@@ -42,15 +42,16 @@ playersView=function(){
  const bulk=fragment.querySelector('.team-bulk-controls')?.outerHTML||'';
  return `${toolbar()}<div class="player-layout"><aside class="card player-list"><div style="padding:12px"><b>完整一线队 · ${t.squad.length}人</b><p class="tiny muted">未入选球员保留在这里，不参与模拟。</p><button class="button small" id="squad-selection">排首发／选替补</button></div>${t.squad.map((p,i)=>`<button data-squad-player="${i}" class="player-item ${i===squadPlayer?'active':''}"><span class="number">${i+1}</span><span>${esc(p.name)}<small>${esc(squadStatus(p,t))}</small></span></button>`).join('')}</aside><section class="card"><div class="card-body">${bulk}<h2>${esc(p.name)}</h2><p class="tiny muted">${esc(squadStatus(p,t))} · CA ${p.native_profile?.current_ability??'未知'} · 所有属性可编辑，未入选球员的修改不会进入本场模拟。</p><label>姓名 <input id="squad-name" maxlength="48" value="${esc(p.name)}"></label><label class="raw-toggle"><input id="raw" type="checkbox" ${raw?'checked':''}>内部原值</label><div class="squad-attributes">${catalog.attributes.map(a=>`<label>${esc(a.label)}<input type="number" data-squad-attribute="${a.id}" value="${a.id<15||raw?p.attributes[a.id]:p.attributes[a.id]/5}" min="0" max="${a.id<15||!raw?20:100}" step="${a.id<15||raw?1:0.2}"></label>`).join('')}</div><button class="button small" id="squad-attribute-reset">恢复该球员导入属性</button></div></section></div>`;
 };
-showSaveLineup=function(){
- const t=state.teams[0],loaded=!!(saveLoaded?.club_uid===saveClub&&t.squad);
- if(loaded)syncSquadFromMatch(t);
- const roster=loaded?t.squad.map(p=>({uid:p.source_uid,name:p.name})):saveRoster.players;
- const picks=loaded?t.lineup.map(i=>t.players[i].source_uid):saveRoster.picks;
- const bench=loaded?t.players.slice(0,t.roster_size).filter((p,i)=>!t.lineup.includes(i)).map(p=>p.source_uid):(saveRoster.bench||[]);
+showSquadSelection=function(){
+ const t=state.teams[0];
+ if(!t.squad){toast('当前方案没有完整一线队名单');return;}
+ syncSquadFromMatch(t);
+ const roster=t.squad.map(p=>({uid:p.source_uid,name:p.name}));
+ const picks=t.lineup.map(i=>t.players[i].source_uid);
+ const bench=t.players.slice(0,t.roster_size).filter((p,i)=>!t.lineup.includes(i)).map(p=>p.source_uid);
  const dialog=document.createElement('dialog');dialog.className='save-dialog squad-selection-dialog';
- dialog.innerHTML=`<h2>一线队 ${roster.length} 人 · 本场最多23人</h2><p>选择11名首发和最多12名替补。未选球员继续保留在一线队，不参与本场模拟。不自动补人。</p><div class="squad-pick-grid">${Array.from({length:11},(_,i)=>`<label>${esc(loaded?t.phases[0][i].position:'首发 '+(i+1))}<select data-career-pick="${i}"><option value="">请选择球员</option>${roster.map(p=>`<option value="${p.uid}" ${picks[i]===p.uid?'selected':''}>${esc(p.name)}</option>`).join('')}</select></label>`).join('')}</div><h3>替补 <span id="squad-bench-count"></span></h3><div class="squad-bench-list">${roster.map(p=>`<label><input type="checkbox" data-squad-bench="${p.uid}" ${bench.includes(p.uid)?'checked':''}>${esc(p.name)}</label>`).join('')}</div><div class="dialog-actions"><button class="button" data-close>取消</button><button class="button primary" data-accept>应用比赛名单</button></div>`;
- const currentPicks=()=>[...dialog.querySelectorAll('[data-career-pick]')].map(s=>s.value===''?null:Number(s.value));
+ dialog.innerHTML=`<h2>一线队 ${roster.length} 人 · 本场最多23人</h2><p>选择11名首发和最多12名替补。未选球员继续保留在一线队，不参与本场模拟。不自动补人。</p><div class="squad-pick-grid">${Array.from({length:11},(_,i)=>`<label>${esc(t.phases[0][i].position)}<select data-squad-pick="${i}"><option value="">请选择球员</option>${roster.map(p=>`<option value="${p.uid}" ${picks[i]===p.uid?'selected':''}>${esc(p.name)}</option>`).join('')}</select></label>`).join('')}</div><h3>替补 <span id="squad-bench-count"></span></h3><div class="squad-bench-list">${roster.map(p=>`<label><input type="checkbox" data-squad-bench="${p.uid}" ${bench.includes(p.uid)?'checked':''}>${esc(p.name)}</label>`).join('')}</div><div class="dialog-actions"><button class="button" data-close>取消</button><button class="button primary" data-accept>应用比赛名单</button></div>`;
+ const currentPicks=()=>[...dialog.querySelectorAll('[data-squad-pick]')].map(s=>s.value===''?null:Number(s.value));
  const refresh=()=>{const starts=new Set(currentPicks());dialog.querySelectorAll('[data-squad-bench]').forEach(c=>{c.disabled=starts.has(+c.dataset.squadBench);if(c.disabled)c.checked=false;});const count=dialog.querySelectorAll('[data-squad-bench]:checked').length;dialog.querySelector('#squad-bench-count').textContent=`${count} / 12`;};
  document.body.append(dialog);dialog.querySelectorAll('select,input').forEach(e=>e.onchange=refresh);refresh();
  dialog.querySelector('[data-close]').onclick=()=>dialog.close();dialog.querySelector('[data-accept]').onclick=async()=>{
@@ -58,20 +59,18 @@ showSaveLineup=function(){
   if(starters.includes(null)||new Set(starters).size!==11){toast('请选择11名不同的首发球员');return;}
   if(substitutes.length>12){toast('最多选择12名替补');return;}
   try{
-   if(loaded){const result=await api('/api/save/selection',{scenario:state,lineup:starters,bench:substitutes});state=result.scenario;side=slot=player=0;save();render();}
-   saveRoster??={players:roster};saveRoster.picks=starters;saveRoster.bench=substitutes;dialog.close();drawSaveMode();toast(`比赛名单：11名首发、${substitutes.length}名替补；其余球员不参与模拟`);
+   const result=await api('/api/save/selection',{scenario:state,lineup:starters,bench:substitutes});state=result.scenario;side=slot=player=0;save();render();
+   dialog.close();toast(`比赛名单：11名首发、${substitutes.length}名替补；其余球员不参与模拟`);
   }catch(e){toast(e.message);}
  };dialog.onclose=()=>dialog.remove();dialog.showModal();
 };
-const squadApiPrevious=api;
-api=async function(url,data){if(url==='/api/save/load'&&data)data={...data,bench:saveRoster?.bench||[]};return squadApiPrevious(url,data);};
 const squadBindPrevious=bind;
 bind=function(){squadBindPrevious();
- if($('#board-match-squad'))$('#board-match-squad').onclick=showSaveLineup;
+ if($('#board-match-squad'))$('#board-match-squad').onclick=showSquadSelection;
  $$('[data-bench-player]').forEach(b=>b.onclick=()=>{const index=+b.dataset.benchPlayer;player=index;squadPlayer=team().squad.findIndex(p=>p.source_uid===team().players[index].source_uid);view='players';render();});
  $$('[data-squad-player]').forEach(b=>b.onclick=()=>{squadPlayer=+b.dataset.squadPlayer;render();});
  $$('[data-squad-attribute]').forEach(input=>input.onchange=()=>{const a=+input.dataset.squadAttribute,v=Number(input.value),value=a<15||raw?v:Math.round(v*5);if(!Number.isFinite(value)||!Number.isInteger(value)||value<0||value>(a<15?20:100)){toast('属性超出范围');render();return;}team().squad[squadPlayer].attributes[a]=value;syncMatchFromSquad(team());save();});
- if($('#squad-selection'))$('#squad-selection').onclick=showSaveLineup;
+ if($('#squad-selection'))$('#squad-selection').onclick=showSquadSelection;
  if($('#squad-name'))$('#squad-name').onchange=e=>{team().squad[squadPlayer].name=e.target.value.slice(0,48);syncMatchFromSquad(team());save();render();};
  if($('#squad-attribute-reset'))$('#squad-attribute-reset').onclick=()=>{const p=team().squad[squadPlayer];p.attributes=clone(p.initial_attributes);syncMatchFromSquad(team());save();render();};
 };

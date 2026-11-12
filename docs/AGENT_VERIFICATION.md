@@ -1,6 +1,7 @@
 # Agent 接入验收说明
 
-> **v2 重构提示**：本文件包含“存档对战”与 `career_*` 的验收内容；这些入口将在 Phase 0.5 删除，删除后本文件必须同步改写。当前内容不代表 v2 契约。
+v2 已删除存档对战；本文只描述自由推演、战术文件、战术池与存档战术库的验收。
+
 
 状态：随 Agent 接入实现一起提供
 适用范围：Windows x64 目标机；开发机可为 Linux
@@ -20,7 +21,6 @@
 | --- | --- |
 | Linux，Python 3.12 及以上 | 契约助手、HTTP 客户端、草案、CLI、MCP、mock 服务端 |
 | Windows，Python 3.12，无游戏 | 服务端导入与语法、CLI/MCP 启动、发现与鉴权错误路径 |
-| Windows，FM27 已安装 | 引擎预检、自由推演、存档对战、FMF 往返、取消与恢复 |
 
 ## 3. 自动化测试
 
@@ -39,7 +39,6 @@ python3 -m unittest discover -s tests -v
 - test_agent_server：路由、清单、分页、幂等、忙碌冲突、shutdown；队列位置、排队取消与全局串行闸门。
 - test_tactics_server_queue：离线加载服务端，验证 UI 409、Agent FIFO 串行、排队取消立即落 cancelled、池展开与 provenance、续跑忙时冲突。
 - test_tactics_server_queue 与 test_tactic_pool 覆盖池场景：A/B 同抽签、逐场抽签记录、CSV 抽签列、跨任务配对保护。
-- test_agent_cli：命令行参数、JSON 输出、退出码、等待、CSV、career 与 FMF。
 - test_agent_mcp：stdio 初始化、工具列表、工具调用、资源、prompt、错误。
 
 Mock 服务端位于 tests/agent_mock.py，只实现协议形状，不实现业务校验；它按真实抽签算法模拟战术池，A/B 同 seed 抽中同一套客队战术，并提供 job export 的抽签 provenance。
@@ -67,7 +66,6 @@ python3 -m unittest discover -s tests
 | A2 | 调用 manifest 与 schemas | 字段齐全，主版本为 fm27lab/v1，schema 可解析 |
 | A3 | draft create default；edit mentality；validate；delete | 草案文件生成、编辑生效、校验通过、删除后不可读 |
 | A4 | 用 CLI 与 MCP 各跑一次 A/B 对比，每方案 2 场 | 任务完成，metrics 含 A/B，paired 存在 |
-| A5 | career import、team、opponents、preview、run | 存档导入可取消；对手报告生成；count 口径为每对手总场数 |
 | A6 | job list、job get、cancel、resume、rename、delete、export | 分页正确；取消后状态 cancelled；重启后可 resume 未完成任务 |
 | A7 | results summary、matches、match、csv | 指标、逐场、事件、CSV 列与规格 7.4 一致；随机模式 summary 含 tactic_pool.draws、matches 含 tactic_pool_entry、CSV 含抽签列 |
 | A8 | fmf import、export、setpiece export | 导出文件可被原版解析器回读；report 中回读校验为真 |

@@ -30,7 +30,7 @@ const poolSnapshot=()=>state?.away_tactic_pool?clone(state.away_tactic_pool):nul
 let poolCountRestore=null,poolPanelScroll=0,poolPreviousFocus=null;
 function syncPoolCount(roundsOverride){
  const input=$('#count');if(!input)return;
- const pool=poolRead(),locked=saveMode!=='save'&&!!pool.enabled&&!!pool.rotation?.enabled;
+ const pool=poolRead(),locked=!!pool.enabled&&!!pool.rotation?.enabled;
  if(!locked){
   if(poolCountRestore){input.value=poolCountRestore.value;input.disabled=poolCountRestore.disabled;poolCountRestore=null}
   return;
@@ -42,9 +42,9 @@ function syncPoolCount(roundsOverride){
 }
 function syncPoolBar(){
  const button=$('#pool-open');if(!button)return;
- if(saveMode==='save'&&!poolPanel.hidden)closePoolPanel();
+
  const status=poolStatus();
- button.hidden=saveMode==='save';
+ button.hidden=false;
  button.setAttribute('aria-expanded',String(!poolPanel.hidden));
  button.innerHTML=`战术池 <span class="tag ${status.cls}">${status.label}</span>`;
  syncPoolCount();
@@ -116,7 +116,7 @@ function fillPoolPanel(){
  if(next)next.scrollTop=poolPanelScroll;
 }
 function openPoolPanel(){
- if(!state||saveMode==='save')return;
+ if(!state)return;
  poolPreviousFocus=document.activeElement instanceof HTMLElement?document.activeElement:null;
  fillPoolPanel();
  poolPanel.hidden=false;
@@ -223,7 +223,7 @@ syncPoolBar();
 const poolRunPrevious=$('#run')?.onclick;
 if($('#run'))$('#run').onclick=async function(event){
  try{
-  if(saveMode!=='save'&&state){
+  if(state){
    const pool=poolRead();
    if(pool.enabled&&pool.rotation?.enabled){
     syncPoolCount();

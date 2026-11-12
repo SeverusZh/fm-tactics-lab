@@ -326,81 +326,12 @@ class Client:
             body["name"] = name
         return self.post(PREFIX + "/runs", body, idempotency_key=idempotency_key)
 
-    # Career save
-
-    def career_import(self, save_path, idempotency_key=None):
-        return self.post(PREFIX + "/career/import", {"path": str(save_path)},
-                         idempotency_key=idempotency_key)
-
-    def career_status(self, save_id=None):
-        return self.get(PREFIX + "/career/status", {"id": save_id})
-
-    def career_import_cancel(self, save_id):
-        return self.post(PREFIX + "/career/import/cancel", {"id": save_id})
-
-    def career_team(self, save_id, club_uid):
-        return self.post(PREFIX + "/career/team", {"save_id": save_id, "club_uid": int(club_uid)})
-
-    def career_load(self, save_id, club_uid, tactic_index, scenario,
-                    lineup=None, bench=None):
-        body = {
-            "save_id": save_id,
-            "club_uid": int(club_uid),
-            "tactic_index": int(tactic_index),
-            "scenario": scenario,
-        }
-        if lineup is not None:
-            body["lineup"] = list(lineup)
-        if bench is not None:
-            body["bench"] = list(bench)
-        return self.post(PREFIX + "/career/load", body)
-
-    def career_selection(self, scenario, lineup, bench):
-        return self.post(PREFIX + "/career/selection", {
+    def selection(self, scenario, lineup, bench):
+        return self.post(PREFIX + "/selection", {
             "scenario": scenario,
             "lineup": list(lineup),
             "bench": list(bench),
         })
-
-    def career_opponents(self, save_id, club_uid):
-        return self.post(PREFIX + "/career/opponents", {
-            "save_id": save_id,
-            "club_uid": int(club_uid),
-        })
-
-    def career_opponents_cancel(self, save_id, club_uid):
-        return self.post(PREFIX + "/career/opponents/cancel", {
-            "save_id": save_id,
-            "club_uid": int(club_uid),
-        })
-
-    def career_preview(self, save_id, club_uid, key, scenario):
-        return self.post(PREFIX + "/career/preview", {
-            "save_id": save_id,
-            "club_uid": int(club_uid),
-            "key": key,
-            "scenario": scenario,
-        })
-
-    def career_run(self, save_id, club_uid, scenario, opponents, count,
-                   first_seed, reference=None, workers=None,
-                   event_details=True, name=None, idempotency_key=None):
-        body = {
-            "save_id": save_id,
-            "club_uid": int(club_uid),
-            "scenario": scenario,
-            "opponents": [{"key": key} for key in opponents],
-            "count": int(count),
-            "first_seed": int(first_seed),
-            "event_details": bool(event_details),
-        }
-        if reference is not None:
-            body["reference"] = reference
-        if workers is not None:
-            body["workers"] = workers
-        if name is not None:
-            body["name"] = name
-        return self.post(PREFIX + "/career/run", body, idempotency_key=idempotency_key)
 
     # FMF and set pieces
 

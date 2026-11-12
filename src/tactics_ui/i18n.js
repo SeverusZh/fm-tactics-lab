@@ -21,7 +21,7 @@ window.FM27I18n = (() => {
  function refreshNames() {
   names.clear();seen=new WeakSet();
   // Each optional page is loaded after this module, so guard lexical bindings.
-  for (const read of [()=>state,()=>reference,()=>saveInfo,()=>saveRoster,()=>saveOpponents,()=>saveLoaded,()=>librarySave,()=>libraryLeagues,()=>libraryReport,()=>selectedJob?.runs?.[selectedJob?.detailIndex || 0]]) {
+  for (const read of [()=>state,()=>reference,()=>librarySave,()=>libraryLeagues,()=>libraryReport,()=>selectedJob?.runs?.[selectedJob?.detailIndex || 0]]) {
    try { remember(read()); } catch (_) { /* Page is not initialized yet. */ }
   }
  }

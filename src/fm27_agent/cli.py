@@ -44,18 +44,16 @@ EXIT_BY_ERROR = {
 }
 
 BAD_JOB_STATES = ("error", "cancelled", "interrupted")
-CAREER_TERMINAL_STATES = ("complete", "error", "cancelled", "empty")
 CSV_FREE_COLUMNS = ("mode", "variant", "seed", "tactic_pool_entry_index",
                     "tactic_pool_entry_name", "home_goals", "away_goals", "shots",
                     "shots_on_target", "xg", "possession", "passes",
                     "completed_passes", "elapsed_seconds", "attempts", "log")
-CSV_CAREER_COLUMNS = ("opponent_key", "venue", "tested_side")
 CSV_EVENT_COLUMNS = ("goals", "cards")
 
 _GLOBAL_FLAGS = {"--json": "json", "--quiet": "quiet", "--no-color": "no_color"}
 _GLOBAL_VALUES = {"--data-dir": "data_dir", "--endpoint": "endpoint",
                   "--token": "token", "--timeout": "timeout"}
-_COMMAND_WORDS = {"status", "engine", "draft", "run", "job", "results", "career",
+_COMMAND_WORDS = {"status", "engine", "draft", "run", "job", "results",
                   "fmf", "setpiece"}
 _ANSI = {"red": "31", "green": "32", "yellow": "33", "cyan": "36"}
 
@@ -488,51 +486,6 @@ def _print_csv(value):
                        ("sha256", value.get("sha256"))]))
 
 
-def _print_career_state(value):
-    pairs = [(key, value.get(key)) for key in
-             ("save_id", "id", "status", "date", "build", "reused", "timed_out")
-             if value.get(key) is not None]
-    for key in ("clubs", "managed", "warnings"):
-        if isinstance(value.get(key), list):
-            pairs.append((key, len(value[key])))
-    print(_pairs_text(pairs))
-
-
-def _print_career_team(value):
-    players = value.get("players") or []
-    tactics = value.get("tactics") or []
-    print(_table(["uid", "name", "positions", "ca"],
-                 [[player.get("uid"), player.get("name"), player.get("positions"),
-                   player.get("ca")] for player in players]))
-    print(_table(["index", "name", "available"],
-                 [[tactic.get("index"), tactic.get("name"), tactic.get("available")]
-                  for tactic in tactics]))
-    if value.get("source_date"):
-        print(f"source_date: {value['source_date']}")
-    selections = value.get("selections")
-    if isinstance(selections, list):
-        print(f"selections: {len(selections)}")
-
-
-def _print_career_opponents(value):
-    rows = [[opponent.get("key"), opponent.get("name"), opponent.get("side"),
-             opponent.get("available"), opponent.get("source_kind")]
-            for opponent in value.get("opponents") or []]
-    print(_table(["key", "name", "side", "available", "source_kind"], rows))
-    print(f"status: {_cell(value.get('status'))}  timed_out: "
-          f"{_cell(value.get('timed_out'))}")
-
-
-def _print_preview(value):
-    print(f"source: {_compact(value.get('source') or {})}")
-    team = value.get("team") or {}
-    print(_pairs_text([("name", team.get("name")),
-                       ("tactic", team.get("tactic_name")),
-                       ("mentality", team.get("mentality")),
-                       ("players", len(team.get("players") or [])),
-                       ("roster_size", team.get("roster_size"))]))
-
-
 def _print_mapping(value):
     if isinstance(value, dict):
         pairs = []
@@ -587,12 +540,7 @@ def _cmd_draft_create(args, client, options):
     service = DraftService(client)
     source = args.source
     params = {}
-    if source == "save":
-        if not args.save_id or args.club is None or args.tactic is None:
-            raise UsageError("save 来源需要 --save-id、--club 与 --tactic")
-        params = {"save_id": args.save_id, "club_uid": args.club,
-                  "tactic_index": args.tactic, "lineup": args.lineup, "bench": args.bench}
-    elif source == "fmf":
+    if source == "fmf":
         if not args.file:
             raise UsageError("fmf 来源需要 --file")
         if args.side is None:
@@ -919,7 +867,7 @@ def _tested_side(run, job_value):
     return side
 
 
-def _csv_row(run, job_value, career, events):
+def _csv_row(run, job_value, events):
     variant = run.get("variant")
     schedule = job_value.get("schedule") or {}
     spec = schedule.get(variant) if isinstance(schedule, dict) else None
@@ -939,10 +887,6 @@ def _csv_row(run, job_value, career, events):
            team.get("possession", ""), team.get("passes", ""),
            team.get("completed_passes", ""), run.get("elapsed_seconds", ""),
            run.get("attempts", ""), run.get("log", "")]
-    if career:
-        row.extend([spec.get("opponent_key", run.get("opponent_key", "")),
-                    spec.get("venue", run.get("venue", "")),
-                    run.get("tested_side", spec.get("tested_side", ""))])
     if events:
         payload = run.get("events") or {}
         row.extend([_compact(payload.get("goals", [])), _compact(payload.get("cards", []))])
@@ -951,11 +895,7 @@ def _csv_row(run, job_value, career, events):
 
 def _cmd_results_csv(client, args, options):
     job_value, runs = _all_runs(client, args.job_id)
-    career = bool(job_value.get("schedule")) or any(
-        "opponent_key" in run for run in runs)
     columns = list(CSV_FREE_COLUMNS)
-    if career:
-        columns.extend(CSV_CAREER_COLUMNS)
     if args.events:
         columns.extend(CSV_EVENT_COLUMNS)
     target = Path(args.out).expanduser()
@@ -965,7 +905,7 @@ def _cmd_results_csv(client, args, options):
             writer = csv.writer(handle)
             writer.writerow(columns)
             for run in runs:
-                writer.writerow(_csv_row(run, job_value, career, args.events))
+                writer.writerow(_csv_row(run, job_value, args.events))
     except OSError as error:
         raise AgentError("internal_error", f"无法写入 CSV：{error}",
                          {"path": str(target)}) from None
@@ -986,154 +926,6 @@ def _cmd_results(args, client, options):
     if args.results_command == "csv":
         return _cmd_results_csv(client, args, options)
     raise UsageError(f"未知 results 子命令：{args.results_command}")
-
-
-def _wait_career_import(client, save_id, timeout, options):
-    deadline = time.monotonic() + max(0.0, float(timeout))
-    last = [None]
-    while True:
-        status = client.career_status(save_id)
-        state = status.get("status") if isinstance(status, dict) else None
-        if state != last[0] and not options.quiet:
-            print(f"[{save_id}] {_cell(state)}", file=sys.stderr, flush=True)
-        last[0] = state
-        timed_out = time.monotonic() >= deadline
-        if state in CAREER_TERMINAL_STATES or timed_out:
-            value = dict(status) if isinstance(status, dict) else {"status": status}
-            value["save_id"] = save_id
-            value["timed_out"] = bool(timed_out and state not in CAREER_TERMINAL_STATES)
-            return value
-        time.sleep(min(1.0, max(0.05, deadline - time.monotonic())))
-
-
-def _cmd_career_import(client, args, options):
-    response = client.career_import(args.save)
-    value = dict(response) if isinstance(response, dict) else {"result": response}
-    save_id = value.get("id") or value.get("save_id")
-    if not args.wait:
-        if save_id is not None:
-            value["save_id"] = save_id
-        _emit(value, options, _print_career_state)
-        return EXIT_OK
-    if not save_id:
-        raise AgentError("internal_error", "服务端未返回存档标识")
-    value = _wait_career_import(client, save_id, args.wait_timeout, options)
-    _emit(value, options, _print_career_state)
-    return EXIT_JOB_FAILED if value.get("status") in ("error", "cancelled") else EXIT_OK
-
-
-def _cmd_career_status(client, args, options):
-    status = client.career_status(args.save_id)
-    value = dict(status) if isinstance(status, dict) else {"status": status}
-    if args.save_id is not None and "save_id" not in value:
-        value["save_id"] = args.save_id
-    _emit(value, options, _print_career_state)
-    return EXIT_OK
-
-
-def _cmd_career_team(client, args, options):
-    result = client.career_team(args.save_id, args.club)
-    _emit(result, options, _print_career_team)
-    return EXIT_OK
-
-
-def _wait_opponents(client, initial, save_id, club_uid, timeout, options):
-    deadline = time.monotonic() + max(0.0, float(timeout))
-    response = initial
-    last = [None]
-    while True:
-        state = response.get("status") if isinstance(response, dict) else None
-        if state != last[0] and not options.quiet:
-            print(f"[{save_id}] opponents {_cell(state)}", file=sys.stderr, flush=True)
-        last[0] = state
-        timed_out = time.monotonic() >= deadline
-        if state in ("complete", "error", "cancelled") or timed_out:
-            value = dict(response) if isinstance(response, dict) else {"result": response}
-            value["save_id"] = save_id
-            value["club_uid"] = club_uid
-            value["timed_out"] = bool(timed_out and state not in ("complete", "error",
-                                                                 "cancelled"))
-            return value
-        time.sleep(min(1.0, max(0.05, deadline - time.monotonic())))
-        response = client.career_opponents(save_id, club_uid)
-
-
-def _cmd_career_opponents(client, args, options):
-    response = client.career_opponents(args.save_id, args.club)
-    if args.wait:
-        value = _wait_opponents(client, response, args.save_id, args.club,
-                                args.wait_timeout, options)
-    else:
-        value = dict(response) if isinstance(response, dict) else {"result": response}
-        value["save_id"] = args.save_id
-        value["club_uid"] = args.club
-        value.setdefault("timed_out", False)
-    _emit(value, options, _print_career_opponents)
-    return EXIT_JOB_FAILED if value.get("status") in ("error", "cancelled") else EXIT_OK
-
-
-def _cmd_career_preview(client, args, options):
-    service = DraftService(client)
-    scenario = service.scenario(args.draft_id)
-    result = client.career_preview(args.save_id, args.club, args.key, scenario)
-    value = {"save_id": args.save_id, "club_uid": args.club, "key": args.key,
-             "team": result.get("team") if isinstance(result, dict) else None,
-             "source": result.get("source") if isinstance(result, dict) else None}
-    _emit(value, options, _print_preview)
-    return EXIT_OK
-
-
-def _cmd_career_cancel(client, args, options):
-    if args.kind == "import":
-        result = client.career_import_cancel(args.save_id)
-    else:
-        if args.club is None:
-            raise UsageError("opponents 取消需要 --club")
-        result = client.career_opponents_cancel(args.save_id, args.club)
-    value = dict(result) if isinstance(result, dict) else {"result": result}
-    value["kind"] = args.kind
-    value["save_id"] = args.save_id
-    _emit(value, options, _print_mapping)
-    return EXIT_OK
-
-
-def _cmd_career_run(client, args, options):
-    service = DraftService(client)
-    scenario = service.scenario(args.draft_id)
-    reference = service.scenario(args.baseline_draft) if args.baseline_draft else None
-    opponents = [item.strip() for item in str(args.opponents).split(",") if item.strip()]
-    if not opponents:
-        raise UsageError("--opponents 需要至少一个对手键")
-    if args.count <= 0:
-        raise UsageError("--count 必须大于 0")
-    if args.count % 2:
-        raise AgentError("validation_failed", "count 为每对手总场数，必须为偶数")
-    response = client.career_run(args.save_id, args.club, scenario, opponents, args.count,
-                                 args.first_seed, reference=reference,
-                                 workers=args.workers, event_details=not args.quick,
-                                 name=args.name)
-    if not args.wait:
-        _emit(response, options, _print_submission)
-        return EXIT_OK
-    return _run_and_wait(client, response, options, args.wait_timeout)
-
-
-def _cmd_career(args, client, options):
-    if args.career_command == "import":
-        return _cmd_career_import(client, args, options)
-    if args.career_command == "status":
-        return _cmd_career_status(client, args, options)
-    if args.career_command == "team":
-        return _cmd_career_team(client, args, options)
-    if args.career_command == "opponents":
-        return _cmd_career_opponents(client, args, options)
-    if args.career_command == "preview":
-        return _cmd_career_preview(client, args, options)
-    if args.career_command == "cancel":
-        return _cmd_career_cancel(client, args, options)
-    if args.career_command == "run":
-        return _cmd_career_run(client, args, options)
-    raise UsageError(f"未知 career 子命令：{args.career_command}")
 
 
 def _materialize_export(result, out):
@@ -1251,8 +1043,6 @@ def _dispatch(args, options):
         return _cmd_job(args, client, options)
     if command == "results":
         return _cmd_results(args, client, options)
-    if command == "career":
-        return _cmd_career(args, client, options)
     if command == "fmf":
         return _cmd_fmf(args, client, options)
     if command == "setpiece":
@@ -1282,20 +1072,15 @@ def _build_parser():
     draft_sub = draft.add_subparsers(dest="draft_command", required=True)
     create = draft_sub.add_parser("create", help="创建草案")
     create.add_argument("--from", dest="source", default="default",
-                        choices=["default", "save", "fmf", "job", "inline", "draft"],
+                        choices=["default", "fmf", "job", "inline", "draft"],
                         help="草案来源")
     create.add_argument("--name")
-    create.add_argument("--save-id", dest="save_id")
-    create.add_argument("--club", type=int, help="club_uid")
-    create.add_argument("--tactic", type=int, help="tactic_index")
     create.add_argument("--job", dest="job")
     create.add_argument("--variant")
     create.add_argument("--file", metavar="FMF", help="FMF 文件")
     create.add_argument("--side", type=_parse_side)
     create.add_argument("--base-draft", dest="base_draft")
     create.add_argument("--inline", metavar="FILE", help="内联场景 JSON 文件")
-    create.add_argument("--lineup", type=_parse_int_list)
-    create.add_argument("--bench", type=_parse_int_list)
     draft_sub.add_parser("list", help="列出草案")
     show = draft_sub.add_parser("show", help="查看草案")
     show.add_argument("draft_id")
@@ -1377,48 +1162,6 @@ def _build_parser():
     results_csv.add_argument("job_id")
     results_csv.add_argument("--out", required=True, metavar="FILE")
     results_csv.add_argument("--events", action="store_true")
-
-    career = sub.add_parser("career", help="存档对战")
-    career_sub = career.add_subparsers(dest="career_command", required=True)
-    career_import = career_sub.add_parser("import", help="导入存档")
-    career_import.add_argument("--save", required=True, metavar="PATH")
-    career_import.add_argument("--wait", action="store_true")
-    career_import.add_argument("--wait-timeout", dest="wait_timeout", type=float,
-                               default=60.0, metavar="SECONDS")
-    career_status = career_sub.add_parser("status", help="导入进度")
-    career_status.add_argument("--save-id", dest="save_id")
-    career_team = career_sub.add_parser("team", help="球队与战术")
-    career_team.add_argument("--save-id", dest="save_id", required=True)
-    career_team.add_argument("--club", required=True, type=int)
-    career_opponents = career_sub.add_parser("opponents", help="扫描同联赛对手")
-    career_opponents.add_argument("--save-id", dest="save_id", required=True)
-    career_opponents.add_argument("--club", required=True, type=int)
-    career_opponents.add_argument("--wait", action="store_true")
-    career_opponents.add_argument("--wait-timeout", dest="wait_timeout", type=float,
-                                  default=60.0, metavar="SECONDS")
-    career_preview = career_sub.add_parser("preview", help="对手预览")
-    career_preview.add_argument("--save-id", dest="save_id", required=True)
-    career_preview.add_argument("--club", required=True, type=int)
-    career_preview.add_argument("--key", required=True)
-    career_preview.add_argument("--draft", required=True, dest="draft_id")
-    career_cancel = career_sub.add_parser("cancel", help="取消导入或扫描")
-    career_cancel.add_argument("--save-id", dest="save_id", required=True)
-    career_cancel.add_argument("--club", type=int)
-    career_cancel.add_argument("--kind", required=True, choices=["import", "opponents"])
-    career_run = career_sub.add_parser("run", help="存档批次")
-    career_run.add_argument("--save-id", dest="save_id", required=True)
-    career_run.add_argument("--club", required=True, type=int)
-    career_run.add_argument("--draft", required=True, dest="draft_id")
-    career_run.add_argument("--opponents", required=True)
-    career_run.add_argument("--count", required=True, type=int)
-    career_run.add_argument("--first-seed", dest="first_seed", required=True, type=int)
-    career_run.add_argument("--baseline", dest="baseline_draft")
-    career_run.add_argument("--workers", type=int)
-    career_run.add_argument("--quick", action="store_true")
-    career_run.add_argument("--name")
-    career_run.add_argument("--wait", action="store_true")
-    career_run.add_argument("--wait-timeout", dest="wait_timeout", type=float,
-                            default=300.0, metavar="SECONDS")
 
     fmf = sub.add_parser("fmf", help="战术文件")
     fmf_sub = fmf.add_subparsers(dest="fmf_command", required=True)

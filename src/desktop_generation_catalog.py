@@ -48,7 +48,7 @@ def ensure(lib,key):
         t['native_coach']=next(r for r in staff if r['selector']==t['coach']['person_selector'])
         t['context']=next(c for c in context['teams']if c['team_id']==t['team']['team_id'])
     value={'binding':binding,'teams':teams,'league':d['league'],'context_policy':PROFILE,
-           'source_date':d['date'],'career_fixture_replay':False}
+           'source_date':d['date'],'fixture_replay':False}
     lib.write(cache,value);return value
 
 

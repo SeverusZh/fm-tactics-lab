@@ -1,6 +1,7 @@
 # AI Agent 接入规格
 
-> **v2 重构提示**：`career_*` 工具与“存档对战”已计划在 Phase 0.5 删除；在删除完成前，本文件中的 `career_*` 段落不代表 v2 契约。以 [DESIGN.md](../DESIGN.md) 与 [TODO.md](../TODO.md) 为准。
+v2 已删除存档对战与 `career_*` 接口；本文只描述自由推演、战术文件、战术池与存档战术库。
+
 
 状态：设计草案 v1，待评审
 适用范围：本机 Windows 部署；MCP 为主、CLI 为辅；首期核心能力
@@ -14,7 +15,6 @@
 | 形态 | MCP 为主、CLI 为辅，共用客户端库 |
 | 改造 | 允许服务端增量改造 |
 | 部署 | 仅本机 Windows |
-| 范围 | 首期自由推演与存档对战核心 |
 | 并发 | 单任务串行；UI 忙时报 409，Agent 提交进入 FIFO 队列 |
 | 草案 | draftId 与文件化草案 |
 
@@ -80,7 +80,6 @@ Agent client  ──stdio──  fm27lab-mcp sidecar ──HTTP loopback──  
 | game_root | string | 游戏安装目录，可为空 |
 | created_at | string | ISO 8601 本地时间 |
 | versions | object | server、adapter、engine_build、scenario_schema、batch_schema |
-| capabilities | array | free_run、career_save、comparison、fmf、repair、resume、cancel、idempotency |
 | limits | object | 与 manifest 中 limits 相同 |
 
 ### 3.3 无头模式与关闭
@@ -194,11 +193,9 @@ fm27lab mcp                    以 stdio 启动 MCP sidecar
 ### 4.5 幂等
 
 - 请求头 Idempotency-Key，长度 8 到 128，字符限可见 ASCII。
-- 适用端点：runs、career/import、career/run、resume。
 - 同键同载荷返回首次响应，并带响应头 Idempotency-Replayed: true。
 - 同键不同载荷返回 409 idempotency_conflict。
 - 键保存在内存，有效期 24 小时；App 重启后清空。
-- experiment_run 与 career_run 每次工具调用自动生成幂等键；token 轮换或端口变化后 MCP 重读 endpoint.json 并重试时不会重复建任务。
 
 ### 4.6 端点总表
 
@@ -227,16 +224,6 @@ fm27lab mcp                    以 stdio 启动 MCP sidecar
 | POST | /api/agent/v1/fmf/import | side、scenario、file_base64、setpiece_target | scenario、report |
 | POST | /api/agent/v1/fmf/export | side、scenario、name | filename、path、sha256、report |
 | POST | /api/agent/v1/setpiece/export | side、scenario、type、variant | filename、path、sha256、report |
-| POST | /api/agent/v1/career/import | path | 202 id、reused |
-| GET | /api/agent/v1/career/status | id | 进度与元数据 |
-| POST | /api/agent/v1/career/import/cancel | id | accepted |
-| POST | /api/agent/v1/career/team | save_id、club_uid | 球员、战术、选择 |
-| POST | /api/agent/v1/career/load | save_id、club_uid、tactic_index、lineup、bench、scenario | scenario、source |
-| POST | /api/agent/v1/career/selection | scenario、lineup、bench | scenario |
-| POST | /api/agent/v1/career/opponents | save_id、club_uid | reading、complete、error |
-| POST | /api/agent/v1/career/opponents/cancel | save_id、club_uid | accepted |
-| POST | /api/agent/v1/career/preview | save_id、club_uid、key、scenario | team、source |
-| POST | /api/agent/v1/career/run | save_id、club_uid、opponents、count、first_seed、scenario、reference、workers、event_details、name | 202 id、total |
 
 ### 4.7 清单与 Schema
 
@@ -251,12 +238,10 @@ manifest 示例：
   "scenario_schema": 3,
   "scenario_view_schema": 4,
   "batch_schema": 1,
-  "capabilities": ["free_run", "career_save", "comparison", "fmf", "repair", "resume", "cancel", "idempotency"],
   "limits": {
     "max_seeds": 10000,
     "max_workers": 256,
     "max_opponents": 40,
-    "max_career_count": 10000,
     "max_body_bytes": 8000000,
     "max_import_bytes": 8000000,
     "max_draft_bytes": 5242880
@@ -275,10 +260,6 @@ Schema 包包含：
 | Agent 端点 | 复用现有实现 |
 | --- | --- |
 | runs | 与 UI 共用的 start_run 校验、pool 展开、任务创建与 execute；Agent 路径允许 FIFO 排队 |
-| career/import 与 career/status | SaveLibrary.start 与 status |
-| career/team、load、selection、preview | SaveLibrary.club、load_team、select_squad、inspect_opponents、opponent_team |
-| career/opponents | SaveLibrary.begin_opponents |
-| career/run | create_save_job |
 | jobs 查询与操作 | JOBS、persist、resume_job、cancel |
 | validate、repair、phase-plan | validate_scenario、repair_saved_scenario、phase_inputs.pack |
 | fmf/import、fmf/export、setpiece/export | import_fmf、export_fmf、export_setpiece |
@@ -334,13 +315,6 @@ draft_id 格式：dr_ 加 12 位十六进制。
 - 状态机沿用 queued、running、complete、error、cancelled、interrupted。
 - 排队中取消立即落 cancelled 且不再执行；运行中取消由 runner 在安全点落地；续跑与提交共用同一串行闸门。
 
-### 5.4 Career
-
-- 存档进度状态：reading、complete、error、empty，新增 cancelled。
-- 导入结果含 save_id、source_sha256、date、build、managed、clubs、warnings。
-- 对手报告沿用现有字段，首期只保证 coach 来源。
-- count 语义为每对手总场数，必须偶数，主客场各半。
-
 ### 5.5 结果视图
 
 - metrics 沿用现有结构，含 n、wins、draws、losses、win_rate、win_interval、goals_for、goals_against、points。
@@ -356,7 +330,6 @@ draft_id 格式：dr_ 加 12 位十六进制。
 | source | 必填 | 行为 |
 | --- | --- | --- |
 | default | 无 | 读取 /api/agent/v1/defaults 的默认场景，转 schema 4 |
-| save | save_id、club_uid、tactic_index，可选 lineup、bench | 调用 career/load 生成场景，转 schema 4 |
 | fmf | file_base64 或 file_path、side、base_scenario 或 base_draft_id | 调用 fmf/import，结果转 schema 4 |
 | job | job_id、variant | 调用 jobs/{id}/export，取指定 variant 的场景 |
 | inline | scenario 或 scenario_path | 直接校验并保存；来源为 draft、job、fmf、inline 时 away_tactic_pool 均原样保留 |
@@ -436,13 +409,6 @@ draft_id 格式：dr_ 加 12 位十六进制。
 | fm27lab results matches | ID、--variant、--limit、--offset、--events | 逐场分页 |
 | fm27lab results match | ID、--variant、--seed | 单场详情 |
 | fm27lab results csv | ID、--out FILE | 导出 CSV |
-| fm27lab career import | --save PATH、--wait | 导入存档 |
-| fm27lab career status | --save-id | 导入进度 |
-| fm27lab career team | --save-id、--club | 球队、球员、战术 |
-| fm27lab career opponents | --save-id、--club、--wait | 同联赛对手扫描 |
-| fm27lab career preview | --save-id、--club、--key、--draft | 对手预览 |
-| fm27lab career cancel | --save-id、--kind import 或 opponents | 取消导入或扫描 |
-| fm27lab career run | --save-id、--club、--draft、--opponents KEY,...、--count、--first-seed、--baseline、--workers、--quick、--wait | 存档批次 |
 | fm27lab fmf import | --draft、--side、--file | 导入战术到草案 |
 | fm27lab fmf export | --draft、--side、--out | 导出战术文件 |
 | fm27lab setpiece export | --draft、--side、--type、--variant、--out | 导出定位球文件 |
@@ -491,21 +457,14 @@ draft_id 格式：dr_ 加 12 位十六进制。
 | --- | --- |
 | lab_status | 清单、引擎兼容、活动任务、存档活动状态 |
 | engine_select | 设置游戏根并预检 |
-| draft_create | 从默认、存档、战术文件、任务导出、内联场景或已有草案创建草案 |
+| draft_create | 从默认、战术文件、任务导出、内联场景或已有草案创建草案 |
 | draft_get | 读取草案摘要、完整场景或场景文件 |
 | draft_edit | 单步或批量语义编辑 |
 | draft_validate | 校验并规范化 |
 | draft_list | 列出草案 |
 | draft_options | 查询合法角色、职责与球队指令选项 |
 | draft_delete | 删除一个或多个草案 |
-| career_import | 导入存档，返回 save_id |
-| career_status | 存档导入进度 |
-| career_team | 读取球队、球员、战术与选择 |
-| career_opponents | 扫描同联赛对手 |
-| career_preview | 预览指定对手 |
-| career_cancel | 取消导入或扫描 |
 | experiment_run | 自由模式批次，支持多候选与对照草案 |
-| career_run | 存档对战批次 |
 | job_get | 任务进度或详情，可只取进度 |
 | job_wait | 等待任务终态或超时 |
 | job_list | 任务分页 |
@@ -526,7 +485,7 @@ lab_status：无参数。返回 manifest、engine 兼容状态、active_job、sa
 
 engine_select：game_root 字符串必填。返回兼容状态，等价于 /api/agent/v1/engine/select。
 
-draft_create：source 必填，取值 default、save、fmf、job、inline、draft；name 可选；save 来源需要 save_id、club_uid、tactic_index，可选 lineup、bench；fmf 来源需要 side、file_base64 或 file_path，以及 base_scenario 或 base_draft_id；job 来源需要 job_id、variant；inline 来源需要 scenario 或 scenario_path，后者支持 Windows 与 \\wsl.localhost UNC 路径；draft 来源需要 base_draft_id，从已有草案克隆。返回 draft_id 与摘要。
+draft_create：source 必填，取值 default、fmf、job、inline、draft；name 可选；fmf 来源需要 side、file_base64 或 file_path，以及 base_scenario 或 base_draft_id；job 来源需要 job_id、variant；inline 来源需要 scenario 或 scenario_path，后者支持 Windows 与 \\wsl.localhost UNC 路径；draft 来源需要 base_draft_id，从已有草案克隆。返回 draft_id 与摘要。
 
 draft_get：draft_id 必填；include_scenario 布尔，默认 false；save_scenario 布尔，默认 false，为真时把完整场景写入 dataDir/agent/exports/scenarios 并返回 scenario_path、scenario_sha256、scenario_bytes。返回摘要，按需附带场景。
 
@@ -540,21 +499,14 @@ draft_options：draft_id 必填；side 默认 0；phase 可选，省略时返回
 
 draft_delete：draft_id 或 draft_ids 二选一。返回删除结果与逐项错误。
 
-career_import：save_path 必填；wait 布尔，默认 false；timeout_seconds 默认 60。未等待时返回 save_id 与状态；等待时最多等 timeout_seconds，超时返回当前进度，由 Agent 继续轮询。
 
-career_status：save_id 可选。返回进度与元数据。
 
-career_team：save_id、club_uid 必填。返回球员、战术列表、选择与来源。
 
-career_opponents：save_id、club_uid 必填；wait 布尔，默认 false；timeout_seconds 默认 60。未等待返回 reading；等待返回完整报告或超时进度。
 
-career_preview：save_id、club_uid、key、draft_id 必填；适配器从草案取场景后调用 career/preview。返回对手 team 与来源。
 
-career_cancel：kind 取 import 或 opponents，save_id 必填，club_uid 在 opponents 时必填。返回 accepted。
 
 experiment_run：draft_id 或 candidates 二选一；candidates 为 1 到 20 个草案，每项含 draft_id 与可选 name；baseline_draft_id 可选；seeds 为起始与数量，或长度 1 到 10000 的唯一整数数组；workers 可选；event_details 默认 true；name 可选。场景带启用的 away_tactic_pool 时，服务端按 seed 把每场分配到条目（random 按权重、rotation 按顺序），A/B 共享同一分配；轮战要求种子数等于条目数乘轮数。多草案按创建顺序进入同一 FIFO 队列串行执行；返回 jobs 列表与合计 total；单草案返回 job_id、total、workers、mode、seed_count、queued、queue_position、variant_names、seeds。
 
-career_run：save_id、club_uid、draft_id、opponents、count、first_seed 必填；baseline_draft_id、workers、event_details、name 可选。返回 job_id、total、workers、mode。
 
 job_get：job_id 必填；runs_offset、runs_limit、variant 可选；include_runs 布尔，默认 true，为 false 时只返回进度。返回任务进度、排队位置与按需的 runs 分页。
 
@@ -675,24 +627,6 @@ results_compare baseline_job_id=<基准 job> candidate_job_ids=[<候选 job>,...
 
 跨任务比较前检查 results_compare 的 comparable：若两任务都带客队战术池，salt 不同意味着同 seed 可能抽到不同战术，此时必须返回不可配对；需要跨任务比较时改用同一任务内的 A/B 对照。
 
-### 9.3 存档对战
-
-```text
-career_import save_path=... wait=false
-career_status save_id
-career_team save_id club_uid
-draft_create source=save save_id club_uid tactic_index
-draft_edit draft_id op=team_instruction side=0 phase=in_possession group=... option=...
-draft_validate draft_id
-career_opponents save_id club_uid wait=true
-career_preview save_id club_uid key draft_id
-career_run save_id club_uid draft_id opponents=[key,...] count=6 first_seed=100 workers=2
-job_wait job_id
-results_summary job_id
-```
-
-注意 count 为每对手总场数，必须偶数，主客场各半。
-
 ### 9.4 战术文件往返
 
 ```text
@@ -721,7 +655,6 @@ results_summary job_id
 - real 名单模式要求每套条目带 roster；roster 来自存档战术页导入时的当前一线队快照，FMF 导入条目没有 roster，不能与 real 同时启用。
 - results_summary 的 tactic_pool.draws 给出每套客队战术的出场次数；results_matches 逐场返回 tactic_pool_entry。
 - 两个独立种子块应在同一实验配置下重复提交，再用 results_compare 比较；不同任务的 salt 不同，若同 seed 分配不一致会被拒绝配对（comparable=false），此时不得手工合并配对结果。
-- 战术池不能与定位球片段或 native_generation 同时使用；存档对战不支持战术池。
 
 ## 10. 安全与隐私
 

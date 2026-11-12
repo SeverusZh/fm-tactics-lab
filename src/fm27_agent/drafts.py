@@ -92,24 +92,6 @@ class DraftService:
             raise AgentError("internal_error", "服务端未返回归一化场景")
         return value
 
-    def _from_save(self, params):
-        save_id = params.get("save_id")
-        club_uid = params.get("club_uid")
-        tactic_index = params.get("tactic_index")
-        if not save_id or club_uid is None or tactic_index is None:
-            raise AgentError("validation_failed", "save 来源需要 save_id、club_uid 与 tactic_index")
-        base = self.client.defaults().get("scenario")
-        if not isinstance(base, dict):
-            raise AgentError("internal_error", "服务端默认场景缺失")
-        loaded = self.client.career_load(
-            save_id, int(club_uid), int(tactic_index), base,
-            lineup=params.get("lineup"), bench=params.get("bench"),
-        )
-        scenario = self._normalize(loaded.get("scenario"))
-        source = {"kind": "save", "save_id": save_id, "club_uid": int(club_uid),
-                  "tactic_index": int(tactic_index), "detail": loaded.get("source")}
-        return scenario, source
-
     def _from_fmf(self, params):
         side = params.get("side")
         if side not in (0, 1):
@@ -167,8 +149,6 @@ class DraftService:
             if not isinstance(scenario, dict):
                 raise AgentError("internal_error", "服务端默认场景缺失")
             origin = {"kind": "default"}
-        elif source == "save":
-            scenario, origin = self._from_save(params)
         elif source == "fmf":
             scenario, origin = self._from_fmf(params)
         elif source == "job":
@@ -362,7 +342,7 @@ class DraftService:
             if has_squad:
                 starters_uid = [players[index]["source_uid"] for index in starters]
                 bench_uid = [players[index]["source_uid"] for index in bench]
-                selected = self.client.career_selection(scenario, starters_uid, bench_uid)
+                selected = self.client.selection(scenario, starters_uid, bench_uid)
                 return selected.get("scenario")
             team["lineup"] = list(starters)
             team["roster_size"] = max(11, max(starters + bench) + 1)
