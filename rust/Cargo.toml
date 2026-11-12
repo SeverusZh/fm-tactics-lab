@@ -1,0 +1,3 @@
+[workspace]
+members = ["crates/fm27lab-core"]
+resolver = "2"

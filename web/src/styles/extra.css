@@ -1,0 +1,25 @@
+.connection-error {
+  margin: var(--space-4) var(--space-8) 0;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid rgba(224, 96, 122, 0.5);
+  border-radius: var(--radius-control);
+  background: rgba(224, 96, 122, 0.08);
+  color: var(--danger);
+  font-size: var(--type-body-sm);
+}
+
+.settings-list {
+  display: grid;
+  grid-template-columns: 120px minmax(0, 1fr);
+  gap: var(--space-3) var(--space-4);
+  margin: 0;
+}
+
+.settings-list dt {
+  color: var(--text-subtle);
+}
+
+.settings-list dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}

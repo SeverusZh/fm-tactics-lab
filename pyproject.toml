@@ -1,0 +1,54 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "fm27lab"
+version = "2.0.0.dev0"
+description = "FM Tactics Lab local sidecar: tactics, save library, native match experiments, CLI and MCP."
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+license = { file = "LICENSE" }
+dependencies = [
+  "backports-zstd==1.8.0",
+  "fastapi>=0.115,<1",
+  "fmsave==0.9.0",
+  "pydantic>=2.10,<3",
+  "typer>=0.15,<1",
+  "uvicorn>=0.34,<1",
+]
+
+[project.scripts]
+fm27lab = "fm27lab.cli:main"
+fm27lab-sidecar = "fm27lab.sidecar_main:main"
+
+[project.optional-dependencies]
+dev = [
+  "httpx>=0.28,<1",
+  "pyinstaller>=6.11,<7",
+  "pytest>=8.3,<9",
+  "pytest-asyncio>=0.24,<1",
+  "ruff>=0.8,<1",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["fm27lab"]
+exclude = ["fm27lab/tests"]
+
+[tool.pytest.ini_options]
+testpaths = ["fm27lab/tests"]
+
+pythonpath = ["."]
+addopts = "-q"
+
+[tool.ruff]
+target-version = "py312"
+line-length = 110
+src = ["fm27lab"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+"fm27lab/cli.py" = ["B008"]

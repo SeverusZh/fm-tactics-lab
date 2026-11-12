@@ -1,6 +1,15 @@
 # Changelog
 
-## Unreleased
+## v2.0.0 · 未发布
+
+本版本正在 `refactor/v2-modular` 分支开发，尚未发布，也不存在可下载构建。计划范围与验收状态以 [TODO.md](TODO.md) 为准；在功能落地并通过独立审核前，本节不列完成项。
+
+已合入本分支、但尚未发布的基线能力：
+
+- 上游 v1112 的原生 worker 复用、counted-session 协议与 1–256 并行输入已合并。
+- 本地分支已有的客队战术池轮战/真实名单与 Agent 接入层保留在合并基线中；v2 的模块化改造会逐步替换其接口。
+
+### 继承自 v1111.2 分支
 
 - Add rotation and real-roster modes to the away tactic pool: rotation cycles every candidate for a configured number of rounds instead of drawing by weight, real-roster mode applies the saved club's current squad and attributes instead of uniform values, the run-bar checkbox becomes a single pool button that opens a bottom-right popup holding both draw modes and both squad sources, save-library rows gain an Overwrite home squad action, and the starting seed gains a random button; pool summaries, provenance and Agent results carry the mode, rounds and roster flags, while CSV keeps the per-match tactic entry columns.
 - Add a local AI agent interface: /api/agent/v1 endpoints, fm27lab CLI, stdio MCP sidecar, file-backed drafts, endpoint discovery with token authentication, headless launcher mode, and cancellable save import and opponent scans.
@@ -58,7 +67,9 @@
 - Retain separate disk budgets for save import, preparation and batch simulation, with the actual data path in errors.
 
 
-## 未发布
+## v1111.2 分支历史
+
+以下为 v1111.2 分支已合入但未独立发布的内容。
 
 - 新增真实AI战术批量生成：读取每队现任主教练、当前阵容和你自己的主教练，用本机原版引擎做 0 tick 对局准备并回读完整双阶段战术；每个对手生成对手主场/对手客场两套（列表显示为「球队主场战术/球队客场战术」）并直接替换第1/2套，支持进度条、并行生成与缓存增量补齐；缓存绑定引擎与生成协议身份，引擎或适配器变化后失效重生成；导出与导入客队战术池按球队/变体合并真实战术与可用预设并报告遗漏，空库不再阻断预设导出。
 - 客队战术池统一属性核对：开启统一属性时，每名首发在战术位置的熟练度固定为满 20，其余属性统一为可配置面板值（默认 15），并在展开后核对。

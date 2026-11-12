@@ -12,4 +12,8 @@ The v1103.2, v1106 and v1108.5 EXEs are separate desktop distributions. Each inc
 
 The MIT grant covers the tool code. It does not relicense game-related inputs, extracted comparison bytes, third-party components or their trademarks. CPython and its bundled components retain the licenses shipped in the runtime. Windows SDK, MSVC and .NET Framework are build prerequisites and are not included in the source archive.
 
-Career-save import uses fmsave 0.9.0 (MIT) and backports.zstd 1.8.0 (PSF-2.0 with the bundled Zstandard license). The public source lists these packages as dependencies. Desktop builds include the packages and their license files.
+Save import uses fmsave 0.9.0 (MIT) and backports.zstd 1.8.0 (PSF-2.0 with the bundled Zstandard license). The public source lists these packages as dependencies. Desktop builds include the packages and their license files.
+
+## Fonts
+
+Barlow and Barlow Condensed are distributed under the SIL Open Font License 1.1, copyright the Barlow Project Authors. JetBrains Mono is distributed under the SIL Open Font License 1.1, copyright JetBrains s.r.o. The woff2 files are self-hosted through the @fontsource packages; their license files are retained in the desktop resources and are not relicensed by this project.

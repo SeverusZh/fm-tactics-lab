@@ -203,7 +203,7 @@ class McpSidecarTests(unittest.TestCase):
             "data_dir": str(cls.data_dir),
             "versions": {"server": "test"},
             "capabilities": ["free_run", "career_save", "cancel"],
-            "limits": {"max_seeds": 10000, "max_workers": 4},
+            "limits": {"max_seeds": 10000, "max_workers": 256},
         }
         (agent_dir / "endpoint.json").write_text(
             json.dumps(endpoint, ensure_ascii=False), encoding="utf-8")
@@ -271,6 +271,24 @@ class McpSidecarTests(unittest.TestCase):
         self.assertEqual(source["enum"], ["default", "save", "fmf", "job", "inline", "draft"])
         self.assertEqual(by_name["job_wait"]["inputSchema"]["properties"]["timeout_seconds"]["default"],
                          45)
+        self.assertEqual(by_name["experiment_run"]["inputSchema"]["properties"]["workers"]["maximum"],
+                         256)
+        status = self.call_tool("lab_status", {})
+        self.assertFalse(status.get("isError"), status)
+        self.assertEqual(status["structuredContent"]["manifest"]["limits"]["max_workers"], 256)
+
+    def test_workers_above_four_are_accepted(self):
+        created = self.call_tool("draft_create", {"source": "default", "name": "MCP 并行"})
+        self.assertFalse(created.get("isError"), created)
+        draft_id = created["structuredContent"]["draft_id"]
+        submitted = self.call_tool("experiment_run", {
+            "draft_id": draft_id,
+            "seeds": {"start": 201, "count": 2},
+            "workers": 5,
+            "event_details": False,
+        })
+        self.assertFalse(submitted.get("isError"), submitted)
+        self.assertEqual(submitted["structuredContent"]["workers"], 5)
 
     def test_draft_edit_run_wait_and_results(self):
         created = self.call_tool("draft_create", {"source": "default", "name": "MCP 基线"})

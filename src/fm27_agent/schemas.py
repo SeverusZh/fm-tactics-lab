@@ -18,7 +18,7 @@ PHASE = {
     "enum": ["in_possession", "out_of_possession"],
     "description": "比赛阶段",
 }
-WORKERS = {"type": "integer", "minimum": 1, "maximum": 4, "description": "并行原生会话数，上限由清单给出"}
+WORKERS = {"type": "integer", "minimum": 1, "maximum": 256, "description": "并行原生会话数，上限由服务端清单给出，当前 256"}
 EVENT_DETAILS = {
     "type": "boolean",
     "default": True,

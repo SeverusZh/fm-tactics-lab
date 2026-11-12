@@ -20,3 +20,15 @@ __pycache__/
 /src/tactics_ui/catalog.json
 engine_compat_profile.h
 engine_compat_profile.json
+/rust/target/
+/src-tauri/target/
+/web/node_modules/
+/web/dist/
+.pytest_cache/
+.ruff_cache/
+/web/.pnpm-store/
+*.tsbuildinfo
+/.toolchain/
+/.agents/
+/.dsh/
+/sidecar-dist/

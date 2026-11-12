@@ -1,10 +1,12 @@
 # FM Tactics Lab
 
+> **This repository is independently maintained by SeverusZh.** It is a fork of [lqf0624/fm-tactics-lab](https://github.com/lqf0624/fm-tactics-lab). I refactor and release on my own schedule, may submit feature PRs upstream when appropriate, and do not guarantee tracking upstream updates. Upstream releases remain maintained by the upstream owner.
+
 [简体中文](README.md) | **English**
 
 **Test your tactics locally with the original FM27 match engine.**
 
-Configure both squads in Free Simulation or import an FM27 career save to play opponents from the same league. Compare scores, xG, shots, possession and passing statistics across complete matches.
+Configure both squads in Free Simulation. Import an FM27 career save through the Save Tactic Library to read league tactics, real AI plans and real squads, then test them with the away tactic pool. Compare scores, xG, shots, possession and passing statistics across complete matches.
 
 Use it to explore which formation suits your players, how pressing or role changes affect performance, and whether an advantage holds across repeated matches.
 
@@ -46,25 +48,23 @@ Player actions and match rules use the original implementation. Scores, xG, shot
 
 Each batch uses a sequence of random seeds. When comparing a saved reference with an edited setup, both variants run with the same seed sequence. Repeated matches help show average changes and variability.
 
+## v2.0.0 in progress
+
+`refactor/v2-modular` moves the desktop shell to Tauri 2 + Rust, with a Python sidecar owning the domain, engine, SQLite, CLI and MCP, and a React 19 + TypeScript frontend. Target behavior is described in [DESIGN.md](DESIGN.md); progress is tracked in [TODO.md](TODO.md).
+
+This refactor removes Career-save Matches, keeps the Save Tactic Library as the only save import entry, standardizes match squads at 23 players, and supports 1–256 manual workers. Upstream v1112 worker reuse is merged. Stable builds remain on the upstream Releases page.
+
 ## Download and launch
 
-The current source version is **v1112**. Download published desktop builds from [GitHub Releases](https://github.com/lqf0624/fm-tactics-lab/releases). Exit the previous app from its tray menu before launching an update.
+The current refactor branch is **v2.0.0-dev**; the existing executable still uses the v1112 label and the new Tauri build is not released yet. Download stable desktop builds from [GitHub Releases](https://github.com/lqf0624/fm-tactics-lab/releases). Exit the previous app from its tray menu before launching an update.
 
 Install FM27, open Steam and sign in to the account that owns the game, then launch the EXE. The tool looks for your installation automatically. You can also select the game root containing `fm_Data` and `shared` in the engine settings at the top.
 
 The EXE includes its Python runtime. Players do not need Python or a compiler. The interface follows the Windows display language and supports Chinese and English. Source setup is described in the [developer guide](docs/DEVELOPMENT.md).
 
-## Career-save matches
+## Save tactic library
 
-1. Switch to **存档对战** (Career-save Matches), import an FM27 .fm save, and select the club you manage.
-2. Load its tactic, review first-team attributes, and adjust your starting lineup and bench.
-3. Select opponents from the same league. Preview their in-possession and out-of-possession boards, then run home and away matches.
-
-Opponent tactics use a built-in preset selected from the head coach's saved style and formation preferences. A team is selectable when both the coach and preferences can be verified. Opponent squads load in batches as needed. You can track or cancel match preparation.
-
-## Save tactics
-
-On **存档战术** (Save Tactics), read a save, then pick any loaded league in the game world to list every opponent head coach's preferences, excluding your club. Each coach produces up to two original game presets: one for his primary preferred formation and one for his secondary formation (tactic 1 and 2; a single preset remains when the secondary preference is missing or identical). Export the league's tactics into a local folder or add them to the away tactic pool in one click; pool imports are not deduplicated, so the same tactic may be added more than once and keep the club's current squad and attributes for real-roster mode. The per-row **覆盖主队名单** (Overwrite home squad) button copies that save club's squad and attributes onto the home team on the player attributes page. Exported files follow `club-coach-第1套战术.fmf` / `club-coach-第2套战术.fmf` (the tactic suffix is Chinese). League and country names are read from the local FM27 game database and follow the interface language (Chinese or English); each league is listed once, using the active or nearest schedule, and unavailable names fall back to league numbers. Exported files are preset approximations, not the actual match-day tactics.
+The Save Tactic Library is the only save import entry. Read a save there, then pick any loaded league in the game world to list every opponent head coach's preferences, excluding your club. Each coach produces up to two original game presets: one for his primary preferred formation and one for his secondary formation (tactic 1 and 2; a single preset remains when the secondary preference is missing or identical). Export the league's tactics into a local folder or add them to the away tactic pool in one click; pool imports are not deduplicated, so the same tactic may be added more than once and keep the club's current squad and attributes for real-roster mode. The per-row **覆盖主队名单** (Overwrite home squad) button copies that save club's squad and attributes onto the home team on the player attributes page. Exported files follow `club-coach-第1套战术.fmf` / `club-coach-第2套战术.fmf` (the tactic suffix is Chinese). League and country names are read from the local FM27 game database and follow the interface language (Chinese or English); each league is listed once, using the active or nearest schedule, and unavailable names fall back to league numbers. Exported files are preset approximations, not the actual match-day tactics.
 
 Opponents in your current league can also batch-generate **real AI tactics**: for each club the tool reads its current head coach, current squad and your own coach, runs the original engine's zero-tick match preparation, and reads back the AI-generated two-phase plan (mentality, team instructions, roles and duties, player instructions and phase mapping). Every opponent produces two plans - tactic 1 for the opponent at home and tactic 2 for the opponent away - and they replace the two list columns (shown as `club home tactic` / `club away tactic`). Generation shows a progress bar, caches finished variants and only fills missing clubs and contexts on later full runs, while a single-club button rebuilds both of that club's plans; the cache is bound to the generation engine identity, so a changed original engine or native adapter invalidates it and regenerates. Export as `club-coach-主场战术.fmf` or `club-coach-客场战术.fmf` or import straight into the away tactic pool; export and pool import merge generated plans with still-available manager presets per club and variant, keep presets for clubs without generated plans and report them as omitted. This is the original AI's output in a controlled preview context (current save squad, fixed preview seed 0 and the tool's default player-side template), not a recording of a finished match; a real fixture is generated by the in-game AI from its own squad and context, and this tool never recalculates per match - the away tactic pool stores this fixed plan. Clubs whose coach profile falls outside the engine's supported range keep their presets and show the failure reason.
 
@@ -140,13 +140,13 @@ For example, after increasing possession, check whether the side also creates mo
 
 ### Starting conditions
 
-Both full squads start with condition and match sharpness at 100%, accumulated fatigue at 0, morale at 20/20, team cohesion at 80 and club cohesion at 100. States evolve normally after kickoff. This makes repeated tactical comparisons easier; consider actual fatigue, morale, cohesion and injuries when applying findings in your season.
+Both full squads start with condition and match sharpness at 100%, accumulated fatigue at 0, morale at 20/20, team cohesion at 80 and club cohesion at 100. States evolve normally after kickoff. Match squads are standardized at 23 players; a 26-player saved squad is truncated to 23 with a visible notice. This makes repeated tactical comparisons easier; consider actual fatigue, morale, cohesion and injuries when applying findings in your season.
 
 ### Tactical effectiveness experiment
 
-Set tactical understanding, player buy-in and opposition information separately for each team on a 0–100 scale. The native engine calculates player ability contributions from each player's CA and suitability for both phase roles. The experiment is off by default. Career-save effectiveness values are not yet available.
+Set tactical understanding, player buy-in and opposition information separately for each team on a 0–100 scale. The native engine calculates player ability contributions from each player's CA and suitability for both phase roles. The experiment is off by default. Saved-tactic effectiveness values are not read from the save.
 
-The away tactic pool can be combined with experimental tactical execution. Each side retains its three manual scores, while the native engine computes ability contribution from the current away players' CA and the assigned tactic's two-phase roles. Execution matches use isolated processes and run more slowly than normal reused sessions. The pool changes tactics; uniform mode retains the current away squad, real-roster mode uses the saved club's squad. Native-generated tactics remain incompatible with the pool.
+The away tactic pool can be combined with experimental tactical execution. Each side retains its three manual scores, while the native engine computes ability contribution from the current away players' CA and the assigned tactic's two-phase roles. New native hosts reuse workers for the whole lane; older hosts fall back to isolated processes. Higher parallelism is not guaranteed to improve throughput. The pool changes tactics; uniform mode retains the current away squad, real-roster mode uses the saved club's squad. Native-generated tactics remain incompatible with the pool.
 
 ## Save and export
 
@@ -158,7 +158,7 @@ The away tactic pool can be combined with experimental tactical execution. Each 
 
 ## Version and project information
 
-The current source version is **v1112**, for Windows x64. The adapter reference build is `27.0.1+2494687`. Tool code is licensed under MIT; the engine and game resources come from your local installation.
+The current source version is **v2.0.0-dev**, for Windows x64. The adapter reference build is `27.0.1+2494687`. Tool code is licensed under MIT; the engine and game resources come from your local installation.
 
 Original engine code and a career match's complete conditions are separate considerations. This tool standardizes starting states; inputs, random states and in-match interventions affect results. Evidence and validation scope are described in [Simulation Fidelity](docs/SIMULATION_FIDELITY.md).
 
@@ -166,8 +166,8 @@ For startup, path or version issues, see [Troubleshooting](docs/TROUBLESHOOTING.
 
 The interface and system tray follow the Windows display language. Simplified Chinese and English are supported, with English as the fallback. Player names, club names, tactic data and raw logs retain their original text.
 
-## v1112 compatibility
+## v2.0.0 compatibility
 
-This release focuses on batch performance. Each supported native worker remains alive until its assigned batch finishes instead of restarting every 64 matches, including execution experiments and random-opponent A/B batches. Match objects are released and execution inputs are reset after every match. Save parsing, league opponents, tactic import/export and official FM27 27.0.1+2494687 support remain available. Start a new experiment after upgrading; use the previous version to resume unfinished older jobs.
+This refactor keeps the v1112 batch performance work. Each supported native worker remains alive until its assigned batch finishes instead of restarting every 64 matches, including execution experiments and random-opponent A/B batches. Match objects are released and execution inputs are reset after every match. Save parsing and the Save Tactic Library remain available; Career-save Matches are removed. Official FM27 27.0.1+2494687 support remains available. The new version starts with an empty SQLite database; use the previous version to view or resume unfinished older jobs.
 
-Parallel workers can be entered manually from 1 to 256; hardware estimates only set the default recommendation. The last choice is saved. Counts above eight have not been benchmarked.
+Parallel workers 1–256 are always valid input; hardware estimates only set the default recommendation and values above it only warn. With less than 2 GiB available memory or insufficient disk, submission is rejected by default unless explicitly overridden. Counts above eight have not been benchmarked and higher parallelism is not guaranteed to improve throughput.

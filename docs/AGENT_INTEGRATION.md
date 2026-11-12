@@ -1,9 +1,11 @@
 # AI Agent 接入规格
 
+> **v2 重构提示**：`career_*` 工具与“存档对战”已计划在 Phase 0.5 删除；在删除完成前，本文件中的 `career_*` 段落不代表 v2 契约。以 [DESIGN.md](../DESIGN.md) 与 [TODO.md](../TODO.md) 为准。
+
 状态：设计草案 v1，待评审
 适用范围：本机 Windows 部署；MCP 为主、CLI 为辅；首期核心能力
 快速启动：[AGENT_QUICKSTART.md](AGENT_QUICKSTART.md)
-依据：v1109.3 源码静态分析；控制面与推演内核的逐行证据保存在本机 .team 目录，不随仓库分发
+依据：v1112 源码静态分析；控制面与推演内核的逐行证据来自本机只读分析，不随仓库分发。
 
 ## 决策基线
 
@@ -243,8 +245,8 @@ manifest 示例：
 ```json
 {
   "api": "fm27lab/v1",
-  "server_version": "1109.3",
-  "adapter_version": "27.0.0+2493426",
+  "server_version": "1112",
+  "adapter_version": "27.0.1+2494687",
   "engine_build": null,
   "scenario_schema": 3,
   "scenario_view_schema": 4,
@@ -252,7 +254,7 @@ manifest 示例：
   "capabilities": ["free_run", "career_save", "comparison", "fmf", "repair", "resume", "cancel", "idempotency"],
   "limits": {
     "max_seeds": 10000,
-    "max_workers": 4,
+    "max_workers": 256,
     "max_opponents": 40,
     "max_career_count": 10000,
     "max_body_bytes": 8000000,
@@ -308,7 +310,7 @@ draft_id 格式：dr_ 加 12 位十六进制。
   "created_at": "2026-11-08T18:40:00+08:00",
   "updated_at": "2026-11-08T18:42:10+08:00",
   "source": {"kind": "default", "ref": null},
-  "meta": {"api": "fm27lab/v1", "scenario_view_schema": 4, "server_version": "1109.3"},
+  "meta": {"api": "fm27lab/v1", "scenario_view_schema": 4, "server_version": "1112"},
   "scenario": {"schema": 4, "rules": "game", "fixture": "bundled_match_pkm", "teams": []}
 }
 ```
@@ -735,8 +737,8 @@ results_summary job_id
 ## 11. 性能与预算
 
 - 单场耗时没有公开基准；按 190 秒无进度超时作为最坏边界理解。
-- 原生会话复用 64 场，首批比赛承担 DLL 加载与激活开销。
-- workers 上限由机器计算，当前最大 4。
+- 新宿主在同一批次 lane 内持续复用，逐场清理执行力上下文；旧宿主回退到每会话 64 场或执行力隔离模式。
+- workers 手动上限当前为 256；CPU 与内存只决定推荐值。高于推荐值的输入显示警告。
 - 准备阶段要求约 20 GiB 可用磁盘；每场按 3 MiB 预留。
 - 建议预算：
 
@@ -757,9 +759,9 @@ results_summary job_id
 - manifest 暴露 server、adapter、engine_build、scenario_schema、batch_schema 与能力位。
 - 草案记录 scenario_view_schema 与 server_version；加载时校验，不匹配提示重新校验。
 - 引擎状态原样透出 compatible、trial_allowed、original_build_verified、resource_fingerprint。
-- 适配器版本绑定参考构建 27.0.0+2493426；升级时需要同步 adapter 与规格。
+- 适配器版本绑定参考构建 27.0.1+2494687；升级时需要同步 adapter 与规格。
 - App 升级后旧草案仍可加载，但提交前必须重新校验；旧实验按 provenance 规则不可混跑。
-- server_version 与 fm27_agent_contract.APP_VERSION 同步为 1109.3；status 返回 engine_compatibility，其中 profile 可能是字符串 id（原生兼容事件透传），manifest 的 engine_build 仅在 profile 为对象时取值，MCP 文本同时兼容字符串与对象两种形状。
+- server_version 与 fm27_agent_contract.APP_VERSION 同步为 1112；status 返回 engine_compatibility，其中 profile 可能是字符串 id（原生兼容事件透传），manifest 的 engine_build 仅在 profile 为对象时取值，MCP 文本同时兼容字符串与对象两种形状。
 - 幂等键与活动任务在重启后清空；状态以磁盘 summary 与 provenance 为准。
 
 ## 13. 验收标准

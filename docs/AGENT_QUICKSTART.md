@@ -1,5 +1,7 @@
 # FM Tactics Lab Agent 快速启动
 
+> **v2 重构提示**：`career_*` 命令与“存档对战”已计划在 Phase 0.5 删除；本文件中的 `career_*` 示例不是 v2 契约。以 [DESIGN.md](../DESIGN.md) 与 [TODO.md](../TODO.md) 为准。
+
 本文面向“在本机运行 FM Tactics Lab，并让 AI Agent 通过 CLI 或 MCP 调用”的通用部署。适用于 Windows x64，FM27 已安装，且本机已准备好工具运行时或源码构建环境。
 
 ## 1. 能做什么

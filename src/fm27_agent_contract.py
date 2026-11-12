@@ -11,7 +11,7 @@ from pathlib import Path
 
 API = "fm27lab/v1"
 PREFIX = "/api/agent/v1"
-APP_VERSION = "1111.2"
+APP_VERSION = "1112"
 ENDPOINT_SCHEMA = 1
 TOKEN_COOKIE = "fm27_session"
 EXEMPT_PATHS = {

@@ -185,7 +185,7 @@ class _Handler(BaseHTTPRequestHandler):
                 "scenario_schema": 3, "scenario_view_schema": 4, "batch_schema": 1,
                 "capabilities": ["free_run", "career_save", "comparison", "fmf",
                                  "repair", "resume", "cancel", "idempotency"],
-                "limits": {"max_seeds": 10000, "max_workers": 4, "max_opponents": 40,
+                "limits": {"max_seeds": 10000, "max_workers": 256, "max_opponents": 40,
                            "max_career_count": 10000, "max_body_bytes": 8000000,
                            "max_import_bytes": 8000000, "max_draft_bytes": 5242880},
                 "schemas": "/api/agent/v1/schemas",

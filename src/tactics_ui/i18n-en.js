@@ -1452,7 +1452,6 @@ window.FM27English = {
  "对照与本地保存会占用更多空间": "comparison and local saving need extra space",
  "建议": "Recommended",
  "可自行设置": "Set manually",
- "路": "workers",
  "高并行会增加内存和处理器占用": "higher parallelism increases memory and CPU usage",
  "并行数高于推荐值": "Worker count exceeds the recommendation",
  "请留意内存和处理器占用": "monitor memory and CPU usage",

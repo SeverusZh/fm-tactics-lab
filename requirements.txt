@@ -1,2 +1,3 @@
-fmsave==0.9.0
-backports-zstd==1.8.0
+# Canonical dependencies live in pyproject.toml. This file keeps the legacy
+# build entry point working during the v2 migration.
+-e .

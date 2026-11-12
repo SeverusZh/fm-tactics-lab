@@ -8,15 +8,24 @@ import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
 TOP = {'README.md', 'README.en.md', 'LICENSE', 'THIRD_PARTY_NOTICES.md', 'CONTRIBUTING.md',
-       'CHANGELOG.md', 'requirements.txt', '.gitignore', '.gitattributes', 'Launcher.cs'}
+       'CHANGELOG.md', 'DESIGN.md', 'TODO.md', 'pyproject.toml', 'requirements.txt',
+       '.gitignore', '.gitattributes', 'Launcher.cs'}
 TYPES = {'src': {'.py', '.js', '.css', '.html'},
+         'fm27lab': {'.py', '.sql', '.md'},
+         'web': {'.ts', '.tsx', '.js', '.jsx', '.css', '.html', '.json', '.svg', '.png', '.ico', '.yaml', '.yml'},
+         'rust': {'.rs', '.toml', '.lock', '.md'},
+         '.github': {'.yml', '.yaml', '.md'},
+         'src-tauri': {'.rs', '.toml', '.json', '.md', '.sql', '.lock', '.png', '.ico', '.svg'},
          'scripts': {'.py'}, 'tests': {'.py', '.cjs'}, 'docs': {'.md'},
          'native': {'.cpp', '.h', '.manifest'}}
+SKIP_PARTS = {'__pycache__', 'node_modules', 'target', 'dist', 'build', '.venv',
+              '.toolchain', '.pytest_cache', '.ruff_cache', '.pnpm-store'}
 NATIVE_JSON = {'native/profile_metadata.json', 'native/adapter_version.json'}
 SCREENSHOTS = {'docs/screenshots/tactics.png', 'docs/screenshots/players.png',
                'docs/screenshots/results.png', 'docs/screenshots/save-tactics.png',
                'docs/screenshots/save-tactics-progress.png', 'docs/screenshots/away-pool.png'}
 FORBIDDEN = {'engine_compat_profile.h', 'engine_compat_profile.json'}
+BINARY_SUFFIXES = {'.png': b'\x89PNG\r\n\x1a\n', '.ico': b'\x00\x00\x01\x00'}
 
 
 def source_files(root=ROOT):
@@ -27,8 +36,18 @@ def source_files(root=ROOT):
     for directory, suffixes in TYPES.items():
         result.extend(path for path in (root / directory).rglob('*')
                       if path.is_file() and path.suffix in suffixes
-                      and '__pycache__' not in path.parts and path.name not in FORBIDDEN)
+                      and not (set(path.relative_to(root).parts) & SKIP_PARTS)
+                      and path.name not in FORBIDDEN)
     return sorted(set(result))
+
+
+def validate_binary_asset(path):
+    expected = BINARY_SUFFIXES.get(Path(path).suffix.lower())
+    if expected is None:
+        return False
+    if not Path(path).read_bytes().startswith(expected):
+        raise ValueError('Unexpected binary asset signature: ' + str(path))
+    return True
 
 
 def validate(root=ROOT):
@@ -39,9 +58,7 @@ def validate(root=ROOT):
             raise ValueError('Missing or symlinked public source: ' + str(path))
         if not path.resolve().is_relative_to(root.resolve()):
             raise ValueError('Source escapes release directory: ' + str(path))
-        if path.relative_to(root).as_posix() in SCREENSHOTS:
-            if not path.read_bytes().startswith(b'\x89PNG\r\n\x1a\n'):
-                raise ValueError('Expected PNG screenshot: ' + str(path))
+        if validate_binary_asset(path):
             continue
         text = path.read_text(encoding='utf-8-sig')
         # Public sources must not contain workstation paths or game code dumps.
@@ -75,5 +92,5 @@ def export(output, root=ROOT):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--output', type=Path, default=ROOT / 'dist/fm-tactics-lab-v1112-source.zip')
+    parser.add_argument('--output', type=Path, default=ROOT / 'dist/fm-tactics-lab-v2.0.0-source.zip')
     export(parser.parse_args().output)
