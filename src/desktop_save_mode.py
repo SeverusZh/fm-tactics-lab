@@ -1116,4 +1116,3 @@ class SaveLibrary:
         return app.validate_scenario(scenario)
 
     OPPONENT_PROFILE='coach-preference-presets-v20'
-

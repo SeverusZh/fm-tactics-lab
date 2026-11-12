@@ -28,23 +28,6 @@ class FakeSaveLibrary:
     def start(self, path):
         return {"id": "a" * 16}
 
-    def cancel_import(self, key=None):
-        self.cancelled.append(("import", key))
-        return {"accepted": True, "id": key}
-
-    def cancel_opponents(self, key, club):
-        self.cancelled.append(("opponents", key, club))
-        return {"accepted": True, "id": key}
-
-    def begin_opponents(self, key, club):
-        return {"status": "reading"}
-
-    def club(self, key, club):
-        return {"players": []}
-
-    def load_team(self, *args):
-        return {"scenario": {}, "source": {}}
-
     def select_squad(self, scenario, side, lineup, bench):
         return scenario
 
@@ -82,9 +65,6 @@ class FakeApp:
     def start_run(self, data):
         self.started.append(data)
         return {"id": "jobnew", "total": len(data["seeds"])}
-
-    def create_save_job(self, data):
-        return {"id": "savejob", "total": 1}
 
     def select_engine(self, path):
         return {"compatible": True, "selected_game_root": path}
