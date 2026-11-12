@@ -3,6 +3,8 @@ from __future__ import annotations
 import pytest
 
 from fm27lab.domain.roster import (
+    POSITION_ALIASES,
+    canonical_position,
     is_goalkeeper,
     normalize_roster,
     player_ability,
@@ -130,9 +132,8 @@ def test_removed_captain_and_taker_are_remapped_by_uid():
         setpiece_priorities={"corners": [uid(26)]},
     )
     assert [item["source_uid"] for item in result.removed] == [24, 25, 26]
-    assert result.captains
+    assert result.captains == (0,)
     assert 25 not in [item["source_uid"] for item in result.players]
-    assert result.captains[0] < 23
     assert result.takers["penalties"]
     assert result.setpiece_priorities["corners"]
     assert all(index < 23 for index in result.takers["penalties"])
@@ -155,13 +156,20 @@ def test_generated_players_are_not_captain_or_first_taker():
     assert result.takers["penalties"][0] not in generated_indices
 
 
-def test_ability_fallback_ignores_hidden_attributes():
+def test_ability_fallback_uses_visible_41_and_ignores_hidden():
     player_with_hidden = player(1, 7, 0)
     player_with_hidden.pop("ability")
     player_with_hidden["attributes"][7] = 10
+    player_with_hidden["attributes"][41] = 20
     for index in (39, 40, 56, 59, 62, 63, 64):
         player_with_hidden["attributes"][index] = 20
-    assert player_ability(player_with_hidden) == 10.0
+    assert player_ability(player_with_hidden) > 10.0
+    hidden_only = player(2, 7, 0)
+    hidden_only.pop("ability")
+    hidden_only["attributes"][7] = 10
+    for index in (39, 40, 56, 59, 62, 63, 64):
+        hidden_only["attributes"][index] = 20
+    assert player_ability(hidden_only) == 10.0
 
 
 def test_missing_and_duplicate_source_uids_are_rejected():
@@ -190,13 +198,6 @@ def test_more_than_twelve_substitutes_are_truncated():
     assert len(result.removed) == 3
 
 
-def test_invalid_indices_are_ignored_without_duplicates():
-    players = roster(23)
-    result = normalize_roster(players, [999, -1, 0, 0, 1, 2, 3, 4, 5, 6, 7], [], [], {}, {})
-    assert len(set(result.lineup)) == 11
-    assert all(0 <= index < 23 for index in result.lineup)
-
-
 def test_normalization_is_deterministic():
     players = roster(26)
     arguments = dict(
@@ -208,6 +209,7 @@ def test_normalization_is_deterministic():
         setpiece_priorities={"corners": [uid(3), uid(4)]},
     )
     assert normalize_roster(**arguments) == normalize_roster(**arguments)
+
 
 def _two_goalkeepers():
     players = [player(1, 0, 30), player(2, 0, 5)]
@@ -279,20 +281,32 @@ def test_invalid_indices_do_not_replace_valid_starters():
 def test_default_corner_taker_prefers_wide_position():
     players = [player(1, 0, 10), player(2, 2, 10), player(3, 3, 20)]
     players.extend(player(index + 4, 7, 10) for index in range(20))
-    result = normalize_roster(
-        players, list(range(11)), list(range(11, 23)), [], {"corners": []}, {}
-    )
+    result = normalize_roster(players, list(range(11)), list(range(11, 23)), [], {"corners": []}, {})
     first = result.players[result.takers["corners"][0]]
     assert first["source_uid"] == 2
 
 
-def test_position_aliases_cover_composite_catalog_names():
-    from fm27lab.domain.roster import POSITION_ALIASES
-
-    assert POSITION_ALIASES["DCR"] == "DC"
-    assert POSITION_ALIASES["DMC"] == "DM"
-    assert POSITION_ALIASES["AMCL"] == "AMC"
-    assert POSITION_ALIASES["STR"] == "ST"
+def test_position_aliases_cover_all_composite_catalog_names():
+    assert len(POSITION_ALIASES) == 11
+    for alias, canonical in POSITION_ALIASES.items():
+        assert canonical_position(alias) == canonical
+        assert canonical in {
+            "GK",
+            "SW",
+            "DL",
+            "DC",
+            "DR",
+            "DM",
+            "ML",
+            "MC",
+            "MR",
+            "AML",
+            "AMC",
+            "AMR",
+            "ST",
+            "WBL",
+            "WBR",
+        }
 
 
 def test_generated_uids_do_not_collide_with_source_uids():
@@ -302,6 +316,31 @@ def test_generated_uids_do_not_collide_with_source_uids():
     result = normalize_roster(players, [0], [], [], {}, {})
     uids = [item["source_uid"] for item in result.players]
     assert len(uids) == len(set(uids))
+
+
+def test_short_two_goalkeeper_roster_never_starts_two():
+    players = [player(1, 0, 20), player(2, 0, 10)]
+    players.extend(player(index + 3, 7, 10) for index in range(7))
+    result = normalize_roster(players, [], [], [], {}, {})
+    starters = result.players[:11]
+    assert sum(1 for item in starters if is_goalkeeper(item)) == 1
+    assert any(item.get("generated") for item in starters)
+
+
+def test_short_three_goalkeeper_roster_never_starts_two():
+    players = [player(1, 0, 20), player(2, 0, 10), player(3, 0, 5)]
+    players.extend(player(index + 4, 7, 10) for index in range(7))
+    result = normalize_roster(players, [], [], [], {}, {})
+    starters = result.players[:11]
+    assert sum(1 for item in starters if is_goalkeeper(item)) == 1
+
+
+def test_second_goalkeeper_goes_to_bench_before_generated_padding():
+    players = [player(1, 0, 20), player(2, 0, 10), player(3, 7, 10)]
+    result = normalize_roster(players, [0], [1], [], {}, {})
+    assert sum(1 for item in result.players[:11] if is_goalkeeper(item)) == 1
+    assert result.players[11]["source_uid"] == 2
+    assert result.players[11].get("generated") is not True
 
 
 def test_roster_trim_includes_remapped_references():
@@ -316,6 +355,4 @@ def test_roster_trim_includes_remapped_references():
     )
     assert result.roster_trim["captains"] == list(result.captains)
     assert result.roster_trim["takers"]["penalties"] == list(result.takers["penalties"])
-    assert result.roster_trim["setpiece_priorities"]["corners"] == list(
-        result.setpiece_priorities["corners"]
-    )
+    assert result.roster_trim["setpiece_priorities"]["corners"] == list(result.setpiece_priorities["corners"])

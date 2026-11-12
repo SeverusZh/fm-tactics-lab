@@ -25,7 +25,7 @@
 | 2026-11-12 | React/Tauri 壳层第二轮 | 同上 | FAIL | 第二轮：CSP IPC 与前端事件已修；但 stop_sidecar 有确定的 Rust 编译错误、stopping/restart 竞态、健康检查误杀新 child、启动失败 endpoint 残留、TopBar 无条件重启、双重启动、minWidth 与测试缺口。已修复。 |
 | 2026-11-12 | React/Tauri 壳层第三轮 | 同上 | FAIL | 第三轮：stop 编译错误已修、stopping/健康误杀/TopBar/minWidth/CSP/endpoint 主路径已闭环；但 dead-child 上限仍 return、restart 与 monitor backoff 仍可能双启、supervisor 竞态测试与 Windows 编译证据缺失。已修复并发问题，待复审。 |
 | 2026-11-12 | React/Tauri 壳层第四轮 | 同上 | FAIL | 第四轮：dead-child paused 与 stop 编译已修；但 should_start 与 start_sidecar 仍有 TOCTOU、restart/backoff 双启、supervisor 竞态测试与 Windows 证据缺失。已修复 start_allowed 锁内门禁。 |
-| 2026-11-12 | React/Tauri 壳层第五轮 | 同上 | 待审 | 等待 shell-reviewer 第五轮结果。 |
+| 2026-11-12 | React/Tauri 壳层第五轮 | 同上 | PASS | start_allowed 锁内门禁、dead-child paused、stop/health 竞态、endpoint 清理、TopBar/RunBar、CSP/minWidth/resources 均闭环；Windows CI run 43252465016 全绿，NSIS artifact 已生成。剩余仅显式 restart 覆盖 monitor 的罕见顺序与安装后真机 QA，作为 Minor/发布门槛。 |
 | 2026-11-12 | Windows 构建门槛 | GitHub Actions run 43252465016 | PASS | 全 job success：sidecar PyInstaller、Python、cargo build、cargo test、tauri build --bundles nsis、sidecar 资源断言、NSIS artifact 上传；安装包约 19.6 MB。 |
 | 2026-11-12 | 23 人名单领域 | fm27lab/domain/roster.py、tests | FAIL | 首轮：索引用作 uid、位置分组偏离 ADR、首发可含 2 GK、GK 未按熟练度、generated 全判 GK/隐藏值错误、ability 含隐藏属性、uid 排序/唯一性、默认主罚缺位置资格、测试恒真断言。已重写。 |
 | 2026-11-12 | 23 人名单领域第二轮 | 同上 | FAIL | 第二轮：GK fill 仍可加入 2 名门将且未用熟练度；可见属性 41 漏算；测试仍有恒真断言与缺口。已修复并扩至 25 项测试。 |
@@ -38,6 +38,6 @@
 - 先列 findings，再列已验证项，最后给结论。
 - Critical 或 Important 未闭环时不得标记 PASS。
 - 审核通过不等于整体发布就绪；发布仍需最终验收与 Windows 真机验证。
-- 现有 276 项 Python 测试来自旧 `tests/` 基线，不是 v2 架构证据；新 `fm27lab/tests` 当前 53 项测试，覆盖包版本、CLI 环境继承、配置/路径边界、SQLite 迁移/事务、HTTP 健康、鉴权、错误封套、Origin、ACL 失败清理、sidecar serve 与 23 人名单；Vitest 当前 9 项。
+- 现有 276 项 Python 测试来自旧 `tests/` 基线，不是 v2 架构证据；新 `fm27lab/tests` 当前 55 项测试，覆盖包版本、CLI 环境继承、配置/路径边界、SQLite 迁移/事务、HTTP 健康、鉴权、错误封套、Origin、ACL 失败清理、sidecar serve 与 23 人名单；Vitest 当前 9 项。
 - Tauri sidecar supervisor 的静态实现已存在，但 Linux 无 WebKitGTK，Windows CI 的 `cargo build`/`cargo test`/安装包构建是唯一编译证据。PyInstaller onedir sidecar 已在 Linux 构建并通过 ready/health/shutdown 冒烟测试。
 - Rust 核心 crate 当前 4 项 cargo test 通过；React 壳当前 9 项 Vitest 通过、类型检查与生产构建通过。Windows CI 已通过 cargo build/test、NSIS 安装包与 sidecar 资源断言；Linux 本机仍无 WebKitGTK。

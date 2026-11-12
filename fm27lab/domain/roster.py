@@ -129,9 +129,7 @@ class RosterResult:
             "generated": [player["source_uid"] for player in self.generated],
             "captains": list(self.captains),
             "takers": {key: list(values) for key, values in self.takers.items()},
-            "setpiece_priorities": {
-                key: list(values) for key, values in self.setpiece_priorities.items()
-            },
+            "setpiece_priorities": {key: list(values) for key, values in self.setpiece_priorities.items()},
         }
 
 
@@ -151,6 +149,10 @@ def player_ability(player: Mapping[str, Any]) -> float:
     attributes = player.get("attributes") or []
     visible = [attributes[index] for index in sorted(VISIBLE_ATTRIBUTES) if index < len(attributes)]
     return float(sum(visible) / len(visible)) if visible else 0.0
+
+
+def canonical_position(name: str) -> str:
+    return POSITION_ALIASES.get(name, name)
 
 
 def is_goalkeeper(player: Mapping[str, Any]) -> bool:
@@ -208,6 +210,7 @@ def _fill(
 ) -> list[int]:
     chosen: list[int] = []
     remaining = list(candidates)
+    chosen_goalkeeper = False
     for group in POSITION_GROUPS:
         slots = {POSITION_INDEX[name] for name in group}
         if not allow_goalkeeper and slots == {POSITION_INDEX["GK"]}:
@@ -223,14 +226,18 @@ def _fill(
                 break
             chosen.append(index)
             remaining.remove(index)
+            if group == ("GK",):
+                chosen_goalkeeper = True
         if len(chosen) >= count:
             break
     for index in sorted(remaining, key=lambda index: _sort_key((index, players[index]))):
         if len(chosen) >= count:
             break
-        if not allow_goalkeeper and is_goalkeeper(players[index]):
+        if is_goalkeeper(players[index]) and (not allow_goalkeeper or chosen_goalkeeper):
             continue
         chosen.append(index)
+        if is_goalkeeper(players[index]):
+            chosen_goalkeeper = True
     return chosen
 
 
@@ -316,9 +323,7 @@ def normalize_roster(
 
     used_uids = set(_validate_uids(source))
     generated_count = 0
-    starter_entries: list[tuple[int | None, dict[str, Any]]] = [
-        (index, source[index]) for index in starters
-    ]
+    starter_entries: list[tuple[int | None, dict[str, Any]]] = [(index, source[index]) for index in starters]
     while len(starter_entries) < STARTERS:
         generated_count += 1
         starter_entries.append((None, _generated(generated_count, used_uids)))
@@ -328,9 +333,9 @@ def normalize_roster(
         index for index in range(len(source)) if index not in set(starters) and index not in set(bench)
     ]
     bench.extend(_fill(remaining, source, BENCH - len(bench), allow_goalkeeper=True))
-    bench_entries: list[tuple[int | None, dict[str, Any]]] = [
-        (index, source[index]) for index in bench
-    ][:BENCH]
+    bench_entries: list[tuple[int | None, dict[str, Any]]] = [(index, source[index]) for index in bench][
+        :BENCH
+    ]
     while len(bench_entries) < BENCH:
         generated_count += 1
         bench_entries.append((None, _generated(generated_count, used_uids)))
