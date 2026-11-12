@@ -27,6 +27,8 @@
 | 2026-11-12 | React/Tauri 壳层第四轮 | 同上 | FAIL | 第四轮：dead-child paused 与 stop 编译已修；但 should_start 与 start_sidecar 仍有 TOCTOU、restart/backoff 双启、supervisor 竞态测试与 Windows 证据缺失。已修复 start_allowed 锁内门禁。 |
 | 2026-11-12 | React/Tauri 壳层第五轮 | 同上 | 待审 | 等待 shell-reviewer 第五轮结果。 |
 | 2026-11-12 | Windows 构建门槛 | GitHub Actions run 43249250613 | PASS（构建） | sidecar PyInstaller、Python 28 项、cargo build、cargo test、tauri build --bundles nsis 全部成功，安装包 18.68 MiB；frontend 仅 Post cache 失败，已移除缓存；sidecar 资源路径断言待新 run。 |
+| 2026-11-12 | 23 人名单领域 | fm27lab/domain/roster.py、tests | FAIL | 首轮：索引用作 uid、位置分组偏离 ADR、首发可含 2 GK、GK 未按熟练度、generated 全判 GK/隐藏值错误、ability 含隐藏属性、uid 排序/唯一性、默认主罚缺位置资格、测试恒真断言。已重写。 |
+| 2026-11-12 | 23 人名单领域第二轮 | 同上 | 待审 | 等待 roster-reviewer 第二轮结果。 |
 
 ## 审核规则
 
@@ -36,6 +38,6 @@
 - Critical 或 Important 未闭环时不得标记 PASS。
 - 审核通过不等于整体发布就绪；发布仍需最终验收与 Windows 真机验证。
 - 现有 276 项 Python 测试来自旧 `tests/` 基线，不是 v2 架构证据；新 `fm27lab/tests` 当前 28 项测试，覆盖包版本、CLI 环境继承、配置/路径边界、SQLite 迁移/事务、HTTP 健康、鉴权、错误封套、Origin、ACL 失败清理与 sidecar serve 集成；Vitest 当前 9 项。
-- 新 `fm27lab/tests` 当前 36 项（含 8 项 23 人名单领域测试）。
+- 新 `fm27lab/tests` 当前 43 项（含 15 项 23 人名单领域测试）。
 - Tauri sidecar supervisor 的静态实现已存在，但 Linux 无 WebKitGTK，Windows CI 的 `cargo build`/`cargo test`/安装包构建是唯一编译证据。PyInstaller onedir sidecar 已在 Linux 构建并通过 ready/health/shutdown 冒烟测试。
 - Rust 核心 crate 当前 4 项 cargo test 通过；React 壳当前 9 项 Vitest 通过、类型检查与生产构建通过。Tauri 壳在 Linux 无 WebKit 依赖，Windows 构建仍是发布门槛。
