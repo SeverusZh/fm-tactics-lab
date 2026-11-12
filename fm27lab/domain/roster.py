@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
@@ -133,6 +134,10 @@ class RosterResult:
         }
 
 
+def canonical_position(name: str) -> str:
+    return POSITION_ALIASES.get(name, name)
+
+
 def player_position(player: Mapping[str, Any]) -> int:
     attributes = player.get("attributes") or []
     if len(attributes) < 15:
@@ -151,12 +156,16 @@ def player_ability(player: Mapping[str, Any]) -> float:
     return float(sum(visible) / len(visible)) if visible else 0.0
 
 
-def canonical_position(name: str) -> str:
-    return POSITION_ALIASES.get(name, name)
-
-
 def is_goalkeeper(player: Mapping[str, Any]) -> bool:
     return player_position(player) == POSITION_INDEX["GK"]
+
+
+def _valid_uid(uid: Any) -> bool:
+    if type(uid) not in (int, str):
+        return False
+    if isinstance(uid, str):
+        return bool(uid.strip()) and uid == uid.strip() and not any(ord(char) < 32 for char in uid)
+    return True
 
 
 def _uid_key(player: Mapping[str, Any]) -> tuple[int, Any]:
@@ -196,6 +205,8 @@ def _validate_uids(source: Sequence[Mapping[str, Any]]) -> dict[Any, int]:
         uid = player.get("source_uid")
         if uid is None or uid == "":
             raise ValueError("roster_missing_source_uid")
+        if not _valid_uid(uid):
+            raise ValueError("roster_invalid_source_uid")
         if uid in mapping:
             raise ValueError("roster_duplicate_source_uid")
         mapping[uid] = index
@@ -440,3 +451,118 @@ def normalize_roster(
         generated=generated,
         source_size=len(source),
     )
+
+
+def _validate_saved_player(player: Mapping[str, Any], index: int) -> None:
+    label = f"真实名单第 {index + 1} 名球员"
+    if not isinstance(player, Mapping):
+        raise ValueError(label + "格式无效")
+    if player.get("generated"):
+        raise ValueError(label + "不能是 generated 占位球员")
+    uid = player.get("source_uid")
+    if not _valid_uid(uid):
+        raise ValueError(label + "缺少有效的 source_uid")
+    name = player.get("name")
+    if not isinstance(name, str) or not 1 <= len(name.strip()) <= 48 or any(ord(char) < 32 for char in name):
+        raise ValueError(label + "名称无效")
+    profile = player.get("native_profile")
+    if profile is not None and not isinstance(profile, Mapping):
+        raise ValueError(label + "扩展输入格式无效")
+    ability = player.get("ability")
+    if ability is not None and (type(ability) is bool or not isinstance(ability, (int, float, Mapping))):
+        raise ValueError(label + "能力值格式无效")
+    attributes = player.get("attributes")
+    if not isinstance(attributes, list) or len(attributes) != 69:
+        raise ValueError(label + "属性必须为 69 项")
+    if any(type(value) is not int for value in attributes):
+        raise ValueError(label + "属性必须为整数")
+    if any(not 0 <= value <= 20 for value in attributes[:15]):
+        raise ValueError(label + "位置熟练度超出范围")
+    if any(not 1 <= value <= 100 for value in attributes[15:]):
+        raise ValueError(label + "属性超出范围")
+
+
+def apply_saved_roster(
+    team: Mapping[str, Any],
+    roster: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Apply an already-selected 23-player saved roster to a match team.
+
+    The returned team is a new object. Native IDs stay tied to host slots;
+    player identity, attributes and lineup come from the saved roster.
+    Captain, taker and set-piece indices are remapped by source_uid.
+    """
+    if not isinstance(team, Mapping) or not isinstance(roster, Mapping):
+        raise ValueError("球队或真实名单格式无效")
+    team_players = team.get("players")
+    if not isinstance(team_players, list) or len(team_players) < MATCH_ROSTER_SIZE:
+        raise ValueError("比赛球队至少需要 23 名球员")
+    if any(not isinstance(item, Mapping) for item in team_players[:MATCH_ROSTER_SIZE]):
+        raise ValueError("比赛球队球员格式无效")
+    old_uids = [item.get("source_uid") for item in team_players[:MATCH_ROSTER_SIZE]]
+    if any(not _valid_uid(uid) for uid in old_uids) or len(set(old_uids)) != MATCH_ROSTER_SIZE:
+        raise ValueError("比赛球队球员 source_uid 必须唯一")
+    saved_players = roster.get("players")
+    if not isinstance(saved_players, list) or len(saved_players) != MATCH_ROSTER_SIZE:
+        raise ValueError("真实名单必须为 23 人")
+    if roster.get("roster_size", MATCH_ROSTER_SIZE) != MATCH_ROSTER_SIZE:
+        raise ValueError("真实名单人数必须为 23")
+    for index, player in enumerate(saved_players):
+        _validate_saved_player(player, index)
+    if len({player["source_uid"] for player in saved_players}) != MATCH_ROSTER_SIZE:
+        raise ValueError("真实名单包含重复球员")
+    if not any(is_goalkeeper(player) for player in saved_players):
+        raise ValueError("真实名单缺少门将")
+    lineup = roster.get("lineup")
+    if not isinstance(lineup, list) or len(lineup) != STARTERS:
+        raise ValueError("真实名单首发必须为 11 名不同球员")
+    if any(type(index) is not int or not 0 <= index < MATCH_ROSTER_SIZE for index in lineup):
+        raise ValueError("真实名单首发必须为 11 名不同球员")
+    if len(set(lineup)) != STARTERS:
+        raise ValueError("真实名单首发必须为 11 名不同球员")
+
+    result = copy.deepcopy(dict(team))
+    old_players = list(team_players[:MATCH_ROSTER_SIZE])
+    new_players: list[dict[str, Any]] = []
+    for index, saved in enumerate(saved_players):
+        target = copy.deepcopy(dict(saved))
+        target.pop("generated", None)
+        target["name"] = saved["name"].strip()
+        if "native_id" in old_players[index]:
+            target["native_id"] = old_players[index]["native_id"]
+        else:
+            target.pop("native_id", None)
+        new_players.append(target)
+    result["players"] = new_players
+    result["roster_size"] = MATCH_ROSTER_SIZE
+    result["lineup"] = list(lineup)
+    result.pop("squad", None)
+
+    uid_to_new = {player["source_uid"]: index for index, player in enumerate(new_players)}
+
+    def remap(values: Any) -> list[int]:
+        if not isinstance(values, (list, tuple)):
+            return []
+        mapped: list[int] = []
+        for old_index in values:
+            if type(old_index) is not int or not 0 <= old_index < len(old_uids):
+                continue
+            new_index = uid_to_new.get(old_uids[old_index])
+            if new_index is not None and new_index not in mapped:
+                mapped.append(new_index)
+        return mapped
+
+    result["captains"] = remap(team.get("captains", []))
+    takers = team.get("takers") or {}
+    if not isinstance(takers, Mapping):
+        raise ValueError("主罚名单格式无效")
+    result["takers"] = {key: remap(values) for key, values in takers.items()}
+    raw_setpieces = team.get("setpieces") or {}
+    if not isinstance(raw_setpieces, Mapping):
+        raise ValueError("定位球配置格式无效")
+    setpieces = copy.deepcopy(dict(raw_setpieces))
+    priorities = setpieces.get("role_priorities")
+    if isinstance(priorities, Mapping):
+        setpieces["role_priorities"] = {key: remap(values) for key, values in priorities.items()}
+    result["setpieces"] = setpieces
+    return result

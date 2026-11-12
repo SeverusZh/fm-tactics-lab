@@ -56,8 +56,7 @@ def rotation_matches(entry_count: int, rounds: int) -> int:
     total = count * round_count
     if total > MAX_ROTATION_MATCHES:
         raise ValueError(
-            f"轮战每方案最多 {MAX_ROTATION_MATCHES} 场，当前 {count} 套 × "
-            f"{round_count} 轮 = {total} 场"
+            f"轮战每方案最多 {MAX_ROTATION_MATCHES} 场，当前 {count} 套 × {round_count} 轮 = {total} 场"
         )
     return total
 
