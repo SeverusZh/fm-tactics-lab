@@ -55,7 +55,7 @@
 - [ ] catalog 与 scenario 纯领域模型。
 - [ ] tactics 双阶段与职责校验。
 - [ ] setpieces 模型与编码。
-- [ ] pool 抽签、轮战、真实名单。
+- [~] pool 抽签与轮战已实现并 PASS；真实名单应用待后续切片。
 - [ ] roster 统一 23 人策略与确定性重映射。
 - [ ] results 指标、配对、分布与 CSV。
 - [ ] 每个模块的单元测试与性质测试。

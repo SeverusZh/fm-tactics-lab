@@ -381,6 +381,7 @@ def test_roster_trim_includes_remapped_references():
     assert result.roster_trim["takers"]["penalties"] == list(result.takers["penalties"])
     assert result.roster_trim["setpiece_priorities"]["corners"] == list(result.setpiece_priorities["corners"])
 
+
 def test_canonical_position_accepts_base_names():
     assert canonical_position("DC") == "DC"
     assert canonical_position("ST") == "ST"
