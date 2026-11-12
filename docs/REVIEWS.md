@@ -43,6 +43,8 @@
 | 2026-11-12 | 结果指标领域 | fm27lab/domain/results.py、tests | FAIL | 首轮：side=1 只换进球、未换胜平负/积分/Wilson；配对差无 side；测试方向恒真。 |
 | 2026-11-12 | 结果指标领域第二轮 | 同上 | FAIL | 第二轮：传球字段部分缺失被伪造成 0.0；边界测试不足。 |
 | 2026-11-12 | 结果指标领域第三轮 | 同上 | PASS | side 取向、Wilson、xG/xGA、配对方向、传球缺失/NaN/零值语义闭环；8 项测试。 |
+| 2026-11-12 | Scenario 归一化 | fm27lab/domain/scenario.py、tests | FAIL | 首轮：非法球员条目崩溃、输出共享嵌套对象、引用测试恒等、roster_trim 缺失。 |
+| 2026-11-12 | Scenario 归一化第二轮 | 同上 | PASS | 深拷贝、非恒等引用、非法输入、roster_trim、substitutes 重写闭环；9 项测试。 |
 
 ## 审核规则
 
@@ -51,6 +53,6 @@
 - 先列 findings，再列已验证项，最后给结论。
 - Critical 或 Important 未闭环时不得标记 PASS。
 - 审核通过不等于整体发布就绪；发布仍需最终验收与 Windows 真机验证。
-- 旧 `tests/` 当前 281 项通过，覆盖 legacy UI/HTTP/CLI/MCP、存档战术库、池与名单；新 `fm27lab/tests` 当前 98 项通过，覆盖包版本、CLI 环境继承、配置/路径边界、SQLite 迁移/事务、HTTP 健康、鉴权、错误封套、Origin、ACL 失败清理、sidecar serve、23 人名单、真实名单应用、客队战术池选择与结果指标；Vitest 当前 9 项。
+- 旧 `tests/` 当前 281 项通过，覆盖 legacy UI/HTTP/CLI/MCP、存档战术库、池与名单；新 `fm27lab/tests` 当前 107 项通过，覆盖包版本、CLI 环境继承、配置/路径边界、SQLite 迁移/事务、HTTP 健康、鉴权、错误封套、Origin、ACL 失败清理、sidecar serve、23 人名单、真实名单应用、scenario 归一化、客队战术池选择与结果指标；Vitest 当前 9 项。
 - Tauri sidecar supervisor 的静态实现已存在，但 Linux 无 WebKitGTK，Windows CI 的 `cargo build`/`cargo test`/安装包构建是唯一编译证据。PyInstaller onedir sidecar 已在 Linux 构建并通过 ready/health/shutdown 冒烟测试。
 - Rust 核心 crate 当前 4 项 cargo test 通过；React 壳当前 9 项 Vitest 通过、类型检查与生产构建通过。Windows CI 已通过 cargo build/test、NSIS 安装包与 sidecar 资源断言；Linux 本机仍无 WebKitGTK。合并、设计、sidecar、壳层、名单五个审核门均已 PASS。

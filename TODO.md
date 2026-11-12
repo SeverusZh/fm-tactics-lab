@@ -52,7 +52,7 @@
 
 ## Phase 1 领域模块
 
-- [ ] catalog 与 scenario 纯领域模型。
+- [~] scenario 23 人归一化已实现并 PASS；catalog 与完整 schema 校验待后续。
 - [ ] tactics 双阶段与职责校验。
 - [ ] setpieces 模型与编码。
 - [x] pool 抽签、轮战与真实名单应用已实现并 PASS。
