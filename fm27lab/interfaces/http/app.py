@@ -2,21 +2,67 @@ from __future__ import annotations
 
 import hmac
 import logging
+import sqlite3
 from collections.abc import Callable
+from typing import Annotated, Any
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Request
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, Response, StreamingResponse
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from pydantic import BaseModel, ConfigDict, Field
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 import fm27lab
 from fm27lab.adapters.storage_sqlite.db import Database
+from fm27lab.adapters.storage_sqlite.repositories import PoolRepository
+from fm27lab.application.pools import PoolService
 from fm27lab.config import Settings
 
 TAURI_ORIGINS = ("tauri://localhost", "http://tauri.localhost")
 DEV_ORIGINS = ("http://localhost:1420",)
 LOGGER = logging.getLogger(__name__)
+
+
+ID_PATTERN = r"^[A-Za-z0-9_-]{1,64}$"
+SECURITY = HTTPBearer(auto_error=False)
+
+
+class PoolEntryInput(BaseModel):
+    model_config = ConfigDict(strict=True, extra="forbid")
+    name: str = Field(min_length=1, max_length=80)
+    weight: int = Field(default=1, ge=1, le=1000)
+    tactic: dict[str, Any]
+    roster: dict[str, Any] | None = None
+    id: str | None = Field(default=None, pattern=ID_PATTERN)
+
+
+class PoolEntryOutput(BaseModel):
+    id: str
+    name: str
+    weight: int
+    tactic: dict[str, Any]
+    roster: dict[str, Any] | None
+    created_at: str
+
+
+class PoolListOutput(BaseModel):
+    items: list[PoolEntryOutput]
+    total: int
+    next_offset: int | None
+
+
+class ErrorBody(BaseModel):
+    code: str
+    message: str
+    details: Any | None
+    retriable: bool
+    retry_after_seconds: int | float | None
+
+
+class ErrorEnvelope(BaseModel):
+    error: ErrorBody
 
 
 def error_body(code: str, message: str, status: int) -> dict:
@@ -33,26 +79,38 @@ def error_body(code: str, message: str, status: int) -> dict:
 
 def require_token(
     request: Request,
-    authorization: str | None = Header(default=None),
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(SECURITY)] = None,
 ) -> None:
-    if authorization is None or not authorization.startswith("Bearer "):
+    if credentials is None or credentials.scheme.lower() != "bearer":
         raise HTTPException(
             status_code=401,
             detail={"code": "unauthorized", "message": "missing bearer token", "retriable": False},
+            headers={"WWW-Authenticate": "Bearer"},
         )
-    supplied = authorization.removeprefix("Bearer ").strip()
+    supplied = credentials.credentials.strip()
     expected = request.app.state.settings.token
     if not supplied or not supplied.isascii() or not hmac.compare_digest(supplied, expected):
         raise HTTPException(
             status_code=401,
             detail={"code": "unauthorized", "message": "invalid bearer token", "retriable": False},
+            headers={"WWW-Authenticate": "Bearer"},
         )
+
+
+def _query_integer(value: str, name: str, low: int, high: int) -> int:
+    if not value.isascii() or not value.isdigit():
+        raise ValueError(f"{name} 必须为 {low}–{high} 的整数")
+    number = int(value)
+    if not low <= number <= high:
+        raise ValueError(f"{name} 必须为 {low}–{high} 的整数")
+    return number
 
 
 def create_app(
     settings: Settings,
     database: Database,
     shutdown: Callable[[], None] | None = None,
+    pool_service: PoolService | None = None,
 ) -> FastAPI:
     app = FastAPI(
         title="FM Tactics Lab Sidecar",
@@ -63,6 +121,7 @@ def create_app(
     )
     app.state.settings = settings
     app.state.database = database
+    app.state.pools = pool_service or PoolService(PoolRepository(database))
     app.state.shutdown = shutdown
 
     origins = list(TAURI_ORIGINS + (DEV_ORIGINS if settings.dev else ()))
@@ -85,7 +144,7 @@ def create_app(
         return await call_next(request)
 
     @app.exception_handler(StarletteHTTPException)
-    async def http_error(_request: Request, exc: StarletteHTTPException):
+    async def http_error(request: Request, exc: StarletteHTTPException):
         detail = exc.detail
         if isinstance(detail, dict) and "code" in detail:
             error = {
@@ -100,13 +159,23 @@ def create_app(
             status = exc.status_code
             code = "not_found" if status == 404 else "method_not_allowed" if status == 405 else "http_error"
             payload = error_body(code, str(detail), status)
-        return JSONResponse(status_code=exc.status_code, content=payload)
+        headers = dict(exc.headers or {})
+        if exc.status_code == 405:
+            allowed: set[str] = set()
+            for route in app.router.routes:
+                methods = getattr(route, "methods", None)
+                pattern = getattr(route, "path_regex", None)
+                if methods and pattern is not None and pattern.match(request.url.path):
+                    allowed.update(method for method in methods if method != "HEAD")
+            if allowed:
+                headers["Allow"] = ", ".join(sorted(allowed))
+        return JSONResponse(status_code=exc.status_code, content=payload, headers=headers)
 
     @app.exception_handler(RequestValidationError)
     async def validation_error(_request: Request, exc: RequestValidationError):
         return JSONResponse(
             status_code=400,
-            content=error_body("validation_failed", str(exc), 400),
+            content=error_body("validation_failed", "request body or query is invalid", 400),
         )
 
     @app.exception_handler(Exception)
@@ -131,6 +200,99 @@ def create_app(
             "version": settings.version,
             "database": "ready",
         }
+
+    @app.get(
+        "/api/pools",
+        response_model=PoolListOutput,
+        responses={400: {"model": ErrorEnvelope}, 401: {"model": ErrorEnvelope}},
+    )
+    def list_pools(
+        limit: Annotated[str, Query(json_schema_extra={"type": "integer", "minimum": 1, "maximum": 128})] = "128",
+        offset: Annotated[str, Query(json_schema_extra={"type": "integer", "minimum": 0, "maximum": 2**31 - 1})] = "0",
+        _: None = Depends(require_token),
+    ):
+        try:
+            return app.state.pools.list(
+                limit=_query_integer(limit, "limit", 1, 128),
+                offset=_query_integer(offset, "offset", 0, 2**31 - 1),
+            )
+        except ValueError as error:
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "validation_failed", "message": str(error), "retriable": False},
+            ) from error
+
+    @app.post(
+        "/api/pools",
+        status_code=201,
+        response_model=PoolEntryOutput,
+        responses={
+            400: {"model": ErrorEnvelope},
+            401: {"model": ErrorEnvelope},
+            409: {"model": ErrorEnvelope},
+        },
+    )
+    def create_pool(body: PoolEntryInput, _: None = Depends(require_token)):
+        try:
+            return app.state.pools.create(body.model_dump())
+        except sqlite3.IntegrityError as error:
+            raise HTTPException(
+                status_code=409,
+                detail={"code": "conflict", "message": "pool entry already exists", "retriable": False},
+            ) from error
+        except ValueError as error:
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "validation_failed", "message": str(error), "retriable": False},
+            ) from error
+
+    @app.get(
+        "/api/pools/{entry_id}",
+        response_model=PoolEntryOutput,
+        responses={
+            400: {"model": ErrorEnvelope},
+            401: {"model": ErrorEnvelope},
+            404: {"model": ErrorEnvelope},
+        },
+    )
+    def get_pool(entry_id: str, _: None = Depends(require_token)):
+        try:
+            value = app.state.pools.get(entry_id)
+        except ValueError as error:
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "validation_failed", "message": str(error), "retriable": False},
+            ) from error
+        if value is None:
+            raise HTTPException(
+                status_code=404,
+                detail={"code": "not_found", "message": "pool entry not found", "retriable": False},
+            )
+        return value
+
+    @app.delete(
+        "/api/pools/{entry_id}",
+        status_code=204,
+        responses={
+            400: {"model": ErrorEnvelope},
+            401: {"model": ErrorEnvelope},
+            404: {"model": ErrorEnvelope},
+        },
+    )
+    def delete_pool(entry_id: str, _: None = Depends(require_token)):
+        try:
+            deleted = app.state.pools.delete(entry_id)
+        except ValueError as error:
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "validation_failed", "message": str(error), "retriable": False},
+            ) from error
+        if not deleted:
+            raise HTTPException(
+                status_code=404,
+                detail={"code": "not_found", "message": "pool entry not found", "retriable": False},
+            )
+        return Response(status_code=204)
 
     @app.get("/api/version")
     def version():
@@ -158,4 +320,23 @@ def create_app(
 
         return StreamingResponse(stream(), media_type="text/event-stream")
 
+    original_openapi = app.openapi
+
+    def openapi_with_contract():
+        if app.openapi_schema is not None:
+            return app.openapi_schema
+        schema = original_openapi()
+        for path in schema.get("paths", {}).values():
+            for operation in path.values():
+                responses = operation.get("responses", {})
+                responses.pop("422", None)
+                for status in ("400", "401", "404", "409"):
+                    if status in responses:
+                        responses[status]["content"] = {
+                            "application/json": {"schema": {"$ref": "#/components/schemas/ErrorEnvelope"}}
+                        }
+        app.openapi_schema = schema
+        return schema
+
+    app.openapi = openapi_with_contract
     return app

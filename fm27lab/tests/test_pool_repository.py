@@ -117,6 +117,9 @@ def test_serialization_failures_and_created_at_are_value_errors(tmp_path):
         repo.add({"name": "\ud800", "weight": 1, "tactic": {}})
     with pytest.raises(ValueError, match="标识"):
         repo.add({"name": "x", "weight": 1, "tactic": {}, "id": "\ud800"})
+    for unsafe in ("a/b", "..", "a%2Fb", " ", "a.b"):
+        with pytest.raises(ValueError, match="标识"):
+            repo.add({"name": "x", "weight": 1, "tactic": {}, "id": unsafe})
 
 
 def test_pool_limit_is_atomic_under_concurrency(tmp_path):

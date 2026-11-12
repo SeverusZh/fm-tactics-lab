@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import secrets
 import sqlite3
 from collections.abc import Mapping
@@ -10,6 +11,8 @@ from typing import Any
 
 from fm27lab.adapters.storage_sqlite.db import Database
 from fm27lab.domain.pool import MAX_ENTRIES
+
+ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 
 
 class SettingsRepository:
@@ -176,17 +179,8 @@ class PoolRepository:
 
     @staticmethod
     def _validate_id(entry_id: Any) -> None:
-        if (
-            not isinstance(entry_id, str)
-            or not 1 <= len(entry_id) <= 64
-            or entry_id != entry_id.strip()
-            or any(ord(c) < 32 or ord(c) == 127 for c in entry_id)
-        ):
+        if not isinstance(entry_id, str) or not ID_PATTERN.fullmatch(entry_id):
             raise ValueError("客队战术标识无效")
-        try:
-            entry_id.encode("utf-8")
-        except UnicodeEncodeError as error:
-            raise ValueError("客队战术标识无效") from error
 
     @staticmethod
     def _dump(value: Mapping[str, Any], label: str) -> str:
