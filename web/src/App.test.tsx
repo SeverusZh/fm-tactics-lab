@@ -104,6 +104,15 @@ describe("App shell", () => {
     await waitFor(() => expect(screen.getAllByText("sidecar 未连接").length).toBeGreaterThan(0));
   });
 
+  it("clears the connection after a sidecar-error event", async () => {
+    renderApp();
+    await waitFor(() => expect(listeners["sidecar-error"]).toBeDefined());
+    await screen.findByText("sidecar 正常");
+    listeners["sidecar-error"]({ payload: "spawn failed" });
+    await waitFor(() => expect(screen.getAllByText("sidecar 未连接").length).toBeGreaterThan(0));
+    expect(screen.getByText("spawn failed")).toBeInTheDocument();
+  });
+
   it("does not restart a connected sidecar when checking again", async () => {
     renderApp();
     await screen.findByText("sidecar 正常");

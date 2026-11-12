@@ -39,8 +39,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: pnpm
-          cache-dependency-path: web/pnpm-lock.yaml
       - run: pnpm --dir web install --frozen-lockfile
       - run: pnpm --dir web run typecheck
       - run: pnpm --dir web test
@@ -63,8 +61,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: pnpm
-          cache-dependency-path: web/pnpm-lock.yaml
       - uses: dtolnay/rust-toolchain@stable
       - uses: actions/setup-python@v5
         with:
@@ -79,3 +75,17 @@ jobs:
       - run: cargo test --manifest-path src-tauri/Cargo.toml
       - run: npm install --global @tauri-apps/cli@^2
       - run: tauri build --bundles nsis
+      - name: Verify sidecar resource and installer
+        shell: pwsh
+        run: |
+          $sidecars = Get-ChildItem -Path src-tauri/target/release -Recurse -Filter fm27lab-sidecar.exe -ErrorAction SilentlyContinue
+          if (-not $sidecars) { throw "sidecar executable missing from build tree" }
+          $sidecars | ForEach-Object { Write-Host $_.FullName }
+          $installers = Get-ChildItem -Path src-tauri/target/release/bundle/nsis -Filter *.exe -ErrorAction SilentlyContinue
+          if (-not $installers) { throw "NSIS installer missing" }
+          $installers | ForEach-Object { Write-Host $_.FullName }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-nsis
+          path: src-tauri/target/release/bundle/nsis/*.exe
+          if-no-files-found: error
