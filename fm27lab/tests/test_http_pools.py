@@ -195,16 +195,23 @@ def test_duplicate_conflict_keeps_original_and_pool_service_injection(tmp_path: 
     second = create_app(settings, database, pool_service=FakeService())
     assert TestClient(second).get("/api/pools", headers=headers).json()["items"] == []
 
+
 def test_openapi_pagination_and_all_error_schemas(tmp_path: Path):
     app, _, _, _ = make_app(tmp_path)
     document = TestClient(app).get("/api/openapi.json").json()
-    parameters = {item["name"]: item["schema"] for item in document["paths"]["/api/pools"]["get"]["parameters"]}
+    parameters = {
+        item["name"]: item["schema"] for item in document["paths"]["/api/pools"]["get"]["parameters"]
+    }
     assert parameters["limit"]["type"] == "integer"
     assert parameters["limit"]["minimum"] == 1
     assert parameters["limit"]["maximum"] == 128
     assert parameters["offset"]["minimum"] == 0
+    assert parameters["limit"]["default"] == 128
+    assert parameters["offset"]["default"] == 0
     get_responses = document["paths"]["/api/pools/{entry_id}"]["get"]["responses"]
     for status in ("400", "401", "404"):
-        assert get_responses[status]["content"]["application/json"]["schema"]["$ref"].endswith("ErrorEnvelope")
+        assert get_responses[status]["content"]["application/json"]["schema"]["$ref"].endswith(
+            "ErrorEnvelope"
+        )
     post_responses = document["paths"]["/api/pools"]["post"]["responses"]
     assert post_responses["409"]["content"]["application/json"]["schema"]["$ref"].endswith("ErrorEnvelope")

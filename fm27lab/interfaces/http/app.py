@@ -207,8 +207,13 @@ def create_app(
         responses={400: {"model": ErrorEnvelope}, 401: {"model": ErrorEnvelope}},
     )
     def list_pools(
-        limit: Annotated[str, Query(json_schema_extra={"type": "integer", "minimum": 1, "maximum": 128})] = "128",
-        offset: Annotated[str, Query(json_schema_extra={"type": "integer", "minimum": 0, "maximum": 2**31 - 1})] = "0",
+        limit: Annotated[
+            str, Query(json_schema_extra={"type": "integer", "minimum": 1, "maximum": 128, "default": 128})
+        ] = "128",
+        offset: Annotated[
+            str,
+            Query(json_schema_extra={"type": "integer", "minimum": 0, "maximum": 2**31 - 1, "default": 0}),
+        ] = "0",
         _: None = Depends(require_token),
     ):
         try:
@@ -335,6 +340,9 @@ def create_app(
                         responses[status]["content"] = {
                             "application/json": {"schema": {"$ref": "#/components/schemas/ErrorEnvelope"}}
                         }
+        for parameter in schema.get("paths", {}).get("/api/pools", {}).get("get", {}).get("parameters", []):
+            if parameter.get("name") in ("limit", "offset"):
+                parameter["schema"]["default"] = int(parameter["schema"]["default"])
         app.openapi_schema = schema
         return schema
 
