@@ -107,9 +107,7 @@ python3 -m unittest discover -s tests
 | 自由推演 | 2 场完成，0 失败；单场吞吐约 23.8 场/分钟 |
 | 对比推演 | 2 种子 × A/B 共 4 场完成；A 与 B 指标独立；paired 差值为 0.5 |
 | 存档导入 | 用户提供的 FM27 存档，构建 27.0.0+2493426，导入完成；32 名一线队球员，74 名可解析球员；原存档只读未修改 |
-| 存档球队 | 载入 managed club 的存储战术与 23 人比赛名单，草案校验通过 |
 | 对手扫描 | 同联赛 23 个可用教练预设对手；预览生成 23 人名单 |
-| 存档批次 | 1 个对手 × 主客场 2 场完成；xg 2.37，xga 1.01，控球 43.7%，传球成功率 83.8% |
 | FMF | 导出 1728 字节，native_roundtrip_verified 为真；导入消耗 1376 字节，records 369 |
 | 定位球 | 导出 451 字节，native_roundtrip_verified 为真 |
 | MCP | initialize 协商 2025-06-18，serverInfo 为 fm27lab-mcp，26 个工具，lab_status 无错误，manifest 资源可读，3 个 prompt |
@@ -121,7 +119,7 @@ python3 -m unittest discover -s tests
 | 未覆盖 | headless 启动只做编译验证；浏览器完整 UI 流程未跑；存档测试只用了一份 FM27 存档 |
 | A16–A18 | 2026-11-10 Windows 实机（agent-runtime，合并后源码 + v1109.3 原生宿主）：lab_status 正常且 server_version=1109.3；36 套池场景经 inline 草案往返与 save_scenario 保留；同 job A/B 8 seeds 同 seed 抽签一致；连续提交两批次第二个 queued/queue_position=2 后串行完成；results_summary 含 tactic_pool.draws、matches 含 tactic_pool_entry、CSV 含抽签列；两条池任务 results_compare 返回 comparable=false；200 场池批次 failures=0 |
 
-说明：源码运行在 WSL 文件系统时，原生宿主若经 UNC 路径读取 match.pkm 会退出 104；本次验收将引擎工作区与数据目录放在 Windows 本地路径下完成。打包版使用 Windows 本地路径，不受影响。存档导入、球队载入、对手扫描与存档批次均在实机完成；导入数据与测试结果保存在 Windows 临时目录，验收后已清理。
+说明：源码运行在 WSL 文件系统时，原生宿主若经 UNC 路径读取 match.pkm 会退出 104；本次验收将引擎工作区与数据目录放在 Windows 本地路径下完成。打包版使用 Windows 本地路径，不受影响。存档战术库导入在实机完成；导入数据与测试结果保存在 Windows 临时目录，验收后已清理。
 
 ## 8. 已知限制
 

@@ -315,10 +315,9 @@ draft_id 格式：dr_ 加 12 位十六进制。
 - 状态机沿用 queued、running、complete、error、cancelled、interrupted。
 - 排队中取消立即落 cancelled 且不再执行；运行中取消由 runner 在安全点落地；续跑与提交共用同一串行闸门。
 
-### 5.5 结果视图
+### 5.4 结果视图
 
 - metrics 沿用现有结构，含 n、wins、draws、losses、win_rate、win_interval、goals_for、goals_against、points。
-- 存档模式追加 xg、xga、possession、shots、pass_completion、opponent_metrics、paired。
 - 客队战术池 job 追加 tactic_pool：salt、mode（random 或 rotation）、rounds、players（uniform 或 real）、uniform、entries（weight、probability、roster）与 draws（total 与每套出场次数）；probability 仅在 random 模式有值，rotation 下为 null；draws 按 seed 计数，同一 seed 的 A/B 只算一次。
 - results_compare 对任一方带战术池的任务先核对模式、条目与分配：模式或条目不同、同种子战术不同、仅一方启用池时返回 comparable=false 与原因，paired 置空。
 - results_csv 输出列见 CLI 章节。
@@ -350,7 +349,6 @@ draft_id 格式：dr_ 加 12 位十六进制。
 
 约束：
 
-- side 0 与 1 对应 teams[0] 与 teams[1]，不代表实际主客；存档批次的实际主客由 schedule 决定。
 - group 与 option 的合法值来自 catalog；非法值返回 validation_failed。
 - role 必须属于该 phase；duty 只允许现有职责位。
 - 首期不提供定位球、针对性指令和球员属性的语义编辑；这些字段通过 FMF 导入或完整场景替换维护。
@@ -435,7 +433,6 @@ draft_id 格式：dr_ 加 12 位十六进制。
 ### 7.4 CSV 列
 
 自由模式：mode、variant、seed、tactic_pool_entry_index、tactic_pool_entry_name、home_goals、away_goals、shots、shots_on_target、xg、possession、passes、completed_passes、elapsed_seconds、attempts、log。战术池列为抽中的客队战术序号与名称；未启用池时留空。MCP results_csv 另含对手统计、xGA、比分变化与进球时间线列。
-存档模式追加：opponent_key、venue、tested_side。
 事件明细导出时追加：goals、cards 的紧凑 JSON 字符串。
 
 ## 8. MCP
@@ -543,7 +540,6 @@ setpiece_export：draft_id、side、type、variant 必填。返回 filename、pa
 | fm27://jobs/{job_id} | 任务摘要 |
 | fm27://jobs/{job_id}/export | 汇总、方案与 provenance |
 | fm27://jobs/{job_id}/logs/{name} | 单场原始 JSONL |
-| fm27://saves/{save_id} | 存档导入状态与元数据 |
 
 大结果只走资源，工具回摘要与游标。
 
@@ -553,7 +549,6 @@ setpiece_export：draft_id、side、type、variant 必填。返回 filename、pa
 | --- | --- | --- |
 | test_tactic_change | draft_id、instruction、seeds | 引导执行单变量对照实验 |
 | compare_baseline_vs_current | baseline_draft_id、draft_id、seeds | 引导读取配对差值并解释 |
-| opponent_sweep | save_id、club_uid、draft_id、count | 引导存档多对手扫描 |
 
 ### 8.6 进度、取消与日志
 
@@ -627,7 +622,7 @@ results_compare baseline_job_id=<基准 job> candidate_job_ids=[<候选 job>,...
 
 跨任务比较前检查 results_compare 的 comparable：若两任务都带客队战术池，salt 不同意味着同 seed 可能抽到不同战术，此时必须返回不可配对；需要跨任务比较时改用同一任务内的 A/B 对照。
 
-### 9.4 战术文件往返
+### 9.3 战术文件往返
 
 ```text
 draft_create source=job job_id variant=B
@@ -638,7 +633,7 @@ fmf_export draft_id side=1
 
 导出后 App 会立即回读并比对，report 中不一致会报错。
 
-### 9.5 客队战术池模式
+### 9.4 客队战术池模式
 
 ```text
 draft_create source=inline scenario_path=<含 away_tactic_pool 的场景文件>
@@ -705,7 +700,6 @@ results_summary job_id
 | A2 | 清单与 schema | manifest 字段齐全；schema 包可解析；主版本不匹配时 CLI 与 MCP 明确报错 |
 | A3 | 草案 | 六种来源均可创建；单步与批量编辑、校验、删除、列表、选项查询均通过；非法编辑不落盘 |
 | A4 | 自由模式 | 通过 CLI 与 MCP 各完成一次 A/B 对比；多候选提交进入队列并按序执行；结果含 metrics 与 paired |
-| A5 | 存档模式 | 导入、球队读取、对手扫描、预览、批次运行完成；count 口径正确 |
 | A6 | 任务 | 列表分页、详情分页、取消、续跑、删除、重命名、导出均通过 |
 | A7 | 结果 | 汇总、逐场分页、单场事件、跨任务配对、CSV 双方列与进球时间线正确 |
 | A8 | 战术文件 | FMF 导入导出往返一致；定位球导出回读通过 |

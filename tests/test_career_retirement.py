@@ -48,3 +48,13 @@ def test_legacy_agent_career_surface_is_removed():
     assert "/api/save/run" not in tactics_server
     assert "/api/save/load" not in tactics_server
     assert "/api/save/selection" in tactics_server
+
+def test_experiment_and_squad_capabilities_are_preserved():
+    controls = (UI / "workspace-controls.js").read_text(encoding="utf-8")
+    assert "战术执行力实验" in controls
+    assert "experiment-panel" in controls
+    assert "resultsView" in controls
+    squad = (UI / "squad-editor.js").read_text(encoding="utf-8")
+    assert "/api/save/selection" in squad
+    assert "showSquadSelection" in squad
+    assert "/api/save/load" not in squad
