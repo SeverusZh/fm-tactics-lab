@@ -87,14 +87,18 @@ const CATALOG_RESPONSE = {
 };
 
 const CATALOG_UNAVAILABLE = { available: false, catalog: null };
-const CATALOG_PHASE_FALLBACK = {
+const CATALOG_PHASE_MATRIX = {
   available: true,
   catalog: {
     positions: [],
     roles: [],
     team_instructions: [
-      { id: 31, label: "旧字段有球", phase: 0, options: [{ id: 7, label: "旧值" }] },
-      { id: 32, label: "新字段无球", possession_phase: 1, options: [{ id: 8, label: "新值" }] },
+      { id: 40, label: "优先有球", possession_phase: 0, phase: 1, options: [{ id: 1, label: "值一" }] },
+      { id: 41, label: "回退有球", phase: 0, options: [{ id: 2, label: "值二" }] },
+      { id: 42, label: "优先无球", possession_phase: 1, phase: 0, options: [{ id: 3, label: "值三" }] },
+      { id: 43, label: "回退无球", phase: 1, options: [{ id: 4, label: "值四" }] },
+      { id: 44, label: "无阶段标记", options: [{ id: 5, label: "值五" }] },
+      { id: 45, label: "真实无球形态", possession_phase: 1, phase: 4, options: [{ id: 6, label: "值六" }] },
     ],
     mentalities: [],
   },
@@ -459,7 +463,9 @@ describe("TacticsPage", () => {
   });
 
 
-  it("catalog 指令按 possession_phase 过滤并兼容旧 phase 字段", async () => {
+  it("catalog 指令按 possession_phase 优先过滤并回退 phase", async () => {
+    const keys = ["40", "41", "42", "43", "44", "45"];
+    const instructions = Object.fromEntries(keys.map((key, index) => [key, index + 1]));
     const scenario = makeScenario();
     const teams = scenario.teams as Array<Record<string, unknown>>;
     teams[0] = makeTeam(
@@ -467,24 +473,32 @@ describe("TacticsPage", () => {
       100,
       HOME_POSSESSION,
       HOME_OUT_OF_POSSESSION,
-      { "31": 7 },
-      { "32": 8 },
+      instructions,
+      instructions,
     );
     stubFetch((url) => {
-      if (url.endsWith("/api/catalog")) return jsonResponse(CATALOG_PHASE_FALLBACK);
+      if (url.endsWith("/api/catalog")) return jsonResponse(CATALOG_PHASE_MATRIX);
       if (url.endsWith("/api/drafts")) return jsonResponse(makeDraftList([makeSummary()]));
       return jsonResponse(makeDraft({ scenario }));
     });
     renderTacticsPage();
 
+    const rowLabels = async () =>
+      Array.from(document.querySelectorAll(".tactics-instruction dt")).map((node) => node.textContent);
+
     await pitchSlots();
-    expect(await screen.findByText("旧字段有球")).toBeInTheDocument();
-    expect(screen.queryByText("新字段无球")).not.toBeInTheDocument();
+    expect(await screen.findByText("优先有球")).toBeInTheDocument();
+    expect(await rowLabels()).toEqual(["优先有球", "回退有球", "无阶段标记"]);
+    expect(screen.queryByText("优先无球")).not.toBeInTheDocument();
+    expect(screen.queryByText("回退无球")).not.toBeInTheDocument();
+    expect(screen.queryByText("真实无球形态")).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "无球" }));
 
-    expect(await screen.findByText("新字段无球")).toBeInTheDocument();
-    expect(screen.queryByText("旧字段有球")).not.toBeInTheDocument();
+    expect(await screen.findByText("优先无球")).toBeInTheDocument();
+    expect(await rowLabels()).toEqual(["优先无球", "回退无球", "无阶段标记", "真实无球形态"]);
+    expect(screen.queryByText("优先有球")).not.toBeInTheDocument();
+    expect(screen.queryByText("回退有球")).not.toBeInTheDocument();
   });
 
   it("载入引擎目录后角色、球队指令与心态显示中文标签", async () => {
