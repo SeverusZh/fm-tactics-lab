@@ -1,14 +1,20 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { App } from "../App";
 import { AppContext } from "../app-context";
 import {
+  compareResults,
   downloadJobCsv,
   getJobPoolSummary,
   getJobSummary,
+  type CompareCandidate,
+  type CompareJob,
+  type ComparePaired,
+  type ComparePairing,
+  type CompareResult,
   type Health,
   type Job,
   type JobMetrics,
@@ -172,8 +178,65 @@ const emptyPool: PoolSummary = {
   draws: {},
 };
 
+function makeComparePairing(overrides: Partial<ComparePairing> = {}): ComparePairing {
+  return {
+    common_seeds: 6,
+    draw_mismatches: 0,
+    mismatched_seeds: [],
+    missing_seeds: [],
+    ...overrides,
+  };
+}
+
+function makeComparePaired(overrides: Partial<ComparePaired> = {}): ComparePaired {
+  return {
+    seeds: 6,
+    win_rate_delta: 0.125,
+    win_rate_delta_ci: [0.02, 0.23],
+    points_delta: 0.5,
+    points_delta_ci: [-0.2, 1.2],
+    goal_difference_delta: 0.4,
+    goal_difference_delta_ci: [-0.1, 0.9],
+    xgd_delta: 0.15,
+    xgd_delta_ci: [-0.05, 0.35],
+    ...overrides,
+  };
+}
+
+function makeCompareJob(overrides: Partial<CompareJob> = {}): CompareJob {
+  return {
+    job_id: "job-2",
+    name: "批次二",
+    metrics: makeMetrics(),
+    tactic_pool: emptyPool,
+    ...overrides,
+  };
+}
+
+function makeCompareCandidate(overrides: Partial<CompareCandidate> = {}): CompareCandidate {
+  return {
+    ...makeCompareJob(),
+    comparable: true,
+    reason: null,
+    pairing: makeComparePairing(),
+    paired: makeComparePaired(),
+    ...overrides,
+  };
+}
+
+function makeCompareResult(overrides: Partial<CompareResult> = {}): CompareResult {
+  return {
+    baseline: makeCompareJob({ job_id: "job-1", name: "批次一" }),
+    variant: "B",
+    side: 0,
+    candidates: [makeCompareCandidate()],
+    ...overrides,
+  };
+}
+
 type ResultsFixtures = {
   jobs?: { items: Job[]; total: number; next_offset: number | null };
+  compare?: CompareResult | (() => CompareResult);
   summary?: JobSummary | ((url: string) => JobSummary);
   runs?: (url: string) => { items: JobRun[]; total: number; next_offset: number | null };
   pool?: PoolSummary | ((url: string) => PoolSummary);
@@ -182,6 +245,11 @@ type ResultsFixtures = {
 
 function resultsFetch(fixtures: ResultsFixtures = {}): FetchHandler {
   return (url) => {
+    if (url.includes("/api/results/compare")) {
+      const compare =
+        typeof fixtures.compare === "function" ? fixtures.compare() : fixtures.compare;
+      return jsonResponse(compare ?? makeCompareResult());
+    }
     if (url.includes("/export.csv")) {
       return fixtures.csv?.() ?? textResponse("job_id,sequence\r\njob-1,1\r\n");
     }
@@ -238,6 +306,33 @@ function poolCard(): HTMLElement {
 
 function poolRowTexts(): string[][] {
   return within(poolCard())
+    .getAllByRole("row")
+    .slice(1)
+    .map((row) =>
+      within(row)
+        .getAllByRole("cell")
+        .map((cell) => cell.textContent ?? ""),
+    );
+}
+
+
+function comparePanel(): HTMLElement {
+  const title = screen.getByText("任务对比");
+  const panel = title.closest(".compare-panel");
+  if (!(panel instanceof HTMLElement)) throw new Error("未找到任务对比面板");
+  return panel;
+}
+
+function compareTable(): HTMLElement {
+  return screen.getByRole("table", { name: "任务对比结果" });
+}
+
+function candidateCheckbox(label: string, jobId: string): HTMLElement {
+  return screen.getByRole("checkbox", { name: "候选任务 " + label + "（" + jobId + "）" });
+}
+
+function compareRowTexts(): string[][] {
+  return within(compareTable())
     .getAllByRole("row")
     .slice(1)
     .map((row) =>
@@ -766,6 +861,352 @@ describe("ResultsPage", () => {
   });
 });
 
+describe("ResultsPage 任务对比", () => {
+  const threeJobs = {
+    items: [
+      makeJob(),
+      makeJob({ id: "job-2", name: "批次二" }),
+      makeJob({ id: "job-3", name: "批次三" }),
+    ],
+    total: 3,
+    next_offset: null,
+  };
+
+  beforeEach(() => {
+    fetchMock.mockReset();
+    vi.stubGlobal("fetch", fetchMock);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it("面板列出基线之外的候选任务，默认变体 B 且未选择候选时按钮禁用", async () => {
+    stubFetch(resultsFetch({ jobs: threeJobs }));
+    renderResultsPage();
+
+    await screen.findByText("任务对比");
+
+    expect(candidateCheckbox("批次二", "job-2")).toBeInTheDocument();
+    expect(candidateCheckbox("批次三", "job-3")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("checkbox", { name: "候选任务 批次一（job-1）" }),
+    ).not.toBeInTheDocument();
+    expect(comparePanel()).toHaveTextContent("批次一");
+    expect(comparePanel()).toHaveTextContent("job-1");
+    expect(within(comparePanel()).getByRole("button", { name: "B" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(within(comparePanel()).getByRole("button", { name: "开始对比" })).toBeDisabled();
+  });
+
+  it("提交对比时携带基线、候选、变体与视角", async () => {
+    stubFetch(resultsFetch({ jobs: threeJobs }));
+    renderResultsPage();
+
+    await screen.findByText("任务对比");
+    fireEvent.click(candidateCheckbox("批次二", "job-2"));
+    fireEvent.click(candidateCheckbox("批次三", "job-3"));
+    fireEvent.click(within(comparePanel()).getByRole("button", { name: "A" }));
+    fireEvent.click(within(comparePanel()).getByRole("button", { name: "开始对比" }));
+
+    await waitFor(() => expect(callsTo("/api/results/compare")).toHaveLength(1));
+    const call = callsTo("/api/results/compare")[0];
+    expect(call.url).toBe("http://127.0.0.1:43210/api/results/compare");
+    expect(call.init.method).toBe("POST");
+    expect(JSON.parse(String(call.init.body))).toEqual({
+      baseline_job_id: "job-1",
+      candidate_job_ids: ["job-2", "job-3"],
+      variant: "A",
+      side: 0,
+    });
+    expect(new Headers(call.init.headers).get("Authorization")).toBe("Bearer test-token");
+    expect(new Headers(call.init.headers).get("Content-Type")).toBe("application/json");
+  });
+
+  it("渲染可比候选的配对差值与置信区间", async () => {
+    stubFetch(resultsFetch({ jobs: threeJobs, compare: makeCompareResult() }));
+    renderResultsPage();
+
+    await screen.findByText("任务对比");
+    fireEvent.click(candidateCheckbox("批次二", "job-2"));
+    fireEvent.click(within(comparePanel()).getByRole("button", { name: "开始对比" }));
+
+    const table = await screen.findByRole("table", { name: "任务对比结果" });
+    expect(within(table).getAllByRole("columnheader").map((header) => header.textContent)).toEqual([
+      "候选任务",
+      "可比性",
+      "场次",
+      "Δ胜率",
+      "Δ净胜球",
+      "Δ积分",
+      "ΔxGD",
+    ]);
+    const cells = compareRowTexts()[0];
+    expect(cells[0]).toContain("批次二");
+    expect(cells[0]).toContain("job-2");
+    expect(cells[0]).toContain("同种子 6 场，抽签不一致 0 场");
+    expect(cells[1]).toContain("可比");
+    expect(cells[2]).toBe("6");
+    expect(cells[3]).toContain("+12.5%");
+    expect(cells[3]).toContain("95% 区间 [2.0%, 23.0%]");
+    expect(cells[4]).toBe("+0.40");
+    expect(cells[5]).toBe("+0.50");
+    expect(cells[6]).toBe("+0.15");
+  });
+
+  it("不可比候选展示原因与不一致种子", async () => {
+    const compare = makeCompareResult({
+      candidates: [
+        makeCompareCandidate({
+          comparable: false,
+          reason: "客队战术池分配不同：2/6 个同种子场次使用了不同战术",
+          pairing: makeComparePairing({
+            draw_mismatches: 2,
+            mismatched_seeds: [11, 12, 13, 14],
+            missing_seeds: [21, 22],
+          }),
+          paired: null,
+        }),
+      ],
+    });
+    stubFetch(resultsFetch({ jobs: threeJobs, compare }));
+    renderResultsPage();
+
+    await screen.findByText("任务对比");
+    fireEvent.click(candidateCheckbox("批次二", "job-2"));
+    fireEvent.click(within(comparePanel()).getByRole("button", { name: "开始对比" }));
+
+    await screen.findByRole("table", { name: "任务对比结果" });
+    const cells = compareRowTexts()[0];
+    expect(cells[0]).toContain("同种子 6 场，抽签不一致 2 场");
+    expect(cells[1]).toContain("不可比");
+    expect(cells[1]).toContain("客队战术池分配不同：2/6 个同种子场次使用了不同战术");
+    expect(cells[1]).toContain("不一致种子 11、12、13…");
+    expect(cells[1]).toContain("缺失种子 21、22");
+    expect(cells[2]).toBe("—");
+    expect(cells[3]).toBe("—");
+    expect(cells[4]).toBe("—");
+    expect(cells[5]).toBe("—");
+    expect(cells[6]).toBe("—");
+  });
+
+  it("对比失败展示内联错误并可重试", async () => {
+    let attempts = 0;
+    const base = resultsFetch({ jobs: threeJobs });
+    stubFetch((url, init) => {
+      if (!url.includes("/api/results/compare")) return base(url, init);
+      attempts += 1;
+      if (attempts === 1) {
+        return jsonResponse({ error: { code: "invalid_request", message: "候选任务不可用" } }, 400);
+      }
+      return jsonResponse(makeCompareResult());
+    });
+    renderResultsPage();
+
+    await screen.findByText("任务对比");
+    fireEvent.click(candidateCheckbox("批次二", "job-2"));
+    fireEvent.click(within(comparePanel()).getByRole("button", { name: "开始对比" }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("候选任务不可用");
+    fireEvent.click(within(alert).getByRole("button", { name: "重试" }));
+
+    expect(await screen.findByRole("table", { name: "任务对比结果" })).toBeInTheDocument();
+    await waitFor(() => expect(attempts).toBe(2));
+  });
+
+  it("对比请求进行中禁用按钮并显示加载状态", async () => {
+    const pending = deferred<Response>();
+    const base = resultsFetch({ jobs: threeJobs });
+    stubFetch((url, init) => {
+      if (!url.includes("/api/results/compare")) return base(url, init);
+      return pending.promise;
+    });
+    renderResultsPage();
+
+    await screen.findByText("任务对比");
+    fireEvent.click(candidateCheckbox("批次二", "job-2"));
+    fireEvent.click(within(comparePanel()).getByRole("button", { name: "开始对比" }));
+
+    const busyButton = await within(comparePanel()).findByRole("button", { name: "对比中…" });
+    expect(busyButton).toBeDisabled();
+    expect(comparePanel()).toHaveAttribute("aria-busy", "true");
+
+    pending.resolve(jsonResponse(makeCompareResult()));
+
+    expect(await screen.findByRole("table", { name: "任务对比结果" })).toBeInTheDocument();
+    expect(within(comparePanel()).getByRole("button", { name: "开始对比" })).toBeEnabled();
+  });
+
+  it("迟到的旧对比响应不覆盖新一轮运行状态与结果", async () => {
+    const stale = deferred<Response>();
+    const current = deferred<Response>();
+    const pendingResponses = [stale, current];
+    const base = resultsFetch({ jobs: threeJobs });
+    stubFetch((url, init) => {
+      if (!url.includes("/api/results/compare")) return base(url, init);
+      const response = pendingResponses.shift();
+      if (response === undefined) throw new Error("未预期的对比请求");
+      return response.promise;
+    });
+    renderResultsPage();
+
+    await screen.findByText("任务对比");
+    fireEvent.click(candidateCheckbox("批次二", "job-2"));
+    fireEvent.click(within(comparePanel()).getByRole("button", { name: "开始对比" }));
+    await waitFor(() => expect(callsTo("/api/results/compare")).toHaveLength(1));
+    expect(within(comparePanel()).getByRole("button", { name: "对比中…" })).toBeDisabled();
+
+    fireEvent.click(within(comparePanel()).getByRole("button", { name: "A" }));
+    fireEvent.click(within(comparePanel()).getByRole("button", { name: "开始对比" }));
+    await waitFor(() => expect(callsTo("/api/results/compare")).toHaveLength(2));
+    expect(within(comparePanel()).getByRole("button", { name: "对比中…" })).toBeDisabled();
+
+    await act(async () => {
+      stale.resolve(
+        jsonResponse(
+          makeCompareResult({
+            candidates: [
+              makeCompareCandidate({
+                name: "迟到旧结果",
+                paired: makeComparePaired({
+                  win_rate_delta: 0.1,
+                  win_rate_delta_ci: [0.05, 0.2],
+                }),
+              }),
+            ],
+          }),
+        ),
+      );
+    });
+
+    expect(comparePanel()).toHaveAttribute("aria-busy", "true");
+    expect(within(comparePanel()).getByRole("button", { name: "对比中…" })).toBeDisabled();
+    expect(screen.queryByRole("table", { name: "任务对比结果" })).not.toBeInTheDocument();
+
+    await act(async () => {
+      current.resolve(
+        jsonResponse(
+          makeCompareResult({
+            variant: "A",
+            candidates: [
+              makeCompareCandidate({
+                name: "当前结果",
+                paired: makeComparePaired({
+                  win_rate_delta: 0.5,
+                  win_rate_delta_ci: [0.4, 0.6],
+                }),
+              }),
+            ],
+          }),
+        ),
+      );
+    });
+
+    const table = screen.getByRole("table", { name: "任务对比结果" });
+    expect(table).not.toHaveTextContent("迟到旧结果");
+    const cells = compareRowTexts()[0];
+    expect(cells[0]).toContain("当前结果");
+    expect(cells[3]).toContain("+50.0%");
+  });
+
+  it("切换统计视角后清空旧结果并保留候选选择", async () => {
+    stubFetch(resultsFetch({ jobs: threeJobs }));
+    renderResultsPage();
+
+    await screen.findByText("任务对比");
+    fireEvent.click(candidateCheckbox("批次二", "job-2"));
+    fireEvent.click(within(comparePanel()).getByRole("button", { name: "开始对比" }));
+    await screen.findByRole("table", { name: "任务对比结果" });
+
+    fireEvent.click(screen.getByRole("button", { name: "客队" }));
+
+    expect(screen.queryByRole("table", { name: "任务对比结果" })).not.toBeInTheDocument();
+    expect(candidateCheckbox("批次二", "job-2")).toBeChecked();
+
+    fireEvent.click(within(comparePanel()).getByRole("button", { name: "开始对比" }));
+    await waitFor(() => expect(callsTo("/api/results/compare")).toHaveLength(2));
+    const second = callsTo("/api/results/compare")[1];
+    expect(JSON.parse(String(second.init.body)).side).toBe(1);
+  });
+
+  it("切换对比变体后清空旧结果，切回原变体不复活", async () => {
+    stubFetch(resultsFetch({ jobs: threeJobs }));
+    renderResultsPage();
+
+    await screen.findByText("任务对比");
+    fireEvent.click(candidateCheckbox("批次二", "job-2"));
+    fireEvent.click(within(comparePanel()).getByRole("button", { name: "开始对比" }));
+    expect(await screen.findByRole("table", { name: "任务对比结果" })).toBeInTheDocument();
+
+    fireEvent.click(within(comparePanel()).getByRole("button", { name: "A" }));
+    expect(screen.queryByRole("table", { name: "任务对比结果" })).not.toBeInTheDocument();
+
+    fireEvent.click(within(comparePanel()).getByRole("button", { name: "B" }));
+    expect(screen.queryByRole("table", { name: "任务对比结果" })).not.toBeInTheDocument();
+    expect(within(comparePanel()).getByRole("button", { name: "开始对比" })).toBeEnabled();
+    expect(callsTo("/api/results/compare")).toHaveLength(1);
+
+    fireEvent.click(within(comparePanel()).getByRole("button", { name: "开始对比" }));
+    await waitFor(() => expect(callsTo("/api/results/compare")).toHaveLength(2));
+    expect(JSON.parse(String(callsTo("/api/results/compare")[1].init.body)).variant).toBe("B");
+    expect(await screen.findByRole("table", { name: "任务对比结果" })).toBeInTheDocument();
+  });
+
+  it("切换基线任务后清空对比结果与候选选择", async () => {
+    stubFetch(resultsFetch({ jobs: threeJobs }));
+    renderResultsPage();
+
+    await screen.findByText("任务对比");
+    fireEvent.click(candidateCheckbox("批次二", "job-2"));
+    fireEvent.click(within(comparePanel()).getByRole("button", { name: "开始对比" }));
+    await screen.findByRole("table", { name: "任务对比结果" });
+
+    fireEvent.change(screen.getByLabelText("实验任务"), { target: { value: "job-2" } });
+
+    await waitFor(() => expect(comparePanel()).toHaveTextContent("批次二"));
+    expect(screen.queryByRole("table", { name: "任务对比结果" })).not.toBeInTheDocument();
+    expect(candidateCheckbox("批次一", "job-1")).not.toBeChecked();
+    expect(candidateCheckbox("批次三", "job-3")).not.toBeChecked();
+    expect(within(comparePanel()).getByRole("button", { name: "开始对比" })).toBeDisabled();
+  });
+
+  it("候选任务最多选择五个", async () => {
+    const sevenJobs = {
+      items: [
+        makeJob(),
+        makeJob({ id: "job-2", name: "批次二" }),
+        makeJob({ id: "job-3", name: "批次三" }),
+        makeJob({ id: "job-4", name: "批次四" }),
+        makeJob({ id: "job-5", name: "批次五" }),
+        makeJob({ id: "job-6", name: "批次六" }),
+        makeJob({ id: "job-7", name: "批次七" }),
+      ],
+      total: 7,
+      next_offset: null,
+    };
+    stubFetch(resultsFetch({ jobs: sevenJobs }));
+    renderResultsPage();
+
+    await screen.findByText("任务对比");
+    for (const [label, jobId] of [
+      ["批次二", "job-2"],
+      ["批次三", "job-3"],
+      ["批次四", "job-4"],
+      ["批次五", "job-5"],
+      ["批次六", "job-6"],
+    ]) {
+      fireEvent.click(candidateCheckbox(label, jobId));
+    }
+
+    expect(candidateCheckbox("批次七", "job-7")).toBeDisabled();
+    expect(candidateCheckbox("批次二", "job-2")).toBeEnabled();
+  });
+});
+
 describe("结果读取 API 客户端", () => {
   beforeEach(() => {
     fetchMock.mockReset();
@@ -814,6 +1255,33 @@ describe("结果读取 API 客户端", () => {
 
     expect(text).toBe("job_id,sequence\r\njob-1,1\r\n");
     expect(fetchCalls()[0].url).toBe("http://127.0.0.1:43210/api/jobs/job-1/export.csv");
+  });
+
+  it("compareResults 提交对比参数并读取结果", async () => {
+    stubFetch(resultsFetch({ compare: makeCompareResult() }));
+
+    const result = await compareResults(connection, {
+      baseline_job_id: "job-1",
+      candidate_job_ids: ["job-2"],
+      variant: "A",
+      side: 1,
+      reps: 200,
+    });
+
+    expect(result.baseline.job_id).toBe("job-1");
+    expect(result.candidates[0].comparable).toBe(true);
+    const call = fetchCalls()[0];
+    expect(call.url).toBe("http://127.0.0.1:43210/api/results/compare");
+    expect(call.init.method).toBe("POST");
+    expect(JSON.parse(String(call.init.body))).toEqual({
+      baseline_job_id: "job-1",
+      candidate_job_ids: ["job-2"],
+      variant: "A",
+      side: 1,
+      reps: 200,
+    });
+    expect(new Headers(call.init.headers).get("Authorization")).toBe("Bearer test-token");
+    expect(new Headers(call.init.headers).get("Content-Type")).toBe("application/json");
   });
 });
 

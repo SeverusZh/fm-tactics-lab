@@ -1,16 +1,18 @@
 import { useQuery } from "@tanstack/react-query";
 import { ChartBar } from "@phosphor-icons/react";
-import { useState, type ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 
 import { useAppContext } from "../app-context";
 import { EmptyState } from "../components/EmptyState";
 import { Panel } from "../components/Panel";
 import {
+  compareResults,
   downloadJobCsv,
   getJobPoolSummary,
   getJobSummary,
   listJobRuns,
   listJobs,
+  type CompareResult,
   type JobMetrics,
   type JobStatus,
   type JobSummary,
@@ -19,6 +21,7 @@ import {
 
 const PAGE_SIZE = 20;
 const JOB_PAGE_SIZE = 50;
+const COMPARE_MAX_CANDIDATES = 5;
 
 const STATUS_LABELS: Record<JobStatus, string> = {
   queued: "排队中",
@@ -84,6 +87,19 @@ function formatDelta(value: number | null): string {
   return (value >= 0 ? "+" : "") + value.toFixed(2);
 }
 
+function formatSignedPercent(value: number | null): string {
+  if (value === null) return "—";
+  return (value >= 0 ? "+" : "") + (value * 100).toFixed(1) + "%";
+}
+
+function formatPercentInterval(interval: [number, number]): string {
+  return "[" + (interval[0] * 100).toFixed(1) + "%, " + (interval[1] * 100).toFixed(1) + "%]";
+}
+
+function seedList(seeds: number[]): string {
+  return seeds.slice(0, 3).join("、") + (seeds.length > 3 ? "…" : "");
+}
+
 function triggerTextDownload(filename: string, text: string): void {
   const url = URL.createObjectURL(new Blob([text], { type: "text/csv;charset=utf-8" }));
   const anchor = document.createElement("a");
@@ -92,6 +108,11 @@ function triggerTextDownload(filename: string, text: string): void {
   anchor.click();
   URL.revokeObjectURL(url);
 }
+
+type CompareView =
+  | { key: string; status: "running" }
+  | { key: string; status: "error"; message: string }
+  | { key: string; status: "success"; result: CompareResult };
 
 type MetricCard = {
   label: string;
@@ -129,6 +150,12 @@ export function ResultsPage() {
   const [downloading, setDownloading] = useState(false);
   const [downloadError, setDownloadError] = useState<string | null>(null);
   const [poolExpandedJobs, setPoolExpandedJobs] = useState<Record<string, boolean>>({});
+  const [selectedCandidateIds, setSelectedCandidateIds] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
+  const [compareVariant, setCompareVariant] = useState<"A" | "B">("B");
+  const [compareView, setCompareView] = useState<CompareView | null>(null);
+  const compareRequestRef = useRef(0);
 
   const jobs = useQuery({
     queryKey: ["results-jobs", connection?.url],
@@ -160,15 +187,87 @@ export function ResultsPage() {
     enabled: connection !== null && activeJobId !== null && summary.data !== undefined,
   });
 
+  const candidateJobs = jobItems.filter((job) => job.id !== activeJobId);
+  const activeJob = jobItems.find((job) => job.id === activeJobId) ?? null;
+  const selectedCandidateJobIds = candidateJobs
+    .filter((job) => selectedCandidateIds.has(job.id))
+    .map((job) => job.id);
+  const atCandidateLimit = selectedCandidateIds.size >= COMPARE_MAX_CANDIDATES;
+  const compareKey = JSON.stringify({
+    baseline: activeJobId,
+    candidates: selectedCandidateJobIds,
+    variant: compareVariant,
+    side,
+  });
+  const visibleCompare =
+    compareView !== null && compareView.key === compareKey ? compareView : null;
+  const comparing = visibleCompare?.status === "running";
+
+  const clearCompare = () => {
+    setCompareView(null);
+    compareRequestRef.current += 1;
+  };
+
+  const toggleCandidate = (jobId: string) => {
+    setSelectedCandidateIds((previous) => {
+      const next = new Set(previous);
+      if (next.has(jobId)) {
+        next.delete(jobId);
+      } else if (next.size < COMPARE_MAX_CANDIDATES) {
+        next.add(jobId);
+      } else {
+        return previous;
+      }
+      return next;
+    });
+    clearCompare();
+  };
+
+  const changeVariant = (next: "A" | "B") => {
+    setCompareVariant(next);
+    clearCompare();
+  };
+
   const changeJob = (jobId: string) => {
     setSelectedJobId(jobId);
     setRunsOffset(0);
     setDownloadError(null);
+    setSelectedCandidateIds(new Set());
+    clearCompare();
   };
 
   const changeSide = (next: 0 | 1) => {
     setSide(next);
     setDownloadError(null);
+    clearCompare();
+  };
+
+  const runCompare = async () => {
+    if (
+      connection === null ||
+      activeJobId === null ||
+      selectedCandidateJobIds.length === 0 ||
+      comparing
+    ) {
+      return;
+    }
+    const requestId = compareRequestRef.current + 1;
+    compareRequestRef.current = requestId;
+    const key = compareKey;
+    setCompareView({ key, status: "running" });
+    try {
+      const result = await compareResults(connection, {
+        baseline_job_id: activeJobId,
+        candidate_job_ids: selectedCandidateJobIds,
+        variant: compareVariant,
+        side,
+      });
+      if (compareRequestRef.current !== requestId) return;
+      setCompareView({ key, status: "success", result });
+    } catch (error) {
+      if (compareRequestRef.current !== requestId) return;
+      setCompareView({ key, status: "error", message: errorMessage(error) });
+    }
   };
 
   const togglePool = () => {
@@ -443,6 +542,156 @@ export function ResultsPage() {
     );
   }
 
+  const compareContent =
+    activeJobId !== null && candidateJobs.length > 0 ? (
+      <section className="compare-panel" aria-labelledby="compare-title" aria-busy={comparing}>
+        <h3 className="results-section-title" id="compare-title">
+          任务对比
+        </h3>
+        <div className="results-meta compare-baseline">
+          <span>基线</span>
+          <strong>{activeJob?.name ?? activeJobId}</strong>
+          <span className="jobs-id">{activeJobId}</span>
+        </div>
+        <div className="compare-controls">
+          <fieldset className="compare-candidates">
+            <legend>候选任务</legend>
+            {candidateJobs.map((job) => {
+              const checked = selectedCandidateIds.has(job.id);
+              return (
+                <label className="compare-candidate" key={job.id}>
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    disabled={!checked && atCandidateLimit}
+                    aria-label={`候选任务 ${job.name ?? job.id}（${job.id}）`}
+                    onChange={() => toggleCandidate(job.id)}
+                  />
+                  <span>{job.name ?? job.id}</span>
+                  <span className="jobs-id">{job.id}</span>
+                </label>
+              );
+            })}
+          </fieldset>
+          <div className="compare-actions">
+            <div className="segmented" role="group" aria-label="对比变体">
+              <button
+                type="button"
+                aria-pressed={compareVariant === "A"}
+                onClick={() => changeVariant("A")}
+              >
+                A
+              </button>
+              <button
+                type="button"
+                aria-pressed={compareVariant === "B"}
+                onClick={() => changeVariant("B")}
+              >
+                B
+              </button>
+            </div>
+            <button
+              className="button primary"
+              type="button"
+              onClick={() => void runCompare()}
+              disabled={selectedCandidateJobIds.length === 0 || comparing}
+            >
+              {comparing ? "对比中…" : "开始对比"}
+            </button>
+          </div>
+        </div>
+        {visibleCompare !== null && visibleCompare.status === "error" ? (
+          <div className="inline-alert" role="alert">
+            <span>{visibleCompare.message}</span>
+            <button className="button small" type="button" onClick={() => void runCompare()}>
+              重试
+            </button>
+          </div>
+        ) : null}
+        {visibleCompare !== null && visibleCompare.status === "success" ? (
+          <div className="jobs-table-wrap">
+            <table className="jobs-table">
+              <caption className="sr-only">任务对比结果</caption>
+              <thead>
+                <tr>
+                  <th scope="col">候选任务</th>
+                  <th scope="col">可比性</th>
+                  <th scope="col" className="jobs-number">
+                    场次
+                  </th>
+                  <th scope="col" className="jobs-number">
+                    Δ胜率
+                  </th>
+                  <th scope="col" className="jobs-number">
+                    Δ净胜球
+                  </th>
+                  <th scope="col" className="jobs-number">
+                    Δ积分
+                  </th>
+                  <th scope="col" className="jobs-number">
+                    ΔxGD
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {visibleCompare.result.candidates.map((candidate) => {
+                  const paired = candidate.paired;
+                  const pairing = candidate.pairing;
+                  return (
+                    <tr key={candidate.job_id}>
+                      <td>
+                        <span className="jobs-name">{candidate.name ?? candidate.job_id}</span>
+                        <span className="jobs-id">{candidate.job_id}</span>
+                        {pairing === null ? null : (
+                          <span className="compare-note">
+                            {pairing.draw_mismatches === null
+                              ? `同种子 ${pairing.common_seeds} 场`
+                              : `同种子 ${pairing.common_seeds} 场，抽签不一致 ${pairing.draw_mismatches} 场`}
+                          </span>
+                        )}
+                      </td>
+                      <td>
+                        <span className="badge" data-tone={candidate.comparable ? "ok" : "warn"}>
+                          {candidate.comparable ? "可比" : "不可比"}
+                        </span>
+                        {candidate.reason === null ? null : (
+                          <span className="compare-note">{candidate.reason}</span>
+                        )}
+                        {pairing !== null && pairing.mismatched_seeds.length > 0 ? (
+                          <span className="compare-note">
+                            不一致种子 {seedList(pairing.mismatched_seeds)}
+                          </span>
+                        ) : null}
+                        {pairing !== null && pairing.missing_seeds.length > 0 ? (
+                          <span className="compare-note">
+                            缺失种子 {seedList(pairing.missing_seeds)}
+                          </span>
+                        ) : null}
+                      </td>
+                      <td className="jobs-number">{paired === null ? "—" : paired.seeds}</td>
+                      <td className="jobs-number">
+                        {paired === null ? "—" : formatSignedPercent(paired.win_rate_delta)}
+                        {paired !== null && paired.win_rate_delta_ci !== null ? (
+                          <span className="metric-hint compare-ci">
+                            95% 区间 {formatPercentInterval(paired.win_rate_delta_ci)}
+                          </span>
+                        ) : null}
+                      </td>
+                      <td className="jobs-number">
+                        {formatDelta(paired?.goal_difference_delta ?? null)}
+                      </td>
+                      <td className="jobs-number">{formatDelta(paired?.points_delta ?? null)}</td>
+                      <td className="jobs-number">{formatDelta(paired?.xgd_delta ?? null)}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        ) : null}
+      </section>
+    ) : null;
+
   let body: ReactNode;
   if (connection === null) {
     body = (
@@ -525,6 +774,7 @@ export function ResultsPage() {
           </div>
         )}
         {summaryContent}
+        {compareContent}
       </>
     );
   }

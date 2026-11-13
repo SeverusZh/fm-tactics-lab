@@ -363,6 +363,107 @@
   font-weight: 600;
 }
 
+.compare-panel {
+  margin-top: var(--space-8);
+}
+
+.compare-baseline {
+  margin-bottom: var(--space-4);
+}
+
+.compare-baseline strong,
+.compare-baseline .jobs-id {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.compare-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-4);
+  margin-bottom: var(--space-4);
+}
+
+.compare-candidates {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.compare-candidates legend {
+  padding: 0;
+  margin-bottom: var(--space-2);
+  color: var(--text-muted);
+  font-size: var(--type-caption);
+}
+
+.compare-candidate {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  min-height: 36px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-control);
+  background: var(--surface-raised);
+  font-size: var(--type-body-sm);
+  cursor: pointer;
+}
+
+.compare-candidate span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.compare-candidate input {
+  margin: 0;
+}
+
+.compare-candidate input:disabled {
+  cursor: not-allowed;
+}
+
+.compare-candidate:has(input:disabled) {
+  border-color: var(--border);
+  background: var(--disabled-bg);
+  color: var(--text-subtle);
+  cursor: not-allowed;
+}
+
+.compare-panel .jobs-table td:first-child {
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.compare-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.compare-note {
+  display: block;
+  margin-top: 2px;
+  color: var(--text-subtle);
+  font-size: var(--type-caption);
+  font-weight: 400;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.compare-ci {
+  display: block;
+  margin-top: 2px;
+}
+
 .pool-card {
   margin-bottom: var(--space-5);
   border: 1px solid var(--border);

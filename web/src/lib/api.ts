@@ -279,6 +279,64 @@ export async function downloadJobCsv(connection: Connection, jobId: string): Pro
   return response.text();
 }
 
+export type CompareInput = {
+  baseline_job_id: string;
+  candidate_job_ids: string[];
+  variant?: "A" | "B";
+  side?: 0 | 1;
+  reps?: number;
+};
+
+export type ComparePairing = {
+  common_seeds: number;
+  draw_mismatches: number | null;
+  mismatched_seeds: number[];
+  missing_seeds: number[];
+};
+
+export type ComparePaired = {
+  seeds: number;
+  win_rate_delta: number | null;
+  win_rate_delta_ci: [number, number] | null;
+  points_delta: number | null;
+  points_delta_ci: [number, number] | null;
+  goal_difference_delta: number | null;
+  goal_difference_delta_ci: [number, number] | null;
+  xgd_delta: number | null;
+  xgd_delta_ci: [number, number] | null;
+};
+
+export type CompareJob = {
+  job_id: string;
+  name: string | null;
+  metrics: JobMetrics | null;
+  tactic_pool: PoolSummary;
+};
+
+export type CompareCandidate = CompareJob & {
+  comparable: boolean;
+  reason: string | null;
+  pairing: ComparePairing | null;
+  paired: ComparePaired | null;
+};
+
+export type CompareResult = {
+  baseline: CompareJob;
+  variant: "A" | "B";
+  side: 0 | 1;
+  candidates: CompareCandidate[];
+};
+
+export function compareResults(
+  connection: Connection,
+  input: CompareInput,
+): Promise<CompareResult> {
+  return apiJson<CompareResult>(connection, "/api/results/compare", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
 export type SaveStatus = "pending" | "reading" | "ready" | "error" | "cancelled";
 
 export type Save = {
