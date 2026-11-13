@@ -79,7 +79,7 @@
 - [~] 命令注册表，HTTP/CLI/MCP 全部由同一份定义生成：registry.py 已声明 41 项能力并有双向契约测试，三入口生成待后续。
 - [~] CLI 全功能命令与退出码：pools/drafts/jobs/saves 命令与退出码已实现并 PASS，注册表统一生成待后续。
 - [x] MCP tools/resources/prompts 全功能同步：stdio 协议层、22 工具、4 个 resources、2 个 prompts 与 `fm27lab mcp` 命令已实现并通过审核。
-- [ ] OpenAPI 生成 TypeScript 类型与请求客户端。
+- [~] OpenAPI 生成 TypeScript 类型已实现并通过契约测试；请求客户端仍手写，待切换。
 - [ ] 契约测试：三入口能力对齐、schema 快照、错误码、幂等。
 - [ ] 独立审核 PASS。
 
@@ -153,9 +153,9 @@
 
 上游：https://github.com/lqf0624/fm-tactics-lab/pull/10
 
-- [ ] 人类经理阵容自动读取：识别 managed club，读取当前/上一场 selection。
-- [ ] 首发 11 人与替补按存档 selection 覆盖，保留战术与定位球；提供撤销。
-- [ ] 导入存档后自动检测并提示；自动覆盖策略必须可配置或有明确确认。
+- [x] 人类经理阵容自动读取：fmsave 适配器识别 managed club 并读取当前 selection。
+- [x] 首发 11 人与替补按存档 selection 覆盖，保留战术与定位球；提供撤销。
+- [~] 导入存档后可读取经理俱乐部与名单；自动检测提示与覆盖确认 UI 待后续。
 - [~] 结果页客队战术池卡片可折叠，显示条目数、模式、名单来源：摘要接口已实现并通过审核，前端卡片待接入。
 - [ ] 折叠状态在会话内保留；移动端/窄屏可用。
 - [~] 测试覆盖自动检测、首发/替补覆盖、撤销、折叠状态：池摘要接口测试已覆盖，其余待补。

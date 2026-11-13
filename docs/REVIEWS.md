@@ -104,6 +104,11 @@
 | 2026-11-14 | FMF 导入导出 | ports/fmf.py、adapters/fmf、routes/fmf.py、tests | FAIL | decode 对 KeyError/RecursionError 未收口，损坏文件返回 500。 |
 | 2026-11-14 | FMF 修复轮 | 同上 | PASS | 异常收口统一 FMF 文件无效、非有限数拒绝、encode 保留 domain 语义、真实场景回归测试经变异验证；51 项相关测试。 |
 | 2026-11-14 | 草稿属性批量编辑 | application/draft_attributes.py、routes、tests | PASS | scope/side 语义、bulk/position/copy/pair_feet/undo 复用领域、单槽快照与持久化；33 项相关测试；22 变异 18 被杀。 |
+| 2026-11-14 | 存档导入与阵容同步 | save_import.py、routes、domain/roster.py、tests | FAIL | starters/bench 在含 generated 占位球员的草案下必然 400；写阶段回滚无测试；不可读路径 500；replace 清空联赛。 |
+| 2026-11-14 | 存档导入修复轮 | 同上 | PASS | 新增 apply_roster_selection 按槽位保占位与重映射、触发器回滚测试、错误收口 400、leagues 保留、uid-only 身份索引；81 项相关测试，变异验证有效。 |
+| 2026-11-14 | 属性批量编辑前端 | PlayersPage、api.ts、tests | PASS | bulk/position/copy/undo 参数与后端一致、失效刷新、错误展示、aria-live；142 项 Vitest；12 变异 11 被杀。 |
+| 2026-11-14 | OpenAPI TypeScript 类型 | scripts/generate_web_types.py、api-schema.ts、tests | FAIL | 字节一致性测试在 CRLF checkout 下会失败。 |
+| 2026-11-14 | 类型生成修复轮 | 同上 + .gitattributes | PASS | .ts/.tsx/.json/.yml 固定 LF、补排序与缺文件测试、重生成 56 schema；1425 项全量。 |
 
 ## 审核规则
 
@@ -112,6 +117,6 @@
 - 先列 findings，再列已验证项，最后给结论。
 - Critical 或 Important 未闭环时不得标记 PASS。
 - 审核通过不等于整体发布就绪；发布仍需最终验收与 Windows 真机验证。
-- 旧 `tests/` 当前 281 项通过，覆盖 legacy UI/HTTP/CLI/MCP、存档战术库、池与名单；新 `fm27lab/tests` 当前 1387 项通过，覆盖包版本、CLI 环境继承、配置/路径边界、SQLite 迁移/事务与池/草案/任务/存档/产物/幂等仓储、HTTP 健康/池/草案/任务 CRUD、鉴权、错误封套、Origin、ACL 失败清理、sidecar serve、23 人名单、真实名单应用、scenario 归一化、catalog/双阶段战术、客队战术池选择、结果指标、任务状态机、存档状态机与应用服务；Vitest 当前 136 项。
+- 旧 `tests/` 当前 281 项通过，覆盖 legacy UI/HTTP/CLI/MCP、存档战术库、池与名单；新 `fm27lab/tests` 当前 1450 项通过，覆盖包版本、CLI 环境继承、配置/路径边界、SQLite 迁移/事务与池/草案/任务/存档/产物/幂等仓储、HTTP 健康/池/草案/任务 CRUD、鉴权、错误封套、Origin、ACL 失败清理、sidecar serve、23 人名单、真实名单应用、scenario 归一化、catalog/双阶段战术、客队战术池选择、结果指标、任务状态机、存档状态机与应用服务；Vitest 当前 142 项。
 - Tauri sidecar supervisor 的静态实现已存在，但 Linux 无 WebKitGTK，Windows CI 的 `cargo build`/`cargo test`/安装包构建是唯一编译证据。PyInstaller onedir sidecar 已在 Linux 构建并通过 ready/health/shutdown 冒烟测试。
 - Rust 核心 crate 当前 4 项 cargo test 通过；React 壳当前 9 项 Vitest 通过、类型检查与生产构建通过。Windows CI 已通过 cargo build/test、NSIS 安装包与 sidecar 资源断言；Linux 本机仍无 WebKitGTK。合并、设计、sidecar、壳层、名单五个审核门均已 PASS。
