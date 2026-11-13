@@ -460,6 +460,18 @@ class JobRepository:
             rows = active.execute(statement, parameters).fetchall()
         return [self._row(row) for row in rows]
 
+    def count(self, status: str | None = None, connection: sqlite3.Connection | None = None) -> int:
+        if status is not None and (not isinstance(status, str) or status not in self.STATUSES):
+            raise ValueError("任务状态无效")
+        statement = "SELECT COUNT(*) FROM jobs"
+        parameters: list[Any] = []
+        if status is not None:
+            statement += " WHERE status=?"
+            parameters.append(status)
+        with self._connection(connection) as (active, _):
+            row = active.execute(statement, parameters).fetchone()
+        return int(row[0])
+
     def update(
         self,
         job_id: str,
@@ -635,6 +647,12 @@ class JobRepository:
                 (job_id, limit, offset),
             ).fetchall()
         return [self._run_row(row) for row in rows]
+
+    def run_count(self, job_id: str, connection: sqlite3.Connection | None = None) -> int:
+        PoolRepository._validate_id(job_id)
+        with self._connection(connection) as (active, _):
+            row = active.execute("SELECT COUNT(*) FROM job_runs WHERE job_id=?", (job_id,)).fetchone()
+        return int(row[0])
 
     def get_run(
         self,

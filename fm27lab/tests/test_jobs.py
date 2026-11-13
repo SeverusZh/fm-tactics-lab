@@ -173,3 +173,50 @@ def test_job_repository_rollback_failed_update_and_duplicates(tmp_path: Path):
         repo.runs("job1", limit=0)
     with pytest.raises(ValueError):
         repo.runs("job1", limit=201)
+
+
+def test_job_repository_count_filters_and_validates_status(tmp_path: Path):
+    repo = JobRepository(database(tmp_path))
+    repo.add(job(id="a", status="queued", created_at="2000-01-01T00:00:00+00:00"))
+    repo.add(job(id="b", status="running", created_at="2000-01-02T00:00:00+00:00"))
+    repo.add(job(id="c", status="running", created_at="2000-01-03T00:00:00+00:00"))
+    assert repo.count() == 3
+    assert repo.count(status="running") == 2
+    assert repo.count(status="completed") == 0
+    for status in ("unknown", [], {}):
+        with pytest.raises(ValueError, match="状态"):
+            repo.count(status=status)
+
+
+def test_job_repository_run_count_per_job(tmp_path: Path):
+    repo = JobRepository(database(tmp_path))
+    repo.add(job(id="a"))
+    repo.add(job(id="b"))
+    repo.add_run("a", run(1))
+    repo.add_run("a", run(2))
+    repo.add_run("b", run(1))
+    assert repo.run_count("a") == 2
+    assert repo.run_count("b") == 1
+    assert repo.run_count("missing") == 0
+    with pytest.raises(ValueError, match="标识"):
+        repo.run_count("a/b")
+
+
+def test_job_repository_counts_follow_the_caller_transaction(tmp_path: Path):
+    db = database(tmp_path)
+    repo = JobRepository(db)
+    with db.transaction() as connection:
+        repo.add(job(id="inside"), connection=connection)
+        repo.add_run("inside", run(1), connection=connection)
+        assert repo.count(connection=connection) == 1
+        assert repo.count(status="queued", connection=connection) == 1
+        assert repo.run_count("inside", connection=connection) == 1
+    assert repo.count() == 1
+    assert repo.run_count("inside") == 1
+    with pytest.raises(RuntimeError):
+        with db.transaction() as connection:
+            repo.add(job(id="rollback"), connection=connection)
+            repo.add_run("rollback", run(1), connection=connection)
+            raise RuntimeError("rollback")
+    assert repo.count() == 1
+    assert repo.run_count("rollback") == 0
