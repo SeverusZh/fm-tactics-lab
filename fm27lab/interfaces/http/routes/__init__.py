@@ -2,7 +2,16 @@ from __future__ import annotations
 
 from fastapi import FastAPI
 
-from fm27lab.interfaces.http.routes import artifacts, drafts, jobs, pools, results, saves, system
+from fm27lab.interfaces.http.routes import (
+    artifacts,
+    drafts,
+    jobs,
+    pools,
+    results,
+    saves,
+    settings,
+    system,
+)
 
 
 def register_routes(app: FastAPI) -> None:
@@ -13,3 +22,4 @@ def register_routes(app: FastAPI) -> None:
     results.register(app)
     saves.register(app)
     artifacts.register(app)
+    settings.register(app)
