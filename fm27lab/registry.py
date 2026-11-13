@@ -32,6 +32,7 @@ CAPABILITY_GROUPS: dict[str, tuple[str, str | None]] = {
     "experiments": ("/api/experiments", "job_id"),
     "jobs": ("/api/jobs", "job_id"),
     "pools": ("/api/pools", "entry_id"),
+    "results": ("/api/results", None),
     "saves": ("/api/saves", "save_id"),
     "settings": ("/api/settings", "key"),
 }
@@ -42,6 +43,7 @@ ACTION_METHODS: dict[str, str] = {
     "batch_delete": "DELETE",
     "cancel": "POST",
     "check": "GET",
+    "compare": "POST",
     "content": "GET",
     "create": "POST",
     "delete": "DELETE",
@@ -400,6 +402,13 @@ CAPABILITIES: tuple[Capability, ...] = (
         ("GET", "/api/catalog"),
         ("catalog", "show"),
         "catalog_snapshot",
+    ),
+    Capability(
+        "results_compare",
+        "跨任务同种子配对比较",
+        ("POST", "/api/results/compare"),
+        ("results", "compare"),
+        "results_compare",
     ),
 )
 

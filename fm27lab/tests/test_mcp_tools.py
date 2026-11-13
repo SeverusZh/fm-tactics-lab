@@ -62,6 +62,7 @@ EXPECTED_TOOL_NAMES = (
     "experiments_cancel",
     "experiments_resume",
     "catalog_snapshot",
+    "results_compare",
 )
 
 PAGINATION_SCHEMAS = {
@@ -352,6 +353,14 @@ REQUEST_CASES = (
     ("experiments_cancel", {"job_id": "job-1"}, "POST", "/api/experiments/job-1/cancel", None, None),
     ("experiments_resume", {"job_id": "job-1"}, "POST", "/api/experiments/job-1/resume", None, None),
     ("catalog_snapshot", {}, "GET", "/api/catalog", None, None),
+    (
+        "results_compare",
+        {"baseline_job_id": "job-1", "candidate_job_ids": ["job-2"]},
+        "POST",
+        "/api/results/compare",
+        None,
+        {"baseline_job_id": "job-1", "candidate_job_ids": ["job-2"]},
+    ),
 )
 
 INVALID_CASES = (
@@ -522,6 +531,22 @@ INVALID_CASES = (
     ),
     ("experiments_cancel", {}, "缺少必填参数：job_id"),
     ("catalog_snapshot", {"bogus": 1}, "未知参数：bogus"),
+    ("results_compare", {}, "缺少必填参数：baseline_job_id"),
+    (
+        "results_compare",
+        {"baseline_job_id": "job-1", "candidate_job_ids": []},
+        "参数 candidate_job_ids 至少需要 1 项",
+    ),
+    (
+        "results_compare",
+        {"baseline_job_id": "job-1", "candidate_job_ids": ["job-2"], "reps": 20001},
+        "参数 reps 不能大于 20000",
+    ),
+    (
+        "results_compare",
+        {"baseline_job_id": "job-1", "candidate_job_ids": ["job-2", "job-2"]},
+        "参数 candidate_job_ids 不能包含重复项",
+    ),
 )
 
 ENCODING_CASES = (
@@ -623,7 +648,7 @@ def assert_chinese(text):
 
 def test_tool_inventory_is_stable():
     assert tool_names() == EXPECTED_TOOL_NAMES
-    assert len(tool_names()) == 48
+    assert len(tool_names()) == 49
     assert [tool.name for tool in build_tools(RecordingClient())] == list(EXPECTED_TOOL_NAMES)
 
 
@@ -711,6 +736,7 @@ def test_required_fields_match_create_contracts():
         ],
         "experiments_cancel": ["job_id"],
         "experiments_resume": ["job_id"],
+        "results_compare": ["baseline_job_id", "candidate_job_ids"],
     }
     for name, required in expected.items():
         assert tools_by_name()[name].input_schema["required"] == required, name
@@ -971,6 +997,56 @@ def test_batch_id_arrays_are_bounded_and_pattern_checked():
         assert ids["items"] == {"type": "string", "pattern": r"^[A-Za-z0-9_-]{1,64}$"}, name
     action = tools_by_name()["jobs_batch_actions"].input_schema["properties"]["action"]
     assert action == {"type": "string", "enum": ["cancel", "delete"]}
+
+
+def test_results_compare_schema_matches_route():
+    schema = tools_by_name()["results_compare"].input_schema
+    assert schema["required"] == ["baseline_job_id", "candidate_job_ids"]
+    properties = schema["properties"]
+    assert properties["baseline_job_id"] == {"type": "string", "pattern": r"^[A-Za-z0-9_-]{1,64}$"}
+    candidates = properties["candidate_job_ids"]
+    assert candidates["type"] == "array"
+    assert candidates["minItems"] == 1
+    assert candidates["maxItems"] == 32
+    assert candidates["uniqueItems"] is True
+    assert candidates["items"] == {"type": "string", "pattern": r"^[A-Za-z0-9_-]{1,64}$"}
+    assert properties["variant"]["enum"] == ["A", "B"]
+    assert properties["side"]["enum"] == [0, 1]
+    assert properties["reps"]["type"] == "integer"
+    assert properties["reps"]["minimum"] == 1
+    assert properties["reps"]["maximum"] == 20000
+
+
+def test_results_compare_handler_forwards_all_options():
+    client = RecordingClient()
+    arguments = {
+        "baseline_job_id": "job-1",
+        "candidate_job_ids": ["job-2", "job-3"],
+        "variant": "A",
+        "side": 1,
+        "reps": 100,
+    }
+    handler_for("results_compare", client)(arguments)
+    assert client.calls == [
+        {"method": "POST", "path": "/api/results/compare", "query": None, "body": arguments}
+    ]
+
+
+def test_results_compare_rejects_out_of_pattern_job_ids():
+    client = RecordingClient()
+    handler = handler_for("results_compare", client)
+    long_id = "a" * 65
+
+    for arguments in (
+        {"baseline_job_id": long_id, "candidate_job_ids": ["job-2"]},
+        {"baseline_job_id": "job-1", "candidate_job_ids": [long_id]},
+        {"baseline_job_id": "job 1", "candidate_job_ids": ["job-2"]},
+    ):
+        with pytest.raises(SidecarError) as caught:
+            handler(arguments)
+        assert caught.value.code == "validation_failed"
+
+    assert client.calls == []
 
 
 def test_saves_squad_requires_and_sends_club_uid():

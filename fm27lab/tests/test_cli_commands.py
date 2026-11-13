@@ -89,6 +89,7 @@ def test_root_help_lists_command_groups():
         "concurrency",
         "experiments",
         "catalog",
+        "results",
     ):
         assert name in result.stdout, name
 
@@ -462,6 +463,107 @@ def test_jobs_summary_rejects_out_of_range_side(monkeypatch):
     result, fake = invoke(monkeypatch, ["jobs", "summary", "j1", "--side", "2"])
     assert result.exit_code == 2
     assert fake.calls == []
+
+
+def test_results_help_lists_compare_command():
+    result = CliRunner().invoke(cli.app, ["results", "--help"])
+    assert result.exit_code == 0, result.output
+    assert "compare" in result.stdout
+    assert "结果对比" in result.stdout
+
+
+def test_results_compare_posts_default_body(monkeypatch):
+    payload = {
+        "baseline": {"job_id": "j1", "name": "基线", "metrics": None, "tactic_pool": {}},
+        "variant": "B",
+        "side": 0,
+        "candidates": [],
+    }
+    result, fake = invoke(
+        monkeypatch,
+        ["results", "compare", "--baseline", "j1", "--candidate", "j2", "--candidate", "j3"],
+        [payload],
+    )
+    assert result.exit_code == 0, result.output
+    assert parse_output(result) == payload
+    assert fake.calls == [
+        {
+            "method": "POST",
+            "path": "/api/results/compare",
+            "body": {
+                "baseline_job_id": "j1",
+                "candidate_job_ids": ["j2", "j3"],
+                "variant": "B",
+                "side": 0,
+                "reps": 2000,
+            },
+            "query": None,
+        }
+    ]
+
+
+def test_results_compare_prints_indented_unicode_json(monkeypatch):
+    payload = {"baseline": {"name": "基线"}, "variant": "B", "side": 0, "candidates": []}
+    result, _ = invoke(
+        monkeypatch,
+        ["results", "compare", "--baseline", "j1", "--candidate", "j2"],
+        [payload],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert result.stdout.startswith('{\n  "baseline"')
+    assert "基线" in result.stdout
+
+
+def test_results_compare_forwards_options(monkeypatch):
+    payload = {"baseline": {}, "variant": "A", "side": 1, "candidates": []}
+    result, fake = invoke(
+        monkeypatch,
+        [
+            "results",
+            "compare",
+            "--baseline",
+            "j1",
+            "--candidate",
+            "j2",
+            "--variant",
+            "A",
+            "--side",
+            "1",
+            "--reps",
+            "100",
+        ],
+        [payload],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert fake.calls[0]["body"] == {
+        "baseline_job_id": "j1",
+        "candidate_job_ids": ["j2"],
+        "variant": "A",
+        "side": 1,
+        "reps": 100,
+    }
+
+
+def test_results_compare_requires_baseline_and_candidates(monkeypatch):
+    missing_candidate, fake = invoke(monkeypatch, ["results", "compare", "--baseline", "j1"])
+    assert missing_candidate.exit_code == 2
+    assert fake.calls == []
+
+    missing_baseline, fake = invoke(monkeypatch, ["results", "compare", "--candidate", "j2"])
+    assert missing_baseline.exit_code == 2
+    assert fake.calls == []
+
+
+def test_results_compare_rejects_out_of_range_options(monkeypatch):
+    for extra in (["--reps", "0"], ["--reps", "20001"], ["--side", "2"]):
+        result, fake = invoke(
+            monkeypatch,
+            ["results", "compare", "--baseline", "j1", "--candidate", "j2", *extra],
+        )
+        assert result.exit_code == 2, extra
+        assert fake.calls == [], extra
 
 
 def test_saves_list_passes_status_and_pagination(monkeypatch):

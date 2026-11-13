@@ -28,6 +28,7 @@ settings_app = typer.Typer(add_completion=False, no_args_is_help=True, help="设
 concurrency_app = typer.Typer(add_completion=False, no_args_is_help=True, help="并发资源预检")
 experiments_app = typer.Typer(add_completion=False, no_args_is_help=True, help="实验调度")
 catalog_app = typer.Typer(add_completion=False, no_args_is_help=True, help="运行时目录")
+results_app = typer.Typer(add_completion=False, no_args_is_help=True, help="结果对比")
 
 app.add_typer(pools_app, name="pools")
 app.add_typer(drafts_app, name="drafts")
@@ -38,6 +39,7 @@ app.add_typer(settings_app, name="settings")
 app.add_typer(concurrency_app, name="concurrency")
 app.add_typer(experiments_app, name="experiments")
 app.add_typer(catalog_app, name="catalog")
+app.add_typer(results_app, name="results")
 
 
 @app.callback()
@@ -852,6 +854,29 @@ def experiments_resume(ctx: typer.Context, job_id: str = typer.Argument(..., hel
 def catalog_show(ctx: typer.Context) -> None:
     """读取运行时目录快照。"""
     _emit(_invoke(ctx, lambda client: client.request_json("GET", "/api/catalog")))
+
+
+@results_app.command("compare")
+def results_compare(
+    ctx: typer.Context,
+    baseline: str = typer.Option(..., "--baseline", help="基线任务 ID"),
+    candidate: list[str] = typer.Option(..., "--candidate", help="候选任务 ID，可重复"),
+    variant: str = typer.Option("B", "--variant", help="变体 A 或 B"),
+    side: int = typer.Option(0, "--side", min=0, max=1, help="统计视角 0 主队 / 1 客队"),
+    reps: int = typer.Option(2000, "--reps", min=1, max=20000, help="bootstrap 次数"),
+) -> None:
+    """跨任务同种子配对比较。"""
+    body: dict[str, Any] = {
+        "baseline_job_id": baseline,
+        "candidate_job_ids": candidate,
+        "variant": variant,
+        "side": side,
+        "reps": reps,
+    }
+    value = _invoke(
+        ctx, lambda client: client.request_json("POST", "/api/results/compare", body=body)
+    )
+    typer.echo(json.dumps(value, ensure_ascii=False, indent=2))
 
 
 def main() -> None:

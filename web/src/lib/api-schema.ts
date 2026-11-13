@@ -30,6 +30,58 @@ export interface CatalogSnapshotOutput {
   catalog: { [key: string]: unknown } | null;
 }
 
+export interface CompareCandidateOutput {
+  job_id: string;
+  name: string | null;
+  metrics: JobMetricsOutput | null;
+  tactic_pool: PoolSummaryOutput;
+  comparable: boolean;
+  reason: string | null;
+  pairing: ComparePairingOutput | null;
+  paired: ComparePairedOutput | null;
+}
+
+export interface CompareInput {
+  baseline_job_id: string;
+  candidate_job_ids: string[];
+  variant?: string;
+  side?: number;
+  reps?: number;
+}
+
+export interface CompareJobOutput {
+  job_id: string;
+  name: string | null;
+  metrics: JobMetricsOutput | null;
+  tactic_pool: PoolSummaryOutput;
+}
+
+export interface CompareOutput {
+  baseline: CompareJobOutput;
+  variant: string;
+  side: number;
+  candidates: CompareCandidateOutput[];
+}
+
+export interface ComparePairedOutput {
+  seeds: number;
+  win_rate_delta: number | null;
+  win_rate_delta_ci: number[] | null;
+  points_delta: number | null;
+  points_delta_ci: number[] | null;
+  goal_difference_delta: number | null;
+  goal_difference_delta_ci: number[] | null;
+  xgd_delta: number | null;
+  xgd_delta_ci: number[] | null;
+}
+
+export interface ComparePairingOutput {
+  common_seeds: number;
+  draw_mismatches: number | null;
+  mismatched_seeds: number[];
+  missing_seeds: number[];
+}
+
 export interface ConcurrencyCheckOutput {
   allowed: boolean;
   code: string | null;

@@ -572,6 +572,38 @@ _SPECS: tuple[_ToolSpec, ...] = (
         path="/api/catalog",
         properties={},
     ),
+    _ToolSpec(
+        name="results_compare",
+        description="跨任务同种子配对比较",
+        method="POST",
+        path="/api/results/compare",
+        properties={
+            "baseline_job_id": _ID_BODY,
+            "candidate_job_ids": {
+                "type": "array",
+                "items": _ID_BODY,
+                "minItems": 1,
+                "maxItems": 32,
+                "uniqueItems": True,
+            },
+            "variant": {"type": "string", "enum": ["A", "B"], "default": "B"},
+            "side": {
+                "type": "integer",
+                "enum": [0, 1],
+                "minimum": 0,
+                "maximum": 1,
+                "default": 0,
+            },
+            "reps": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 20000,
+                "default": 2000,
+            },
+        },
+        required=("baseline_job_id", "candidate_job_ids"),
+        body_keys=("baseline_job_id", "candidate_job_ids", "variant", "side", "reps"),
+    ),
 )
 
 _TOOL_NAMES: tuple[str, ...] = tuple(spec.name for spec in _SPECS)

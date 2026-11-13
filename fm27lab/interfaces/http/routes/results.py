@@ -3,11 +3,11 @@ from __future__ import annotations
 from typing import Annotated, Any
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Response
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from fm27lab.adapters.storage_sqlite.repositories import JobRepository
 from fm27lab.application.results import ResultsService
-from fm27lab.interfaces.http.common import ErrorEnvelope, _query_integer, require_token
+from fm27lab.interfaces.http.common import ID_PATTERN, ErrorEnvelope, _query_integer, require_token
 from fm27lab.interfaces.http.routes.jobs import JobOutput
 
 
@@ -61,6 +61,59 @@ class PoolSummaryOutput(BaseModel):
     uniform: PoolSummaryUniformOutput | None = None
     entries: list[PoolSummaryEntryOutput] | None = None
     draws: dict[str, int] = Field(default_factory=dict)
+
+
+CompareId = Annotated[str, Field(min_length=1, max_length=64, pattern=ID_PATTERN)]
+
+
+class CompareInput(BaseModel):
+    model_config = ConfigDict(strict=True, extra="forbid")
+
+    baseline_job_id: CompareId
+    candidate_job_ids: list[CompareId] = Field(min_length=1, max_length=32)
+    variant: str = Field(default="B", pattern=r"^[AB]$")
+    side: int = Field(default=0, ge=0, le=1)
+    reps: int = Field(default=2000, ge=1, le=20000)
+
+
+class ComparePairingOutput(BaseModel):
+    common_seeds: int
+    draw_mismatches: int | None
+    mismatched_seeds: list[int]
+    missing_seeds: list[int]
+
+
+class ComparePairedOutput(BaseModel):
+    seeds: int
+    win_rate_delta: float | None
+    win_rate_delta_ci: list[float] | None
+    points_delta: float | None
+    points_delta_ci: list[float] | None
+    goal_difference_delta: float | None
+    goal_difference_delta_ci: list[float] | None
+    xgd_delta: float | None
+    xgd_delta_ci: list[float] | None
+
+
+class CompareJobOutput(BaseModel):
+    job_id: str
+    name: str | None
+    metrics: JobMetricsOutput | None
+    tactic_pool: PoolSummaryOutput
+
+
+class CompareCandidateOutput(CompareJobOutput):
+    comparable: bool
+    reason: str | None
+    pairing: ComparePairingOutput | None
+    paired: ComparePairedOutput | None
+
+
+class CompareOutput(BaseModel):
+    baseline: CompareJobOutput
+    variant: str
+    side: int
+    candidates: list[CompareCandidateOutput]
 
 
 def _validation_error(error: ValueError) -> HTTPException:
@@ -140,6 +193,30 @@ def register(app: FastAPI) -> None:
         if summary is None:
             raise _not_found()
         return summary
+
+    @app.post(
+        "/api/results/compare",
+        response_model=CompareOutput,
+        responses={
+            400: {"model": ErrorEnvelope},
+            401: {"model": ErrorEnvelope},
+            404: {"model": ErrorEnvelope},
+        },
+    )
+    def compare_results(payload: CompareInput, _: None = Depends(require_token)):
+        try:
+            compared = results().compare(
+                payload.baseline_job_id,
+                list(payload.candidate_job_ids),
+                variant=payload.variant,
+                side=payload.side,
+                reps=payload.reps,
+            )
+        except ValueError as error:
+            raise _validation_error(error) from error
+        if compared is None:
+            raise _not_found()
+        return compared
 
     @app.get(
         "/api/jobs/{job_id}/export.csv",

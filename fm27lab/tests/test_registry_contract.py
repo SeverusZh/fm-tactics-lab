@@ -75,6 +75,7 @@ EXPECTED_NAMES = frozenset(
         "experiments_cancel",
         "experiments_resume",
         "catalog_snapshot",
+        "results_compare",
     }
 )
 
@@ -105,6 +106,7 @@ EXTENDED_SURFACES: dict[str, tuple[tuple[str, ...], str]] = {
     "experiments_cancel": (("experiments", "cancel"), "experiments_cancel"),
     "experiments_resume": (("experiments", "resume"), "experiments_resume"),
     "catalog_snapshot": (("catalog", "show"), "catalog_snapshot"),
+    "results_compare": (("results", "compare"), "results_compare"),
 }
 
 
