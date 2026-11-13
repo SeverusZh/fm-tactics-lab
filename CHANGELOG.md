@@ -17,6 +17,13 @@
 - 新增 drafts 仓储与 DraftService：scenario 23 人归一化、JSON/事务、原子更新、updated_at 排序与分页摘要；已通过独立审核。
 - 新增 sidecar `/api/drafts` CRUD：严格 body、23 人归一化、分页、PATCH、CORS、OpenAPI 与错误封套；已通过独立审核。
 - 新增 jobs/job_runs 仓储：状态/进度不变量、逐场 run、级联删除、事务与分页过滤；已通过独立审核。
+- 新增 saves/save_leagues/save_clubs 仓储与 SavesService：存档状态机、UTC 时间规范化、子表原子导入与分页；已通过独立审核。
+- 新增 artifacts 与 idempotency 仓储：产物元数据与外键置空、同键同载荷重放、同键异载荷冲突、并发原子写入；已通过独立审核。
+- 新增 JobService 与 `/api/jobs`：任务状态机、取消、逐场 runs、分页信封、鉴权与 409/404 契约；已通过独立审核。
+- 新增 ResultsService 与 ArtifactService：任务结果汇总与配对差值、逐场分页、确定性 CSV 导出，产物原子写入、路径穿越与符号链接防护；已通过独立审核。
+- HTTP 路由拆分为 common 与 routes 模块并新增 `/api/saves`：存档 CRUD、状态流转、子表原子导入与分页，既有 pools/drafts/jobs 契约保持不变；已通过独立审核。
+- 新增引擎能力协商与运行时计划：counted-session 复用、旧宿主 64 场回退、执行力实验隔离与 provenance，供后续原生适配器接线；已通过独立审核。
+- 新增前端任务管理页与 jobs 类型客户端：状态筛选、分页、取消、删除、创建与错误态；已通过独立审核。
 
 - 上游 v1112 的原生 worker 复用、counted-session 协议与 1–256 并行输入已合并。
 - 本地分支已有的客队战术池轮战/真实名单与 Agent 接入层保留在合并基线中；v2 的模块化改造会逐步替换其接口。

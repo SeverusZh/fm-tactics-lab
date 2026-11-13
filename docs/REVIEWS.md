@@ -57,6 +57,17 @@
 | 2026-11-12 | Drafts HTTP 终轮 | 同上 | PASS | CORS PATCH、严格 body、23 人 PATCH、分页、注入、OpenAPI security/错误封套闭环；6 项测试。 |
 | 2026-11-12 | Jobs 仓储 | repositories.py、tests | FAIL | 首轮：created_at 假值、status 不可哈希、单边比分、回滚/重复键测试缺口。 |
 | 2026-11-12 | Jobs 仓储终轮 | 同上 | PASS | 时间/状态/比分不变量、BEGIN IMMEDIATE 更新、runs 顺序/级联/回滚与测试闭环；7 项测试。 |
+| 2026-11-13 | Saves 仓储 | saves.py、tests | PASS | 20+5 项测试；事务、级联、确定性重复映射与 UTC 时间规范化闭环；C1 与回滚覆盖 MINOR 已在修复轮补齐。 |
+| 2026-11-13 | 产物与幂等仓储 | artifacts.py、idempotency.py、tests | FAIL | prune 以 ISO 字符串字典序比较，跨时区与等值输入会误删漏删；另有外键判定、C1 控制字符与排序 MINOR。 |
+| 2026-11-13 | 产物与幂等仓储修复 | 同上 | PASS | prune 规范化 UTC 后比较并拒绝 naive；四类时区与等值场景独立复现通过；C1、sqlite_errorname、created_at 规范化与并发异 hash 补齐；仅 3 项 MINOR。 |
+| 2026-11-13 | Jobs 仓储计数与服务 | repositories.py、application/jobs.py、tests | PASS | 状态机、时间戳、append_run 原子回滚与并发唯一序号闭环；36 项相关测试；3 项 MINOR 为既有契约与理论竞态。 |
+| 2026-11-13 | Saves 应用服务 | application/saves.py、tests、count | PASS | 状态机、import_payload 四路回滚、分页信封与事务原子闭环；72 项相关测试；4 项 MINOR。 |
+| 2026-11-13 | Jobs HTTP | app.py、test_http_jobs.py | PASS | 7 条路由鉴权、404/409/分页、OpenAPI 与 CORS 不回归；409 判定先于写入；4 项 MINOR。 |
+| 2026-11-13 | 结果与产物应用服务 | application/results.py、artifacts.py、tests | FAIL | artifacts 的 kind 目录符号链接可逃逸 root；register_text 孤立代理项英文异常；另有两项测试缺口。 |
+| 2026-11-13 | 结果与产物修复 | 同上 | PASS | kind 目录 resolve containment、root 内符号链接只删链接本身、UTF-8 错误转中文、CSV 非 JSON 字段转义与 all_runs 整页边界补齐；仅理论 TOCTOU 与目录 fsync 为可接受风险。 |
+| 2026-11-13 | HTTP 路由模块化与存档接口 | app.py、common.py、routes/、test_http_saves.py | PASS | 旧新 OpenAPI 与响应快照对比行为不变；saves CRUD 与 import 分页、409/404/400 分界与回滚正确；2 项 MINOR 为超大 club_uid 500 与消息文案耦合。 |
+| 2026-11-13 | 引擎能力协商与运行时计划 | ports/engine.py、engine_native/capabilities.py、tests | PASS | 能力缺省回退、四运行时矩阵、provenance 五键与 Protocol 结构均闭环；62 项测试。 |
+| 2026-11-13 | 前端任务管理页 | web/src jobs 客户端与 JobsPage | PASS | 22 项 Vitest、类型检查与构建通过；列表/筛选/分页/取消/删除/创建与错误态齐全；MINOR 为手写类型与末页空页。 |
 
 ## 审核规则
 
@@ -65,6 +76,6 @@
 - 先列 findings，再列已验证项，最后给结论。
 - Critical 或 Important 未闭环时不得标记 PASS。
 - 审核通过不等于整体发布就绪；发布仍需最终验收与 Windows 真机验证。
-- 旧 `tests/` 当前 281 项通过，覆盖 legacy UI/HTTP/CLI/MCP、存档战术库、池与名单；新 `fm27lab/tests` 当前 163 项通过，覆盖包版本、CLI 环境继承、配置/路径边界、SQLite 迁移/事务/池与草案/任务仓储、HTTP 健康/池与草案 CRUD、鉴权、错误封套、Origin、ACL 失败清理、sidecar serve、23 人名单、真实名单应用、scenario 归一化、catalog/双阶段战术、客队战术池选择与结果指标；Vitest 当前 9 项。
+- 旧 `tests/` 当前 281 项通过，覆盖 legacy UI/HTTP/CLI/MCP、存档战术库、池与名单；新 `fm27lab/tests` 当前 358 项通过，覆盖包版本、CLI 环境继承、配置/路径边界、SQLite 迁移/事务与池/草案/任务/存档/产物/幂等仓储、HTTP 健康/池/草案/任务 CRUD、鉴权、错误封套、Origin、ACL 失败清理、sidecar serve、23 人名单、真实名单应用、scenario 归一化、catalog/双阶段战术、客队战术池选择、结果指标、任务状态机、存档状态机与应用服务；Vitest 当前 9 项。
 - Tauri sidecar supervisor 的静态实现已存在，但 Linux 无 WebKitGTK，Windows CI 的 `cargo build`/`cargo test`/安装包构建是唯一编译证据。PyInstaller onedir sidecar 已在 Linux 构建并通过 ready/health/shutdown 冒烟测试。
 - Rust 核心 crate 当前 4 项 cargo test 通过；React 壳当前 9 项 Vitest 通过、类型检查与生产构建通过。Windows CI 已通过 cargo build/test、NSIS 安装包与 sidecar 资源断言；Linux 本机仍无 WebKitGTK。合并、设计、sidecar、壳层、名单五个审核门均已 PASS。

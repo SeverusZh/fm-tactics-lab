@@ -63,18 +63,18 @@
 
 ## Phase 2 存储与引擎
 
-- [~] SQLite 连接、迁移与仓储：settings、pool_entries、drafts、jobs/job_runs、`/api/pools` 与 `/api/drafts` 已实现；saves/artifacts/idempotency 待后续。
+- [~] SQLite 连接、迁移与仓储：settings、pool_entries、drafts、jobs/job_runs、saves/save_leagues/save_clubs、artifacts、idempotency 与 `/api/pools`、`/api/drafts`、`/api/jobs` 已实现；`/api/saves`、结果与产物接口接入进行中。
 - [ ] 空库启动与只读旧目录探测。
-- [ ] 原生宿主适配器与 counted-session 能力协商。
+- [~] 原生宿主适配器与 counted-session 能力协商：能力解析与运行时计划已实现，原生适配器接线待后续。
 - [ ] 1–256 路调度、取消、续跑、磁盘/内存预检。
-- [ ] 旧宿主回退到 64 场或执行力隔离模式，并记录 provenance。
+- [~] 旧宿主回退到 64 场或执行力隔离模式，并记录 provenance：运行时计划与 provenance 进行中。
 - [ ] 并发验收矩阵：1、8、256 路提交、取消、续跑、结果身份一致。
 - [ ] 真实引擎 Windows 验证脚本。
 - [ ] 独立审核 PASS。
 
 ## Phase 3 接口
 
-- [ ] FastAPI 路由、错误封套、分页、幂等。
+- [~] FastAPI 路由、错误封套、分页、幂等：路由模块化与 `/api/jobs`、`/api/saves` 已完成，幂等接入进行中。
 - [ ] SSE 进度与轮询降级。
 - [ ] 命令注册表，HTTP/CLI/MCP 全部由同一份定义生成。
 - [ ] CLI 全功能命令与退出码。
