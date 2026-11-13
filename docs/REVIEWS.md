@@ -81,6 +81,9 @@
 | 2026-11-13 | 设置修复轮 | 同上 | PASS | allow_methods 加 PUT 并补预检测试；字节上限度量口径统一；surrogate 与旧值保留补测；PUT 三 Origin 预检矩阵通过。 |
 | 2026-11-13 | 幂等键中间件 | application/idempotency.py、interfaces/http/idempotency.py、tests | FAIL | 截断流式响应被缓存污染键；并发同键双执行副作用。 |
 | 2026-11-13 | 幂等修复轮 | 同上 | PASS | Content-Length/204 完整判定、在途 asyncio 锁、鉴权前置、重复头保真与线程池执行；38 项测试；8 项 MINOR 记录。 |
+| 2026-11-13 | MCP stdio 命令接线 | cli.py mcp、test_cli_mcp.py | PASS | 22 工具、stdout 纯净、启动失败退出码 1、health 就绪探测与 data-dir 优先级；11 项 MINOR。 |
+| 2026-11-13 | 前端设置页 | SettingsPage、api.ts、tests | PASS | 设置 CRUD、JSON 校验、删除确认、并发预检面板；77 项 Vitest、typecheck 与 build 通过；11 项 MINOR。 |
+| 2026-11-13 | 任务批量操作 HTTP | routes/jobs.py、test_http_jobs.py | PASS | 批量 cancel/delete、失败明细与顺序、边界与 OpenAPI；17 项 jobs HTTP 测试。 |
 
 ## 审核规则
 
@@ -89,6 +92,6 @@
 - 先列 findings，再列已验证项，最后给结论。
 - Critical 或 Important 未闭环时不得标记 PASS。
 - 审核通过不等于整体发布就绪；发布仍需最终验收与 Windows 真机验证。
-- 旧 `tests/` 当前 281 项通过，覆盖 legacy UI/HTTP/CLI/MCP、存档战术库、池与名单；新 `fm27lab/tests` 当前 931 项通过，覆盖包版本、CLI 环境继承、配置/路径边界、SQLite 迁移/事务与池/草案/任务/存档/产物/幂等仓储、HTTP 健康/池/草案/任务 CRUD、鉴权、错误封套、Origin、ACL 失败清理、sidecar serve、23 人名单、真实名单应用、scenario 归一化、catalog/双阶段战术、客队战术池选择、结果指标、任务状态机、存档状态机与应用服务；Vitest 当前 56 项。
+- 旧 `tests/` 当前 281 项通过，覆盖 legacy UI/HTTP/CLI/MCP、存档战术库、池与名单；新 `fm27lab/tests` 当前 960 项通过，覆盖包版本、CLI 环境继承、配置/路径边界、SQLite 迁移/事务与池/草案/任务/存档/产物/幂等仓储、HTTP 健康/池/草案/任务 CRUD、鉴权、错误封套、Origin、ACL 失败清理、sidecar serve、23 人名单、真实名单应用、scenario 归一化、catalog/双阶段战术、客队战术池选择、结果指标、任务状态机、存档状态机与应用服务；Vitest 当前 77 项。
 - Tauri sidecar supervisor 的静态实现已存在，但 Linux 无 WebKitGTK，Windows CI 的 `cargo build`/`cargo test`/安装包构建是唯一编译证据。PyInstaller onedir sidecar 已在 Linux 构建并通过 ready/health/shutdown 冒烟测试。
 - Rust 核心 crate 当前 4 项 cargo test 通过；React 壳当前 9 项 Vitest 通过、类型检查与生产构建通过。Windows CI 已通过 cargo build/test、NSIS 安装包与 sidecar 资源断言；Linux 本机仍无 WebKitGTK。合并、设计、sidecar、壳层、名单五个审核门均已 PASS。

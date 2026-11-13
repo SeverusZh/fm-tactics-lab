@@ -78,7 +78,7 @@
 - [~] SSE 进度与轮询降级：事件发布器与 SSE 流已实现，任务事件接线待后续。
 - [ ] 命令注册表，HTTP/CLI/MCP 全部由同一份定义生成。
 - [~] CLI 全功能命令与退出码：pools/drafts/jobs/saves 命令与退出码已实现并 PASS，注册表统一生成待后续。
-- [~] MCP tools/resources/prompts 全功能同步：stdio 协议层与 22 工具已实现，serve 命令接线待后续。
+- [~] MCP tools/resources/prompts 全功能同步：stdio 协议层、22 工具与 `fm27lab mcp` 命令已实现；resources/prompts 待后续。
 - [ ] OpenAPI 生成 TypeScript 类型与请求客户端。
 - [ ] 契约测试：三入口能力对齐、schema 快照、错误码、幂等。
 - [ ] 独立审核 PASS。
