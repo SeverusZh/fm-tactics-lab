@@ -12,11 +12,13 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from fm27lab.adapters.catalog_native.catalog import CatalogRepository
 from fm27lab.adapters.engine_native.capabilities import parse_capabilities, plan_runtime
+from fm27lab.adapters.fmf import FmfCodec
 from fm27lab.adapters.storage_sqlite.db import Database
 from fm27lab.adapters.storage_sqlite.idempotency import IdempotencyRepository
 from fm27lab.adapters.storage_sqlite.repositories import DraftRepository, JobRepository, PoolRepository
 from fm27lab.adapters.storage_sqlite.saves import SavesRepository
 from fm27lab.application.catalog import CatalogService
+from fm27lab.application.draft_attributes import DraftAttributeService
 from fm27lab.application.drafts import DraftService
 from fm27lab.application.events import EventPublisher
 from fm27lab.application.experiments import ExperimentService
@@ -36,6 +38,7 @@ from fm27lab.interfaces.http.common import (
 )
 from fm27lab.interfaces.http.idempotency import IdempotencyMiddleware
 from fm27lab.interfaces.http.routes import register_routes
+from fm27lab.interfaces.http.routes.fmf import FmfService
 from fm27lab.ports.engine import EngineCapabilities
 
 TAURI_ORIGINS = ("tauri://localhost", "http://tauri.localhost")
@@ -87,6 +90,8 @@ def create_app(
     shutdown: Callable[[], None] | None = None,
     pool_service: PoolService | None = None,
     draft_service: DraftService | None = None,
+    draft_attribute_service: DraftAttributeService | None = None,
+    fmf_service: FmfService | None = None,
     job_service: JobService | None = None,
     experiment_service: ExperimentService | None = None,
     saves_service: SavesService | None = None,
@@ -106,6 +111,8 @@ def create_app(
     app.state.events = events or EventPublisher()
     app.state.pools = pool_service or PoolService(PoolRepository(database))
     app.state.drafts = draft_service or DraftService(DraftRepository(database))
+    app.state.draft_attributes = draft_attribute_service or DraftAttributeService(app.state.drafts)
+    app.state.fmf_service = fmf_service or FmfService(FmfCodec(), app.state.drafts)
     app.state.jobs = job_service or JobService(JobRepository(database), publisher=app.state.events)
     app.state.experiments = experiment_service or ExperimentService(
         app.state.jobs,

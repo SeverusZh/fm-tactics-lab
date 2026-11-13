@@ -36,6 +36,7 @@ CAPABILITY_GROUPS: dict[str, tuple[str, str | None]] = {
     "settings": ("/api/settings", "key"),
 }
 ACTION_METHODS: dict[str, str] = {
+    "attributes": "POST",
     "batch_actions": "POST",
     "batch_delete": "DELETE",
     "cancel": "POST",
@@ -44,8 +45,10 @@ ACTION_METHODS: dict[str, str] = {
     "create": "POST",
     "delete": "DELETE",
     "export": "GET",
+    "export_fmf": "GET",
     "get": "GET",
     "import": "POST",
+    "import_fmf": "POST",
     "list": "GET",
     "pool_summary": "GET",
     "put": "PUT",
@@ -59,10 +62,12 @@ ACTION_METHODS: dict[str, str] = {
 }
 ITEM_ACTIONS: frozenset[str] = frozenset(
     {
+        "attributes",
         "cancel",
         "content",
         "delete",
         "export",
+        "export_fmf",
         "get",
         "import",
         "pool_summary",
@@ -142,6 +147,27 @@ CAPABILITIES: tuple[Capability, ...] = (
         ("DELETE", "/api/drafts/{draft_id}"),
         ("drafts", "delete"),
         "drafts_delete",
+    ),
+    Capability(
+        "drafts_attributes",
+        "批量编辑场景草案球员属性",
+        ("POST", "/api/drafts/{draft_id}/attributes"),
+        None,
+        None,
+    ),
+    Capability(
+        "drafts_export_fmf",
+        "导出场景草案为 FMF 文件",
+        ("GET", "/api/drafts/{draft_id}/export.fmf"),
+        None,
+        None,
+    ),
+    Capability(
+        "drafts_import_fmf",
+        "从 FMF 文件导入场景草案",
+        ("POST", "/api/drafts/import-fmf"),
+        None,
+        None,
     ),
     Capability("jobs_list", "分页列出实验任务", ("GET", "/api/jobs"), ("jobs", "list"), "jobs_list"),
     Capability("jobs_get", "查看单个实验任务", ("GET", "/api/jobs/{job_id}"), ("jobs", "get"), "jobs_get"),

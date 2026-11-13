@@ -35,6 +35,9 @@ EXPECTED_NAMES = frozenset(
         "drafts_create",
         "drafts_update",
         "drafts_delete",
+        "drafts_attributes",
+        "drafts_export_fmf",
+        "drafts_import_fmf",
         "jobs_list",
         "jobs_get",
         "jobs_create",
@@ -218,3 +221,21 @@ def test_detect_drift_reports_missing_capability_and_wrong_path(tmp_path: Path):
         for item in CAPABILITIES
     )
     assert detect_drift(wrong_method)
+
+
+def test_fmf_capabilities_register_http_only_surfaces():
+    export = capability("drafts_export_fmf")
+    assert export.http == ("GET", "/api/drafts/{draft_id}/export.fmf")
+    assert export.cli is None
+    assert export.mcp is None
+    import_capability = capability("drafts_import_fmf")
+    assert import_capability.http == ("POST", "/api/drafts/import-fmf")
+    assert import_capability.cli is None
+    assert import_capability.mcp is None
+
+
+def test_draft_attributes_capability_registers_http_only_surface():
+    item = capability("drafts_attributes")
+    assert item.http == ("POST", "/api/drafts/{draft_id}/attributes")
+    assert item.cli is None
+    assert item.mcp is None
