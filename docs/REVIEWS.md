@@ -88,6 +88,12 @@
 | 2026-11-13 | Issue 6 批量删除与多选 | application/jobs.py、routes/jobs.py、JobsPage、tests | FAIL | 批删 get→delete 非原子可删运行中任务；确认框缺焦点与键盘语义。 |
 | 2026-11-13 | Issue 6 修复轮 | 同上 | PASS | 服务层事务内 get→delete、DI 恢复、真实并发回归、焦点/Esc/结果聚焦与勾选收敛；后端 58 与前端 90 测试。 |
 | 2026-11-13 | PR 10 客队战术池摘要 | application/results.py、routes/results.py、tests | PASS | enabled 语义、draws 零填充与 A/B 去重、优先级与 400/404 契约；69 项相关测试。 |
+| 2026-11-13 | MCP 资源与提示词 | mcp/protocol.py、resources.py、prompts.py、cli.py、tests | PASS | capabilities 声明、resources/prompts 四方法、-32602 中文错误、通知静默与 stdout 纯净；提示词字段已按 v2 数据模型修正。 |
+| 2026-11-13 | 实验调度 HTTP | routes/experiments.py、app.py、tests | PASS | submit/start/cancel/resume 状态码矩阵、引擎未配置 503、注入路径与 OpenAPI；17 项测试。 |
+| 2026-11-13 | 球员属性页 | web PlayersPage、api.ts 草稿函数、tests | PASS | 六组索引与标签逐项对齐、显示换算、两段请求与缓存、隐藏开关与空/错态；116 项 Vitest。 |
+| 2026-11-13 | 原生引擎适配器 | engine_native/host.py、capabilities.py、fake_simulator、tests | FAIL | 回调异常重复交付；原生 counted 能力分支零测试覆盖。 |
+| 2026-11-13 | 原生引擎修复轮 | 同上 | FAIL | 兼容诊断中途失败绕过取消/终止，可无限阻塞并残留宿主进程。 |
+| 2026-11-13 | 原生引擎终轮 | 同上 | PASS | 回调消费先记账、native 能力矩阵与 65 场 DW2 测试、兼容校验前置、_force_stop 清理与停滞宿主回归；131 项引擎测试。 |
 
 ## 审核规则
 
@@ -96,6 +102,6 @@
 - 先列 findings，再列已验证项，最后给结论。
 - Critical 或 Important 未闭环时不得标记 PASS。
 - 审核通过不等于整体发布就绪；发布仍需最终验收与 Windows 真机验证。
-- 旧 `tests/` 当前 281 项通过，覆盖 legacy UI/HTTP/CLI/MCP、存档战术库、池与名单；新 `fm27lab/tests` 当前 1062 项通过，覆盖包版本、CLI 环境继承、配置/路径边界、SQLite 迁移/事务与池/草案/任务/存档/产物/幂等仓储、HTTP 健康/池/草案/任务 CRUD、鉴权、错误封套、Origin、ACL 失败清理、sidecar serve、23 人名单、真实名单应用、scenario 归一化、catalog/双阶段战术、客队战术池选择、结果指标、任务状态机、存档状态机与应用服务；Vitest 当前 90 项。
+- 旧 `tests/` 当前 281 项通过，覆盖 legacy UI/HTTP/CLI/MCP、存档战术库、池与名单；新 `fm27lab/tests` 当前 1205 项通过，覆盖包版本、CLI 环境继承、配置/路径边界、SQLite 迁移/事务与池/草案/任务/存档/产物/幂等仓储、HTTP 健康/池/草案/任务 CRUD、鉴权、错误封套、Origin、ACL 失败清理、sidecar serve、23 人名单、真实名单应用、scenario 归一化、catalog/双阶段战术、客队战术池选择、结果指标、任务状态机、存档状态机与应用服务；Vitest 当前 116 项。
 - Tauri sidecar supervisor 的静态实现已存在，但 Linux 无 WebKitGTK，Windows CI 的 `cargo build`/`cargo test`/安装包构建是唯一编译证据。PyInstaller onedir sidecar 已在 Linux 构建并通过 ready/health/shutdown 冒烟测试。
 - Rust 核心 crate 当前 4 项 cargo test 通过；React 壳当前 9 项 Vitest 通过、类型检查与生产构建通过。Windows CI 已通过 cargo build/test、NSIS 安装包与 sidecar 资源断言；Linux 本机仍无 WebKitGTK。合并、设计、sidecar、壳层、名单五个审核门均已 PASS。
