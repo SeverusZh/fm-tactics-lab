@@ -13,6 +13,7 @@ from fm27lab.client import SidecarClient, SidecarError
 from fm27lab.interfaces.mcp.protocol import McpTool
 
 MAX_OFFSET = 2**31 - 1
+MAX_SEEDS = 10000
 
 _ID: dict[str, Any] = {"type": "string", "minLength": 1, "maxLength": 64}
 _ID_BODY: dict[str, Any] = {"type": "string", "pattern": r"^[A-Za-z0-9_-]{1,64}$"}
@@ -47,8 +48,9 @@ _SEEDS: dict[str, Any] = {
     "type": "array",
     "items": {"type": "integer", "minimum": 0, "maximum": 2**32 - 1},
     "minItems": 1,
+    "maxItems": MAX_SEEDS,
+    "uniqueItems": True,
 }
-_VARIANTS: dict[str, Any] = {"type": "array", "items": {"type": "string"}, "minItems": 1}
 
 
 def _pagination(limit_maximum: int, limit_default: int) -> dict[str, Any]:
@@ -516,7 +518,8 @@ _SPECS: tuple[_ToolSpec, ...] = (
         properties={
             "name": _NAME_100,
             "seeds": _SEEDS,
-            "variants": _VARIANTS,
+            "draft_id": _ID_BODY,
+            "baseline_draft_id": _ID_BODY,
             "workers": _WORKERS_BOUNDED,
             "cpu_count": _CPU_COUNT,
             "available_memory_bytes": _BYTES,
@@ -525,7 +528,7 @@ _SPECS: tuple[_ToolSpec, ...] = (
         },
         required=(
             "seeds",
-            "variants",
+            "draft_id",
             "workers",
             "cpu_count",
             "available_memory_bytes",
@@ -534,7 +537,8 @@ _SPECS: tuple[_ToolSpec, ...] = (
         body_keys=(
             "name",
             "seeds",
-            "variants",
+            "draft_id",
+            "baseline_draft_id",
             "workers",
             "cpu_count",
             "available_memory_bytes",

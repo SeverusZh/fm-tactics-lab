@@ -1,19 +1,27 @@
 from __future__ import annotations
 
+import copy
 from pathlib import Path
+from typing import NamedTuple
 
 import pytest
 from fastapi.testclient import TestClient
 
 from fm27lab.adapters.engine_native.capabilities import parse_capabilities, plan_runtime
+from fm27lab.adapters.engine_native.scenario_assets import load_scenario_assets
 from fm27lab.adapters.storage_sqlite.db import Database
-from fm27lab.adapters.storage_sqlite.repositories import JobRepository
+from fm27lab.adapters.storage_sqlite.repositories import DraftRepository, JobRepository
+from fm27lab.application.drafts import DraftService
+from fm27lab.application.experiment_material import ExperimentMaterializer
 from fm27lab.application.experiments import ExperimentService
 from fm27lab.application.jobs import JobService
 from fm27lab.config import Settings
+from fm27lab.domain.roster import POSITION_SLOTS, canonical_position
 from fm27lab.interfaces.http.app import MissingEngine, create_app
 from fm27lab.ports.engine import EngineCapabilities, EnginePort
+from fm27lab.tests.test_experiment_material import engine_scenario
 from fm27lab.tests.test_http_health import make_app
+from fm27lab.tests.test_scenario_assets import POSITION_ORDER, write_engine_root
 
 GIB = 1024**3
 DEFAULT_PLAN = plan_runtime(
@@ -48,7 +56,7 @@ def experiment_payload(**overrides) -> dict:
     value = {
         "name": "Experiment",
         "seeds": [1, 2],
-        "variants": ["A", "B"],
+        "draft_id": "draft-1",
         "workers": 2,
         "cpu_count": 8,
         "available_memory_bytes": 32 * GIB,
@@ -85,16 +93,69 @@ class FakeEngine:
         self.cancel_calls += 1
 
 
-def make_engine_app(tmp_path: Path) -> tuple[TestClient, Settings, JobService, FakeEngine]:
-    settings = Settings.create(data_dir=tmp_path, token="c" * 64, dev=True)
+def build_settings(tmp_path: Path, *, engine: bool = True) -> Settings:
+    settings = Settings.create(
+        data_dir=tmp_path / "data",
+        engine_root=write_engine_root(tmp_path) if engine else None,
+        token="c" * 64,
+        dev=True,
+    )
     settings.ensure_dirs()
+    return settings
+
+
+def seed_drafts(database: Database, settings: Settings) -> tuple[str, str]:
+    assert settings.engine_root is not None
+    assets = load_scenario_assets(settings.engine_root)
+    repository = DraftRepository(database)
+    draft_id = repository.add(
+        {
+            "name": "候选",
+            "scenario": engine_scenario(assets, home_name="候选主队"),
+            "source": {},
+        }
+    )["id"]
+    baseline_id = repository.add(
+        {
+            "name": "基线",
+            "scenario": engine_scenario(assets, home_name="基线主队"),
+            "source": {},
+        }
+    )["id"]
+    return draft_id, baseline_id
+
+
+class EngineApp(NamedTuple):
+    client: TestClient
+    settings: Settings
+    jobs: JobService
+    engine: FakeEngine
+    draft_id: str
+    baseline_id: str
+
+
+def make_engine_app(tmp_path: Path) -> EngineApp:
+    settings = build_settings(tmp_path)
     database = Database(settings.database_path)
     database.initialize()
+    draft_id, baseline_id = seed_drafts(database, settings)
+    drafts = DraftService(DraftRepository(database))
     jobs = JobService(JobRepository(database))
     engine = FakeEngine()
-    experiments = ExperimentService(jobs, engine, DEFAULT_PLAN)
-    app = create_app(settings, database, job_service=jobs, experiment_service=experiments)
-    return TestClient(app), settings, jobs, engine
+    experiments = ExperimentService(
+        jobs,
+        engine,
+        DEFAULT_PLAN,
+        materializer=ExperimentMaterializer(drafts, settings),
+    )
+    app = create_app(
+        settings,
+        database,
+        job_service=jobs,
+        draft_service=drafts,
+        experiment_service=experiments,
+    )
+    return EngineApp(TestClient(app), settings, jobs, engine, draft_id, baseline_id)
 
 
 def canned_job(**overrides) -> dict:
@@ -122,6 +183,21 @@ class StubJobs:
 
     def get(self, job_id):
         return self.job
+
+
+class StubDrafts:
+    def __init__(self, rows: dict[str, dict] | None = None) -> None:
+        self.rows = {} if rows is None else rows
+        self.requested: list[str] = []
+
+    def get(self, draft_id: str):
+        self.requested.append(draft_id)
+        row = self.rows.get(draft_id)
+        return copy.deepcopy(row) if row is not None else None
+
+
+def draft_row(scenario: dict, draft_id: str = "draft-1") -> dict:
+    return {"id": draft_id, "name": draft_id, "scenario": scenario, "source": None}
 
 
 class StubExperiments:
@@ -178,29 +254,70 @@ def test_experiment_http_requires_token(tmp_path: Path):
 
 
 def test_submit_creates_queued_experiment_job(tmp_path: Path):
-    app, settings, _, _ = make_app(tmp_path)
-    assert isinstance(app.state.experiments, ExperimentService)
-    client = TestClient(app)
-    headers = auth(settings)
-    response = client.post("/api/experiments", json=experiment_payload(name=None), headers=headers)
+    app = make_engine_app(tmp_path)
+    client = app.client
+    headers = auth(app.settings)
+    response = client.post(
+        "/api/experiments",
+        json=experiment_payload(name=None, draft_id=app.draft_id),
+        headers=headers,
+    )
     assert response.status_code == 201
     job = response.json()
     assert set(job) == JOB_FIELDS
     assert job["kind"] == "experiment"
     assert job["status"] == "queued"
     assert job["name"] is None
-    assert job["config"] == {"seeds": [1, 2], "variants": ["A", "B"]}
+    assert job["config"]["seeds"] == [1, 2]
+    assert job["config"]["variants"] == ["B"]
+    assert job["config"]["draft_id"] == app.draft_id
+    assert job["config"]["baseline_draft_id"] is None
+    materialized = job["config"]["materialized"]
+    assert materialized["codec"] == "FM27CFG1"
+    assert [item["variant"] for item in materialized["configs"]] == ["B", "B"]
+    assert [item["seed"] for item in materialized["configs"]] == [1, 2]
+    for item in materialized["configs"]:
+        config_file = Path(item["config_file"])
+        assert config_file.is_absolute()
+        assert config_file.is_file()
+        assert config_file.name == f"B-{item['seed']}.bin"
+        assert config_file.read_bytes()[:8] == b"FM27CFG1"
+        scenario_file = Path(item["scenario_file"])
+        assert scenario_file.is_relative_to(app.settings.data_dir)
+    assert materialized["pool"] is None
     assert job["workers"] == 2
-    assert job["total"] == 4
+    assert job["total"] == 2
     assert job["completed"] == 0
     assert job["started_at"] is None
     assert job["finished_at"] is None
     assert job["summary"]["runtime_mode"] == "isolated_worker"
     assert job["summary"]["provenance"] == DEFAULT_PLAN.provenance
     assert job["summary"]["provenance"]["fallback_reason"] == "counted_sessions_unavailable"
+    assert job["summary"]["configs_count"] == 2
     fetched = client.get(f"/api/jobs/{job['id']}", headers=headers)
     assert fetched.status_code == 200
     assert fetched.json() == job
+
+
+def test_submit_with_baseline_draft_uses_ab_variants(tmp_path: Path):
+    app = make_engine_app(tmp_path)
+    response = app.client.post(
+        "/api/experiments",
+        json=experiment_payload(
+            seeds=[5],
+            draft_id=app.draft_id,
+            baseline_draft_id=app.baseline_id,
+        ),
+        headers=auth(app.settings),
+    )
+    assert response.status_code == 201
+    job = response.json()
+    assert job["config"]["variants"] == ["A", "B"]
+    assert job["config"]["baseline_draft_id"] == app.baseline_id
+    configs = job["config"]["materialized"]["configs"]
+    assert [(item["variant"], item["seed"]) for item in configs] == [("A", 5), ("B", 5)]
+    assert job["total"] == 2
+    assert job["summary"]["configs_count"] == 2
 
 
 def test_submit_uses_injected_experiment_service(tmp_path: Path):
@@ -211,7 +328,8 @@ def test_submit_uses_injected_experiment_service(tmp_path: Path):
     payload = experiment_payload(
         name="Injected",
         seeds=[3, 1],
-        variants=["B", "A"],
+        draft_id="draft-9",
+        baseline_draft_id="draft-8",
         workers=4,
         cpu_count=16,
         available_memory_bytes=64 * GIB,
@@ -223,25 +341,28 @@ def test_submit_uses_injected_experiment_service(tmp_path: Path):
     assert response.json() == stub.job
     assert stub.submissions == [
         {
-            "config": {"seeds": [3, 1], "variants": ["B", "A"]},
+            "config": {"seeds": [3, 1]},
             "workers": 4,
             "name": "Injected",
             "cpu_count": 16,
             "available_memory_bytes": 64 * GIB,
             "free_disk_bytes": 200 * GIB,
             "allow_oversubscription": True,
+            "draft_id": "draft-9",
+            "baseline_draft_id": "draft-8",
         }
     ]
     assert second.state.jobs.list()["total"] == 0
 
 
 def test_submit_resource_preflight_returns_409(tmp_path: Path):
-    app, settings, _, _ = make_app(tmp_path)
-    client = TestClient(app)
-    headers = auth(settings)
+    app = make_engine_app(tmp_path)
+    client = app.client
+    headers = auth(app.settings)
+    payload = experiment_payload(draft_id=app.draft_id)
     memory = client.post(
         "/api/experiments",
-        json=experiment_payload(available_memory_bytes=GIB),
+        json={**payload, "available_memory_bytes": GIB},
         headers=headers,
     )
     assert memory.status_code == 409
@@ -252,20 +373,20 @@ def test_submit_resource_preflight_returns_409(tmp_path: Path):
     assert error["retriable"] is True
     disk = client.post(
         "/api/experiments",
-        json=experiment_payload(free_disk_bytes=3 * GIB),
+        json={**payload, "free_disk_bytes": 3 * GIB},
         headers=headers,
     )
     assert disk.status_code == 409
     assert disk.json()["error"]["code"] == "insufficient_disk"
     assert "磁盘" in disk.json()["error"]["message"]
-    assert app.state.jobs.list()["total"] == 0
+    assert app.jobs.list()["total"] == 0
     allowed = client.post(
         "/api/experiments",
-        json=experiment_payload(available_memory_bytes=GIB, allow_oversubscription=True),
+        json={**payload, "available_memory_bytes": GIB, "allow_oversubscription": True},
         headers=headers,
     )
     assert allowed.status_code == 201
-    assert app.state.jobs.list()["total"] == 1
+    assert app.jobs.list()["total"] == 1
 
 
 def test_submit_validation_failures_return_400(tmp_path: Path):
@@ -278,12 +399,16 @@ def test_submit_validation_failures_return_400(tmp_path: Path):
         experiment_payload(seeds=[]),
         experiment_payload(seeds=[1, 1]),
         experiment_payload(seeds=[-1]),
+        experiment_payload(seeds=[4294967296]),
         experiment_payload(seeds=["1"]),
         experiment_payload(seeds=[True]),
-        experiment_payload(variants=[]),
-        experiment_payload(variants=["C"]),
-        experiment_payload(variants=["A", "A"]),
-        experiment_payload(variants=[1]),
+        experiment_payload(seeds=list(range(10001))),
+        experiment_payload(draft_id=None),
+        experiment_payload(draft_id=""),
+        experiment_payload(draft_id="bad.id"),
+        experiment_payload(draft_id="x" * 65),
+        experiment_payload(baseline_draft_id="bad id"),
+        experiment_payload(variants=["A", "B"]),
         experiment_payload(workers=0),
         experiment_payload(workers=257),
         experiment_payload(workers=True),
@@ -313,35 +438,148 @@ def test_submit_validation_failures_return_400(tmp_path: Path):
     assert app.state.jobs.list()["total"] == 0
 
 
-def test_start_runs_queued_job_with_fake_engine(tmp_path: Path):
-    client, settings, _, engine = make_engine_app(tmp_path)
-    headers = auth(settings)
-    created = client.post("/api/experiments", json=experiment_payload(), headers=headers)
+def test_submit_rejects_total_matches_above_limit(tmp_path: Path):
+    app, settings, _, _ = make_app(tmp_path)
+    client = TestClient(app)
+    response = client.post(
+        "/api/experiments",
+        json=experiment_payload(
+            seeds=list(range(10000)),
+            draft_id="draft-1",
+            baseline_draft_id="draft-0",
+        ),
+        headers=auth(settings),
+    )
+    assert response.status_code == 400
+    error = response.json()["error"]
+    assert error["code"] == "validation_failed"
+    assert "实验总场数不能超过 10000" in error["message"]
+    assert app.state.jobs.list()["total"] == 0
+
+
+def test_submit_missing_draft_returns_404(tmp_path: Path):
+    app, settings, _, database = make_app(tmp_path)
+    stub = StubDrafts()
+    second = create_app(settings, database, draft_service=stub)
+    client = TestClient(second)
+    response = client.post(
+        "/api/experiments",
+        json=experiment_payload(draft_id="missing-draft"),
+        headers=auth(settings),
+    )
+    assert response.status_code == 404
+    error = response.json()["error"]
+    assert set(error) == ERROR_FIELDS
+    assert error["code"] == "not_found"
+    assert error["message"] == "草案不存在"
+    assert error["retriable"] is False
+    assert stub.requested == ["missing-draft"]
+    assert second.state.jobs.list()["total"] == 0
+
+
+def test_submit_missing_baseline_draft_returns_404(tmp_path: Path):
+    app, settings, _, database = make_app(tmp_path)
+    assets = load_scenario_assets(write_engine_root(tmp_path / "fixtures"))
+    stub = StubDrafts({"draft-1": draft_row(engine_scenario(assets))})
+    second = create_app(settings, database, draft_service=stub)
+    client = TestClient(second)
+    response = client.post(
+        "/api/experiments",
+        json=experiment_payload(draft_id="draft-1", baseline_draft_id="missing-baseline"),
+        headers=auth(settings),
+    )
+    assert response.status_code == 404
+    error = response.json()["error"]
+    assert error["code"] == "not_found"
+    assert error["message"] == "基线草案不存在"
+    assert stub.requested == ["draft-1", "missing-baseline"]
+    assert second.state.jobs.list()["total"] == 0
+
+
+def test_submit_without_configured_engine_returns_400(tmp_path: Path):
+    app, settings, _, database = make_app(tmp_path)
+    assets = load_scenario_assets(write_engine_root(tmp_path / "fixtures"))
+    stub = StubDrafts({"draft-1": draft_row(engine_scenario(assets))})
+    second = create_app(settings, database, draft_service=stub)
+    client = TestClient(second)
+    response = client.post(
+        "/api/experiments",
+        json=experiment_payload(draft_id="draft-1"),
+        headers=auth(settings),
+    )
+    assert response.status_code == 400
+    error = response.json()["error"]
+    assert error["code"] == "validation_failed"
+    assert error["message"] == "引擎目录未配置，无法生成比赛配置"
+    assert second.state.jobs.list()["total"] == 0
+
+
+def test_submit_without_catalog_returns_400(tmp_path: Path):
+    settings = Settings.create(
+        data_dir=tmp_path / "data",
+        engine_root=tmp_path / "empty-engine",
+        token="c" * 64,
+        dev=True,
+    )
+    settings.ensure_dirs()
+    (tmp_path / "empty-engine").mkdir(parents=True, exist_ok=True)
+    database = Database(settings.database_path)
+    database.initialize()
+    assets = load_scenario_assets(write_engine_root(tmp_path / "fixtures"))
+    stub = StubDrafts({"draft-1": draft_row(engine_scenario(assets))})
+    app = create_app(settings, database, draft_service=stub)
+    client = TestClient(app)
+    response = client.post(
+        "/api/experiments",
+        json=experiment_payload(draft_id="draft-1"),
+        headers=auth(settings),
+    )
+    assert response.status_code == 400
+    error = response.json()["error"]
+    assert error["code"] == "validation_failed"
+    assert "引擎目录文件" in error["message"]
+    assert app.state.jobs.list()["total"] == 0
+
+
+def test_start_dispatches_materialized_config_paths(tmp_path: Path):
+    app = make_engine_app(tmp_path)
+    client = app.client
+    headers = auth(app.settings)
+    created = client.post(
+        "/api/experiments",
+        json=experiment_payload(draft_id=app.draft_id),
+        headers=headers,
+    )
     assert created.status_code == 201
-    job_id = created.json()["id"]
+    job = created.json()
+    job_id = job["id"]
+    materialized = job["config"]["materialized"]
     started = client.post("/api/experiments/start", headers=headers)
     assert started.status_code == 200
     body = started.json()
     assert set(body) == {"job"}
-    job = body["job"]
-    assert set(job) == JOB_FIELDS
-    assert job["id"] == job_id
-    assert job["status"] == "completed"
-    assert job["completed"] == 4
-    assert job["total"] == 4
-    assert job["started_at"] is not None
-    assert job["finished_at"] is not None
-    assert job["summary"]["runtime_mode"] == DEFAULT_PLAN.runtime_mode
-    assert job["summary"]["provenance"] == DEFAULT_PLAN.provenance
-    assert engine.tasks == [
-        {"variant": "A", "seed": 1},
-        {"variant": "B", "seed": 1},
-        {"variant": "A", "seed": 2},
-        {"variant": "B", "seed": 2},
+    finished = body["job"]
+    assert set(finished) == JOB_FIELDS
+    assert finished["id"] == job_id
+    assert finished["status"] == "completed"
+    assert finished["completed"] == 2
+    assert finished["total"] == 2
+    assert finished["started_at"] is not None
+    assert finished["finished_at"] is not None
+    assert finished["summary"]["runtime_mode"] == DEFAULT_PLAN.runtime_mode
+    assert finished["summary"]["provenance"] == DEFAULT_PLAN.provenance
+    assert app.engine.tasks == [
+        {
+            "variant": item["variant"],
+            "seed": item["seed"],
+            "config": item["config_file"],
+        }
+        for item in materialized["configs"]
     ]
+    assert all(Path(task["config"]).is_absolute() for task in app.engine.tasks)
     runs = client.get(f"/api/jobs/{job_id}/runs", headers=headers)
     assert runs.status_code == 200
-    assert runs.json()["total"] == 4
+    assert runs.json()["total"] == 2
     empty = client.post("/api/experiments/start", headers=headers)
     assert empty.status_code == 204
     assert empty.content == b""
@@ -373,10 +611,15 @@ def test_start_uses_injected_experiment_service(tmp_path: Path):
 
 
 def test_start_conflicts_with_running_job(tmp_path: Path):
-    client, settings, jobs, _ = make_engine_app(tmp_path)
-    headers = auth(settings)
-    first = client.post("/api/experiments", json=experiment_payload(), headers=headers).json()
-    jobs.update(first["id"], {"status": "running"})
+    app = make_engine_app(tmp_path)
+    client = app.client
+    headers = auth(app.settings)
+    first = client.post(
+        "/api/experiments",
+        json=experiment_payload(draft_id=app.draft_id),
+        headers=headers,
+    ).json()
+    app.jobs.update(first["id"], {"status": "running"})
     response = client.post("/api/experiments/start", headers=headers)
     assert response.status_code == 409
     error = response.json()["error"]
@@ -384,7 +627,7 @@ def test_start_conflicts_with_running_job(tmp_path: Path):
     assert error["code"] == "invalid_transition"
     assert "已有任务在运行" in error["message"]
     assert error["retriable"] is False
-    assert jobs.get(first["id"])["status"] == "running"
+    assert app.jobs.get(first["id"])["status"] == "running"
 
 
 def test_start_maps_errors_from_injected_service(tmp_path: Path):
@@ -416,32 +659,52 @@ def test_missing_engine_is_engine_port_and_reports_unavailable():
     engine.cancel()
 
 
-def test_start_without_configured_engine_returns_503(tmp_path: Path):
-    app, settings, _, _ = make_app(tmp_path)
+def test_create_app_builds_materializer_and_default_engine(tmp_path: Path):
+    settings = build_settings(tmp_path)
+    database = Database(settings.database_path)
+    database.initialize()
+    draft_id, _ = seed_drafts(database, settings)
+    jobs = JobService(JobRepository(database))
+    app = create_app(settings, database, job_service=jobs)
     client = TestClient(app)
-    headers = auth(settings)
-    submitted = client.post("/api/experiments", json=experiment_payload(), headers=headers)
+    assert isinstance(app.state.experiments, ExperimentService)
+    submitted = client.post(
+        "/api/experiments",
+        json=experiment_payload(seeds=[1], draft_id=draft_id),
+        headers=auth(settings),
+    )
     assert submitted.status_code == 201
-    response = client.post("/api/experiments/start", headers=headers)
-    assert response.status_code == 503
-    error = response.json()["error"]
+    job = submitted.json()
+    assert job["config"]["materialized"]["codec"] == "FM27CFG1"
+    assert job["summary"]["configs_count"] == 1
+    started = client.post("/api/experiments/start", headers=auth(settings))
+    assert started.status_code == 503
+    error = started.json()["error"]
     assert set(error) == ERROR_FIELDS
     assert error["code"] == "engine_unavailable"
     assert error["message"] == ENGINE_UNAVAILABLE
     assert error["retriable"] is True
+    assert jobs.get(job["id"])["status"] == "error"
+    assert jobs.get(job["id"])["summary"]["error"] == ENGINE_UNAVAILABLE
 
 
 def test_cancel_experiment_contract(tmp_path: Path):
-    client, settings, _, _ = make_engine_app(tmp_path)
-    headers = auth(settings)
+    app = make_engine_app(tmp_path)
+    client = app.client
+    headers = auth(app.settings)
     missing = client.post("/api/experiments/missing-job/cancel", headers=headers)
     assert missing.status_code == 404
     assert missing.json()["error"]["code"] == "not_found"
+
     malformed = client.post("/api/experiments/bad.id/cancel", headers=headers)
     assert malformed.status_code == 400
     assert malformed.json()["error"]["code"] == "validation_failed"
 
-    queued = client.post("/api/experiments", json=experiment_payload(), headers=headers).json()
+    queued = client.post(
+        "/api/experiments",
+        json=experiment_payload(draft_id=app.draft_id),
+        headers=headers,
+    ).json()
     cancelled = client.post(f"/api/experiments/{queued['id']}/cancel", headers=headers)
     assert cancelled.status_code == 200
     value = cancelled.json()
@@ -453,7 +716,11 @@ def test_cancel_experiment_contract(tmp_path: Path):
     assert again.json()["error"]["code"] == "invalid_transition"
     assert again.json()["error"]["retriable"] is False
 
-    completed = client.post("/api/experiments", json=experiment_payload(), headers=headers).json()
+    completed = client.post(
+        "/api/experiments",
+        json=experiment_payload(draft_id=app.draft_id),
+        headers=headers,
+    ).json()
     assert client.post("/api/experiments/start", headers=headers).status_code == 200
     terminal = client.post(f"/api/experiments/{completed['id']}/cancel", headers=headers)
     assert terminal.status_code == 409
@@ -461,19 +728,24 @@ def test_cancel_experiment_contract(tmp_path: Path):
 
 
 def test_resume_experiment_contract(tmp_path: Path):
-    client, settings, jobs, _ = make_engine_app(tmp_path)
-    headers = auth(settings)
+    app = make_engine_app(tmp_path)
+    client = app.client
+    headers = auth(app.settings)
     missing = client.post("/api/experiments/missing-job/resume", headers=headers)
     assert missing.status_code == 404
     assert missing.json()["error"]["code"] == "not_found"
 
-    queued = client.post("/api/experiments", json=experiment_payload(), headers=headers).json()
+    queued = client.post(
+        "/api/experiments",
+        json=experiment_payload(draft_id=app.draft_id),
+        headers=headers,
+    ).json()
     conflict = client.post(f"/api/experiments/{queued['id']}/resume", headers=headers)
     assert conflict.status_code == 409
     assert conflict.json()["error"]["code"] == "invalid_transition"
 
-    jobs.update(queued["id"], {"status": "running"})
-    jobs.update(queued["id"], {"status": "interrupted"})
+    app.jobs.update(queued["id"], {"status": "running"})
+    app.jobs.update(queued["id"], {"status": "interrupted"})
     resumed = client.post(f"/api/experiments/{queued['id']}/resume", headers=headers)
     assert resumed.status_code == 200
     value = resumed.json()
@@ -481,19 +753,29 @@ def test_resume_experiment_contract(tmp_path: Path):
     assert value["status"] == "queued"
     assert value["started_at"] is not None
     assert value["finished_at"] is None
-    assert jobs.get(queued["id"])["status"] == "queued"
+    assert app.jobs.get(queued["id"])["status"] == "queued"
 
 
 def test_resume_and_start_finishes_missing_matches(tmp_path: Path):
-    client, settings, jobs, engine = make_engine_app(tmp_path)
-    headers = auth(settings)
+    app = make_engine_app(tmp_path)
+    client = app.client
+    headers = auth(app.settings)
     job = client.post(
         "/api/experiments",
-        json=experiment_payload(seeds=[1], variants=["A", "B"]),
+        json=experiment_payload(
+            seeds=[1],
+            draft_id=app.draft_id,
+            baseline_draft_id=app.baseline_id,
+        ),
         headers=headers,
     ).json()
-    jobs.update(job["id"], {"status": "running"})
-    jobs.append_run(
+    materialized = job["config"]["materialized"]
+    assert [(item["variant"], item["seed"]) for item in materialized["configs"]] == [
+        ("A", 1),
+        ("B", 1),
+    ]
+    app.jobs.update(job["id"], {"status": "running"})
+    app.jobs.append_run(
         job["id"],
         {
             "variant": "A",
@@ -504,13 +786,14 @@ def test_resume_and_start_finishes_missing_matches(tmp_path: Path):
             "stats": {},
         },
     )
-    jobs.update(job["id"], {"status": "interrupted"})
+    app.jobs.update(job["id"], {"status": "interrupted"})
     assert client.post(f"/api/experiments/{job['id']}/resume", headers=headers).status_code == 200
     started = client.post("/api/experiments/start", headers=headers)
     assert started.status_code == 200
     assert started.json()["job"]["status"] == "completed"
     assert started.json()["job"]["completed"] == 2
-    assert engine.tasks == [{"variant": "B", "seed": 1}]
+    missing_config = materialized["configs"][1]["config_file"]
+    assert app.engine.tasks == [{"variant": "B", "seed": 1, "config": missing_config}]
 
 
 def test_cancel_and_resume_use_injected_experiment_service(tmp_path: Path):
@@ -553,7 +836,7 @@ def test_experiment_http_openapi_contract(tmp_path: Path):
     submit_operation = paths["/api/experiments"]["post"]
     submit_schema = submit_operation["responses"]["201"]["content"]["application/json"]["schema"]
     assert submit_schema["$ref"].endswith("JobOutput")
-    for status in ("400", "409"):
+    for status in ("400", "404", "409"):
         schema = submit_operation["responses"][status]["content"]["application/json"]["schema"]
         assert schema["$ref"].endswith("ErrorEnvelope"), status
 
@@ -581,7 +864,8 @@ def test_experiment_http_openapi_contract(tmp_path: Path):
     assert set(submit_input["properties"]) == {
         "name",
         "seeds",
-        "variants",
+        "draft_id",
+        "baseline_draft_id",
         "workers",
         "cpu_count",
         "available_memory_bytes",
@@ -591,16 +875,172 @@ def test_experiment_http_openapi_contract(tmp_path: Path):
     assert submit_input["additionalProperties"] is False
     assert set(submit_input["required"]) == {
         "seeds",
-        "variants",
+        "draft_id",
         "workers",
         "cpu_count",
         "available_memory_bytes",
         "free_disk_bytes",
     }
-    assert submit_input["properties"]["seeds"]["type"] == "array"
-    assert submit_input["properties"]["seeds"]["items"]["type"] == "integer"
-    assert submit_input["properties"]["variants"]["type"] == "array"
-    assert submit_input["properties"]["variants"]["items"]["type"] == "string"
+    seeds = submit_input["properties"]["seeds"]
+    assert seeds["type"] == "array"
+    assert seeds["items"]["type"] == "integer"
+    assert seeds["items"]["minimum"] == 0
+    assert seeds["items"]["maximum"] == 4294967295
+    assert seeds["minItems"] == 1
+    assert seeds["maxItems"] == 10000
+    draft_id = submit_input["properties"]["draft_id"]
+    assert draft_id["type"] == "string"
+    assert draft_id["minLength"] == 1
+    assert draft_id["maxLength"] == 64
+    assert draft_id["pattern"] == "^[A-Za-z0-9_-]+$"
+    assert "variants" not in submit_input["properties"]
     assert submit_input["properties"]["allow_oversubscription"]["default"] is False
     assert components["ExperimentStartOutput"]["properties"]["job"]["$ref"].endswith("JobOutput")
     assert document["components"]["securitySchemes"]["HTTPBearer"]["scheme"] == "bearer"
+
+def normalizable_scenario(assets, *, home_name: str = "主队", home_mentality: int = 4) -> dict:
+    slot_index = {name: index for index, name in enumerate(POSITION_SLOTS)}
+    teams = []
+    for side, base in enumerate(assets.default_teams):
+        team = copy.deepcopy(base)
+        team["name"] = home_name if side == 0 else "客队"
+        for index, player in enumerate(team["players"]):
+            player["source_uid"] = f"{side}-{index}"
+            position = POSITION_ORDER[index] if index < 11 else "MC"
+            attributes = [0] * 15 + list(player["attributes"][15:])
+            attributes[slot_index[canonical_position(position)]] = 20
+            player["attributes"] = attributes
+        team["lineup"] = list(range(11))
+        team["substitutes"] = list(range(11, 23))
+        team["captains"] = [0]
+        team["takers"] = {key: [] for key in team["takers"]}
+        team["takers"]["penalties"] = [0]
+        team["setpieces"] = copy.deepcopy(team["setpieces"])
+        team["setpieces"]["role_priorities"] = {str(group): [] for group in range(8)}
+        team["mentality"] = home_mentality if side == 0 else 4
+        teams.append(team)
+    return {"schema": 3, "rules": "lab", "fixture": "bundled_match_pkm", "teams": teams}
+
+
+def test_end_to_end_draft_create_submit_and_start(tmp_path: Path):
+    app = make_engine_app(tmp_path)
+    client, settings = app.client, app.settings
+    headers = auth(settings)
+    assets = load_scenario_assets(settings.engine_root)
+    candidate = client.post(
+        "/api/drafts",
+        json={"name": "候选草案", "scenario": normalizable_scenario(assets)},
+        headers=headers,
+    )
+    assert candidate.status_code == 201, candidate.text
+    baseline = client.post(
+        "/api/drafts",
+        json={
+            "name": "基线草案",
+            "scenario": normalizable_scenario(assets, home_name="基线主队", home_mentality=3),
+        },
+        headers=headers,
+    )
+    assert baseline.status_code == 201, baseline.text
+    submitted = client.post(
+        "/api/experiments",
+        json=experiment_payload(
+            seeds=[11, 12],
+            draft_id=candidate.json()["id"],
+            baseline_draft_id=baseline.json()["id"],
+        ),
+        headers=headers,
+    )
+    assert submitted.status_code == 201, submitted.text
+    job = submitted.json()
+    materialized = job["config"]["materialized"]
+    assert job["total"] == 4
+    assert job["summary"]["configs_count"] == 4
+    assert [(entry["variant"], entry["seed"]) for entry in materialized["configs"]] == [
+        ("A", 11),
+        ("B", 11),
+        ("A", 12),
+        ("B", 12),
+    ]
+    started = client.post("/api/experiments/start", headers=headers)
+    assert started.status_code == 200, started.text
+    assert started.json()["job"]["status"] == "completed"
+    assert app.engine.tasks == [
+        {
+            "variant": entry["variant"],
+            "seed": entry["seed"],
+            "config": entry["config_file"],
+        }
+        for entry in materialized["configs"]
+    ]
+    binaries = [Path(task["config"]).read_bytes() for task in app.engine.tasks]
+    assert all(data.startswith(b"FM27CFG1") for data in binaries)
+    assert len({data for data in binaries}) == 2
+    runs = app.jobs.runs(job["id"], limit=10)
+    assert runs["total"] == 4
+    assert len(runs["items"]) == 4
+
+def materialized_client(tmp_path: Path) -> tuple[TestClient, Settings, dict[str, str], str]:
+    settings = build_settings(tmp_path)
+    database = Database(settings.database_path)
+    database.initialize()
+    draft_id, _ = seed_drafts(database, settings)
+    return TestClient(create_app(settings, database)), settings, auth(settings), draft_id
+
+
+def submit_materialized_job(
+    client: TestClient, headers: dict[str, str], draft_id: str, seed: int
+) -> tuple[dict, Path]:
+    submitted = client.post(
+        "/api/experiments",
+        json=experiment_payload(seeds=[seed], draft_id=draft_id, workers=1),
+        headers=headers,
+    )
+    assert submitted.status_code == 201, submitted.text
+    job = submitted.json()
+    directory = Path(job["config"]["materialized"]["dir"])
+    assert directory.is_dir()
+    return job, directory
+
+
+def test_delete_job_removes_materialized_directory(tmp_path: Path):
+    client, _, headers, draft_id = materialized_client(tmp_path)
+    job, directory = submit_materialized_job(client, headers, draft_id, 3)
+
+    deleted = client.delete(f"/api/jobs/{job['id']}", headers=headers)
+
+    assert deleted.status_code == 204, deleted.text
+    assert not directory.exists()
+
+
+def test_batch_delete_removes_materialized_directories(tmp_path: Path):
+    client, _, headers, draft_id = materialized_client(tmp_path)
+    directories: list[Path] = []
+    ids: list[str] = []
+    for seed in (3, 4):
+        job, directory = submit_materialized_job(client, headers, draft_id, seed)
+        cancelled = client.post(f"/api/experiments/{job['id']}/cancel", headers=headers)
+        assert cancelled.status_code == 200, cancelled.text
+        ids.append(job["id"])
+        directories.append(directory)
+
+    removed = client.request("DELETE", "/api/jobs", json={"ids": ids}, headers=headers)
+
+    assert removed.status_code == 200, removed.text
+    assert removed.json()["deleted"] == ids
+    assert all(not directory.exists() for directory in directories)
+
+
+def test_batch_delete_action_removes_materialized_directory(tmp_path: Path):
+    client, _, headers, draft_id = materialized_client(tmp_path)
+    job, directory = submit_materialized_job(client, headers, draft_id, 3)
+
+    actions = client.post(
+        "/api/jobs/actions",
+        json={"action": "delete", "ids": [job["id"]]},
+        headers=headers,
+    )
+
+    assert actions.status_code == 200, actions.text
+    assert actions.json()["succeeded"] == [job["id"]]
+    assert not directory.exists()

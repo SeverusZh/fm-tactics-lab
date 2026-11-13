@@ -159,7 +159,8 @@ export interface ExperimentStartOutput {
 export interface ExperimentSubmitInput {
   name?: string | null;
   seeds: number[];
-  variants: string[];
+  draft_id: string;
+  baseline_draft_id?: string | null;
   workers: number;
   cpu_count: number;
   available_memory_bytes: number;
@@ -436,6 +437,13 @@ export interface SquadOutput {
   club_name: string | null;
   players: { [key: string]: unknown }[];
   selection: { [key: string]: unknown } | null;
+}
+
+export interface SystemResourcesOutput {
+  cpu_count: number;
+  available_memory_bytes: number;
+  free_disk_bytes: number;
+  recommended_workers: number;
 }
 
 export interface ValidationError {

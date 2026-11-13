@@ -20,6 +20,7 @@ from fm27lab.client import SidecarError
 from fm27lab.tests.test_http_drafts import scenario as draft_scenario
 
 TOKEN = "token-must-not-leak-2f8a"
+GIB = 1024**3
 
 
 class FakeClient:
@@ -90,6 +91,7 @@ def test_root_help_lists_command_groups():
         "experiments",
         "catalog",
         "results",
+        "system",
     ):
         assert name in result.stdout, name
 
@@ -1514,6 +1516,38 @@ def test_concurrency_check_rejects_out_of_range_workers(monkeypatch):
     assert fake.calls == []
 
 
+def test_system_help_lists_resources_command():
+    result = CliRunner().invoke(cli.app, ["system", "--help"])
+    assert result.exit_code == 0, result.output
+    assert "resources" in result.stdout
+
+
+def test_system_resources_prints_sidecar_payload(monkeypatch):
+    payload = {
+        "cpu_count": 16,
+        "available_memory_bytes": 8 * GIB,
+        "free_disk_bytes": 100 * GIB,
+        "recommended_workers": 6,
+    }
+    result, fake = invoke(monkeypatch, ["system", "resources"], [payload])
+    assert result.exit_code == 0, result.output
+    assert parse_output(result) == payload
+    assert fake.calls == [
+        {"method": "GET", "path": "/api/system/resources", "body": None, "query": None}
+    ]
+
+
+def test_system_resources_maps_probe_failure_to_exit_1(monkeypatch):
+    result, fake = invoke(
+        monkeypatch,
+        ["system", "resources"],
+        error=SidecarError("resource_probe_failed", "无法探测可用内存", 503),
+    )
+    assert result.exit_code == 1
+    assert "resource_probe_failed" in result.stderr
+    assert "无法探测可用内存" in result.stderr
+
+
 def test_experiments_submit_posts_full_body(monkeypatch):
     payload = {"id": "j1", "kind": "experiment", "status": "queued"}
     result, fake = invoke(
@@ -1523,10 +1557,14 @@ def test_experiments_submit_posts_full_body(monkeypatch):
             "submit",
             "--name",
             "批次",
-            "--seeds",
-            "[1, 2]",
-            "--variants",
-            '["a", "b"]',
+            "--draft-id",
+            "draft-1",
+            "--baseline-draft-id",
+            "draft-0",
+            "--seed",
+            "1",
+            "--seed",
+            "2",
             "--workers",
             "4",
             "--cpu-count",
@@ -1548,7 +1586,8 @@ def test_experiments_submit_posts_full_body(monkeypatch):
             "body": {
                 "name": "批次",
                 "seeds": [1, 2],
-                "variants": ["a", "b"],
+                "draft_id": "draft-1",
+                "baseline_draft_id": "draft-0",
                 "workers": 4,
                 "cpu_count": 8,
                 "available_memory_bytes": 1024,
@@ -1560,16 +1599,16 @@ def test_experiments_submit_posts_full_body(monkeypatch):
     ]
 
 
-def test_experiments_submit_omits_optional_name(monkeypatch):
+def test_experiments_submit_omits_optional_fields(monkeypatch):
     result, fake = invoke(
         monkeypatch,
         [
             "experiments",
             "submit",
-            "--seeds",
-            "[1]",
-            "--variants",
-            '["a"]',
+            "--draft-id",
+            "draft-1",
+            "--seed",
+            "7",
             "--workers",
             "1",
             "--cpu-count",
@@ -1583,8 +1622,8 @@ def test_experiments_submit_omits_optional_name(monkeypatch):
     )
     assert result.exit_code == 0, result.output
     assert fake.calls[0]["body"] == {
-        "seeds": [1],
-        "variants": ["a"],
+        "seeds": [7],
+        "draft_id": "draft-1",
         "workers": 1,
         "cpu_count": 1,
         "available_memory_bytes": 0,
@@ -1593,16 +1632,14 @@ def test_experiments_submit_omits_optional_name(monkeypatch):
     }
 
 
-def test_experiments_submit_rejects_non_array_seeds(monkeypatch):
+def test_experiments_submit_requires_draft_id(monkeypatch):
     result, fake = invoke(
         monkeypatch,
         [
             "experiments",
             "submit",
-            "--seeds",
-            '{"a":1}',
-            "--variants",
-            '["a"]',
+            "--seed",
+            "1",
             "--workers",
             "1",
             "--cpu-count",
@@ -1615,7 +1652,186 @@ def test_experiments_submit_rejects_non_array_seeds(monkeypatch):
     )
     assert result.exit_code == 2
     assert fake.calls == []
-    assert "seeds" in result.stderr
+    assert "draft-id" in result.stderr
+
+
+def test_experiments_submit_rejects_non_integer_seed(monkeypatch):
+    result, fake = invoke(
+        monkeypatch,
+        [
+            "experiments",
+            "submit",
+            "--draft-id",
+            "draft-1",
+            "--seed",
+            "abc",
+            "--workers",
+            "1",
+            "--cpu-count",
+            "1",
+            "--available-memory-bytes",
+            "0",
+            "--free-disk-bytes",
+            "0",
+        ],
+    )
+    assert result.exit_code == 2
+    assert fake.calls == []
+
+
+def test_experiments_submit_help_marks_resources_as_auto_probed():
+    result = CliRunner().invoke(cli.app, ["experiments", "submit", "--help"])
+    assert result.exit_code == 0, result.output
+    assert result.stdout.count("缺省时自动探测") == 3
+
+
+def test_experiments_submit_prefills_missing_resources(monkeypatch):
+    resources = {
+        "cpu_count": 16,
+        "available_memory_bytes": 8 * GIB,
+        "free_disk_bytes": 100 * GIB,
+        "recommended_workers": 6,
+    }
+    payload = {"id": "j1", "kind": "experiment", "status": "queued"}
+    result, fake = invoke(
+        monkeypatch,
+        ["experiments", "submit", "--draft-id", "draft-1", "--seed", "3", "--workers", "2"],
+        [resources, payload],
+    )
+    assert result.exit_code == 0, result.output
+    assert parse_output(result) == payload
+    assert fake.calls == [
+        {"method": "GET", "path": "/api/system/resources", "body": None, "query": None},
+        {
+            "method": "POST",
+            "path": "/api/experiments",
+            "body": {
+                "seeds": [3],
+                "draft_id": "draft-1",
+                "workers": 2,
+                "cpu_count": 16,
+                "available_memory_bytes": 8 * GIB,
+                "free_disk_bytes": 100 * GIB,
+                "allow_oversubscription": False,
+            },
+            "query": None,
+        },
+    ]
+
+
+def test_experiments_submit_prefers_explicit_resources(monkeypatch):
+    resources = {
+        "cpu_count": 99,
+        "available_memory_bytes": 8 * GIB,
+        "free_disk_bytes": 100 * GIB,
+        "recommended_workers": 6,
+    }
+    result, fake = invoke(
+        monkeypatch,
+        [
+            "experiments",
+            "submit",
+            "--draft-id",
+            "draft-1",
+            "--seed",
+            "1",
+            "--workers",
+            "1",
+            "--cpu-count",
+            "4",
+        ],
+        [resources, {"id": "j2"}],
+    )
+    assert result.exit_code == 0, result.output
+    assert [call["path"] for call in fake.calls] == [
+        "/api/system/resources",
+        "/api/experiments",
+    ]
+    body = fake.calls[1]["body"]
+    assert body["cpu_count"] == 4
+    assert body["available_memory_bytes"] == 8 * GIB
+    assert body["free_disk_bytes"] == 100 * GIB
+
+
+def test_experiments_submit_skips_resource_probe_when_all_resources_given(monkeypatch):
+    result, fake = invoke(
+        monkeypatch,
+        [
+            "experiments",
+            "submit",
+            "--draft-id",
+            "draft-1",
+            "--seed",
+            "1",
+            "--workers",
+            "1",
+            "--cpu-count",
+            "1",
+            "--available-memory-bytes",
+            "0",
+            "--free-disk-bytes",
+            "0",
+        ],
+        [{"id": "j3"}],
+    )
+    assert result.exit_code == 0, result.output
+    assert [call["path"] for call in fake.calls] == ["/api/experiments"]
+
+
+def test_experiments_submit_reports_resource_probe_failure(monkeypatch):
+    result, fake = invoke(
+        monkeypatch,
+        ["experiments", "submit", "--draft-id", "draft-1", "--seed", "1", "--workers", "1"],
+        error=SidecarError("resource_probe_failed", "无法探测可用内存", 503),
+    )
+    assert result.exit_code == 1
+    assert "resource_probe_failed" in result.stderr
+    assert "无法探测可用内存" in result.stderr
+    assert [call["path"] for call in fake.calls] == ["/api/system/resources"]
+
+
+def test_experiments_submit_rejects_invalid_resource_probe_payload(monkeypatch):
+    result, fake = invoke(
+        monkeypatch,
+        ["experiments", "submit", "--draft-id", "draft-1", "--seed", "1", "--workers", "1"],
+        [{"cpu_count": 8, "available_memory_bytes": -1, "free_disk_bytes": 100 * GIB}],
+    )
+    assert result.exit_code == 1
+    assert "宿主资源" in result.stderr
+    assert [call["path"] for call in fake.calls] == ["/api/system/resources"]
+
+
+def test_experiments_submit_rejects_non_object_resource_probe_payload(monkeypatch):
+    result, fake = invoke(
+        monkeypatch,
+        ["experiments", "submit", "--draft-id", "draft-1", "--seed", "1", "--workers", "1"],
+        [[{"cpu_count": 8, "available_memory_bytes": 8 * GIB, "free_disk_bytes": 100 * GIB}]],
+    )
+    assert result.exit_code == 1
+    assert "invalid_response: 宿主资源响应不是对象" in result.stderr
+    assert [call["path"] for call in fake.calls] == ["/api/system/resources"]
+
+
+def test_experiments_submit_rejects_zero_cpu_count_from_probe(monkeypatch):
+    result, fake = invoke(
+        monkeypatch,
+        ["experiments", "submit", "--draft-id", "draft-1", "--seed", "1", "--workers", "1"],
+        [{"cpu_count": 0, "available_memory_bytes": 8 * GIB, "free_disk_bytes": 100 * GIB}],
+    )
+    assert result.exit_code == 1
+    assert "invalid_response: 宿主资源字段无效：cpu_count" in result.stderr
+    assert [call["path"] for call in fake.calls] == ["/api/system/resources"]
+
+
+def test_experiments_submit_rejects_missing_probed_field(monkeypatch):
+    result, fake = invoke(
+        monkeypatch,
+        ["experiments", "submit", "--draft-id", "draft-1", "--seed", "1", "--workers", "1"],
+        [{"cpu_count": 8, "free_disk_bytes": 100 * GIB}],
+    )
+    assert result.exit_code == 1
+    assert "invalid_response: 宿主资源字段无效：available_memory_bytes" in result.stderr
+    assert [call["path"] for call in fake.calls] == ["/api/system/resources"]
 
 
 def test_experiments_start_posts_route(monkeypatch):
@@ -2030,15 +2246,15 @@ def test_live_sidecar_round_trip_covers_new_commands(live_data_dir: Path):
     assert squad.exit_code == 1
     assert "not_found" in squad.stderr
 
-    submitted = invoke_live(
+    missing_draft = invoke_live(
         data_dir,
         [
             "experiments",
             "submit",
-            "--seeds",
-            "[1]",
-            "--variants",
-            '["A"]',
+            "--draft-id",
+            "missing-draft",
+            "--seed",
+            "1",
             "--workers",
             "1",
             "--cpu-count",
@@ -2049,8 +2265,15 @@ def test_live_sidecar_round_trip_covers_new_commands(live_data_dir: Path):
             str(16 * 1024**3),
         ],
     )
-    assert submitted.exit_code == 0, submitted.output
-    experiment = json.loads(submitted.stdout)
+    assert missing_draft.exit_code == 1
+    assert "not_found" in missing_draft.stderr
+    assert "草案不存在" in missing_draft.stderr
+    created_experiment = invoke_live(
+        data_dir,
+        ["jobs", "create", "--kind", "experiment", "--total", "2"],
+    )
+    assert created_experiment.exit_code == 0, created_experiment.output
+    experiment = json.loads(created_experiment.stdout)
     resume = invoke_live(data_dir, ["experiments", "resume", experiment["id"]])
     assert resume.exit_code == 1
     assert "invalid_transition" in resume.stderr

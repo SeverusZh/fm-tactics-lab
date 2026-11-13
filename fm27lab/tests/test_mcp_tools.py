@@ -328,7 +328,8 @@ REQUEST_CASES = (
         {
             "name": "实验批次",
             "seeds": [1, 2],
-            "variants": ["A", "B"],
+            "draft_id": "draft-1",
+            "baseline_draft_id": "draft-0",
             "workers": 4,
             "cpu_count": 8,
             "available_memory_bytes": 8589934592,
@@ -341,7 +342,8 @@ REQUEST_CASES = (
         {
             "name": "实验批次",
             "seeds": [1, 2],
-            "variants": ["A", "B"],
+            "draft_id": "draft-1",
+            "baseline_draft_id": "draft-0",
             "workers": 4,
             "cpu_count": 8,
             "available_memory_bytes": 8589934592,
@@ -491,7 +493,7 @@ INVALID_CASES = (
         "experiments_submit",
         {
             "seeds": [],
-            "variants": ["A"],
+            "draft_id": "draft-1",
             "workers": 1,
             "cpu_count": 1,
             "available_memory_bytes": 0,
@@ -501,14 +503,49 @@ INVALID_CASES = (
     ),
     (
         "experiments_submit",
-        {"seeds": [1], "variants": ["A"], "workers": 1, "cpu_count": 1, "available_memory_bytes": 0},
+        {
+            "seeds": [1, 1],
+            "draft_id": "draft-1",
+            "workers": 1,
+            "cpu_count": 1,
+            "available_memory_bytes": 0,
+            "free_disk_bytes": 0,
+        },
+        "参数 seeds 不能包含重复项",
+    ),
+    (
+        "experiments_submit",
+        {
+            "seeds": list(range(10001)),
+            "draft_id": "draft-1",
+            "workers": 1,
+            "cpu_count": 1,
+            "available_memory_bytes": 0,
+            "free_disk_bytes": 0,
+        },
+        "参数 seeds 不能超过 10000 项",
+    ),
+    (
+        "experiments_submit",
+        {"seeds": [1], "draft_id": "draft-1", "workers": 1, "cpu_count": 1, "available_memory_bytes": 0},
         "缺少必填参数：free_disk_bytes",
     ),
     (
         "experiments_submit",
         {
             "seeds": [1],
-            "variants": ["A"],
+            "workers": 1,
+            "cpu_count": 1,
+            "available_memory_bytes": 0,
+            "free_disk_bytes": 0,
+        },
+        "缺少必填参数：draft_id",
+    ),
+    (
+        "experiments_submit",
+        {
+            "seeds": [1],
+            "draft_id": "draft-1",
             "workers": 257,
             "cpu_count": 1,
             "available_memory_bytes": 0,
@@ -521,7 +558,7 @@ INVALID_CASES = (
         {
             "name": "",
             "seeds": [1],
-            "variants": ["A"],
+            "draft_id": "draft-1",
             "workers": 1,
             "cpu_count": 1,
             "available_memory_bytes": 0,
@@ -728,7 +765,7 @@ def test_required_fields_match_create_contracts():
         ],
         "experiments_submit": [
             "seeds",
-            "variants",
+            "draft_id",
             "workers",
             "cpu_count",
             "available_memory_bytes",
@@ -1095,8 +1132,12 @@ def test_experiments_submit_schema_matches_route():
         "type": "array",
         "items": {"type": "integer", "minimum": 0, "maximum": 2**32 - 1},
         "minItems": 1,
+        "maxItems": 10000,
+        "uniqueItems": True,
     }
-    assert properties["variants"] == {"type": "array", "items": {"type": "string"}, "minItems": 1}
+    assert properties["draft_id"] == {"type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$"}
+    assert properties["baseline_draft_id"] == {"type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$"}
+    assert "variants" not in properties
     assert properties["workers"] == {"type": "integer", "minimum": 1, "maximum": 256}
     assert properties["name"]["minLength"] == 1
     assert properties["name"]["maxLength"] == 100
@@ -1157,7 +1198,7 @@ def test_new_create_bodies_contain_only_supplied_fields():
     handler_for("experiments_submit", client)(
         {
             "seeds": [1],
-            "variants": ["A"],
+            "draft_id": "draft-1",
             "workers": 1,
             "cpu_count": 1,
             "available_memory_bytes": 0,
@@ -1171,7 +1212,7 @@ def test_new_create_bodies_contain_only_supplied_fields():
         {"source_path": "/tmp/a.fm"},
         {
             "seeds": [1],
-            "variants": ["A"],
+            "draft_id": "draft-1",
             "workers": 1,
             "cpu_count": 1,
             "available_memory_bytes": 0,

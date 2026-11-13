@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import threading
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -53,10 +54,11 @@ def job_service(tmp_path: Path) -> JobService:
 def make_service(
     tmp_path: Path,
     engine: FakeEngine | None = None,
+    materializer: FakeMaterializer | None = None,
 ) -> tuple[ExperimentService, FakeEngine, JobService]:
     jobs = job_service(tmp_path)
     fake = FakeEngine() if engine is None else engine
-    return ExperimentService(jobs, fake, PLAN), fake, jobs
+    return ExperimentService(jobs, fake, PLAN, materializer=materializer), fake, jobs
 
 
 def submit(service: ExperimentService, *, seeds=(1, 2), variants=("A", "B"), **overrides) -> dict[str, Any]:
@@ -610,3 +612,380 @@ def test_publisher_failure_keeps_experiment_flow_working(tmp_path: Path):
         "experiment.progress",
         "experiment.completed",
     ]
+
+
+class FakeMaterializer:
+    def __init__(self, *, error: Exception | None = None, pool: dict[str, Any] | None = None):
+        self.calls: list[dict[str, Any]] = []
+        self.discarded: list[str] = []
+        self.error = error
+        self.pool = pool
+
+    def prepare(self, *, job_id, draft_id, baseline_draft_id, seeds):
+        self.calls.append(
+            {
+                "job_id": job_id,
+                "draft_id": draft_id,
+                "baseline_draft_id": baseline_draft_id,
+                "seeds": list(seeds),
+            }
+        )
+        if self.error is not None:
+            raise self.error
+        variants = ("A", "B") if baseline_draft_id is not None else ("B",)
+        configs = [
+            {
+                "variant": variant,
+                "seed": seed,
+                "entry": None,
+                "config_file": f"/tmp/experiments/{job_id}/{variant}-{seed}.bin",
+                "config_sha256": "0" * 64,
+                "scenario_file": f"/tmp/experiments/{job_id}/{variant}-{seed}.json",
+                "scenario_sha256": "1" * 64,
+            }
+            for seed in seeds
+            for variant in variants
+        ]
+        return {
+            "dir": f"/tmp/experiments/{job_id}",
+            "codec": "FM27CFG1",
+            "configs": configs,
+            "pool": self.pool,
+        }
+
+    def discard(self, job_id: str) -> None:
+        self.discarded.append(job_id)
+
+
+class FailingDiscardMaterializer(FakeMaterializer):
+    def __init__(self, *, discard_error: Exception, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self.discard_error = discard_error
+
+    def discard(self, job_id: str) -> None:
+        super().discard(job_id)
+        raise self.discard_error
+
+
+def test_submit_materializes_and_updates_job_config(tmp_path: Path):
+    materializer = FakeMaterializer()
+    service, fake, jobs = make_service(tmp_path, materializer=materializer)
+    job = submit(service, seeds=(3, 1), draft_id="draft-1", baseline_draft_id="draft-0")
+    assert materializer.calls == [
+        {
+            "job_id": job["id"],
+            "draft_id": "draft-1",
+            "baseline_draft_id": "draft-0",
+            "seeds": [3, 1],
+        }
+    ]
+    assert job["status"] == "queued"
+    assert job["total"] == 4
+    config = job["config"]
+    assert config["seeds"] == [3, 1]
+    assert config["variants"] == ["A", "B"]
+    assert config["draft_id"] == "draft-1"
+    assert config["baseline_draft_id"] == "draft-0"
+    materialized = config["materialized"]
+    assert materialized["dir"] == f"/tmp/experiments/{job['id']}"
+    assert materialized["codec"] == "FM27CFG1"
+    assert [(item["variant"], item["seed"]) for item in materialized["configs"]] == [
+        ("A", 3),
+        ("B", 3),
+        ("A", 1),
+        ("B", 1),
+    ]
+    assert materialized["pool"] is None
+    assert job["summary"]["configs_count"] == 4
+    assert job["summary"]["provenance"] == PLAN.provenance
+    assert job["summary"]["runtime_mode"] == PLAN.runtime_mode
+    assert "pool" not in job["summary"]
+
+
+def test_submit_without_baseline_materializes_single_variant(tmp_path: Path):
+    materializer = FakeMaterializer()
+    service, _, _ = make_service(tmp_path, materializer=materializer)
+    job = submit(service, seeds=(7,), draft_id="draft-1")
+    assert job["config"]["variants"] == ["B"]
+    assert job["config"]["baseline_draft_id"] is None
+    assert job["total"] == 1
+    assert job["summary"]["configs_count"] == 1
+    assert [(item["variant"], item["seed"]) for item in job["config"]["materialized"]["configs"]] == [
+        ("B", 7)
+    ]
+
+
+def test_submit_materializer_pool_summary_lands_in_job_summary(tmp_path: Path):
+    pool = {
+        "profile": "away-tactic-pool-v1",
+        "enabled": True,
+        "mode": "random",
+        "rounds": 1,
+        "entries": [],
+        "draws": {"7": 0},
+        "salt": "salt",
+    }
+    service, _, _ = make_service(tmp_path, materializer=FakeMaterializer(pool=pool))
+    job = submit(service, seeds=(7,), draft_id="draft-1")
+    assert job["summary"]["pool"] == pool
+
+
+def test_submit_deletes_job_when_materialization_fails(tmp_path: Path):
+    materializer = FakeMaterializer(error=RuntimeError("物化失败"))
+    service, fake, jobs = make_service(tmp_path, materializer=materializer)
+    with pytest.raises(RuntimeError, match="物化失败"):
+        submit(service, seeds=(1,), draft_id="draft-1")
+    assert jobs.list()["items"] == []
+    assert materializer.discarded == [materializer.calls[0]["job_id"]]
+
+
+def test_submit_removes_job_and_materialization_when_base_exception_is_raised(tmp_path: Path):
+    materializer = FakeMaterializer(error=KeyboardInterrupt())
+    service, _, jobs = make_service(tmp_path, materializer=materializer)
+
+    with pytest.raises(KeyboardInterrupt):
+        submit(service, seeds=(1,), draft_id="draft-1")
+
+    assert jobs.list()["items"] == []
+    assert materializer.discarded == [materializer.calls[0]["job_id"]]
+
+
+def test_submit_preserves_original_error_when_job_cleanup_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    materializer = FakeMaterializer(error=RuntimeError("物化失败"))
+    service, _, jobs = make_service(tmp_path, materializer=materializer)
+
+    def failing_delete(job_id: str) -> bool:
+        raise RuntimeError("任务删除失败")
+
+    monkeypatch.setattr(jobs, "delete", failing_delete)
+
+    with pytest.raises(RuntimeError, match="物化失败"):
+        submit(service, seeds=(1,), draft_id="draft-1")
+
+    assert materializer.discarded == [materializer.calls[0]["job_id"]]
+
+
+def test_submit_preserves_original_error_when_materialization_cleanup_fails(tmp_path: Path):
+    materializer = FailingDiscardMaterializer(
+        error=RuntimeError("物化失败"),
+        discard_error=OSError("目录清理失败"),
+    )
+    service, _, jobs = make_service(tmp_path, materializer=materializer)
+
+    with pytest.raises(RuntimeError, match="物化失败"):
+        submit(service, seeds=(1,), draft_id="draft-1")
+
+    assert jobs.list()["items"] == []
+    assert materializer.discarded == [materializer.calls[0]["job_id"]]
+
+
+def test_submit_rejects_total_matches_above_limit(tmp_path: Path):
+    service, _, _ = make_service(tmp_path)
+    with pytest.raises(ValueError, match="实验总场数不能超过 10000"):
+        submit(service, seeds=list(range(5001)), variants=("A", "B"), workers=1)
+
+
+def test_start_next_dispatches_materialized_config_paths(tmp_path: Path):
+    materializer = FakeMaterializer()
+    service, fake, jobs = make_service(tmp_path, materializer=materializer)
+    job = submit(service, seeds=(3, 1), draft_id="draft-1", baseline_draft_id="draft-0")
+    final = service.start_next()
+    assert final is not None
+    assert final["status"] == "completed"
+    assert final["completed"] == 4
+    prefix = f"/tmp/experiments/{job['id']}"
+    assert fake.tasks == [
+        {"variant": "A", "seed": 3, "config": f"{prefix}/A-3.bin"},
+        {"variant": "B", "seed": 3, "config": f"{prefix}/B-3.bin"},
+        {"variant": "A", "seed": 1, "config": f"{prefix}/A-1.bin"},
+        {"variant": "B", "seed": 1, "config": f"{prefix}/B-1.bin"},
+    ]
+    assert all(Path(task["config"]).is_absolute() for task in fake.tasks)
+
+
+def test_start_next_after_resume_dispatches_only_missing_materialized_tasks(tmp_path: Path):
+    materializer = FakeMaterializer()
+    service, fake, jobs = make_service(tmp_path, materializer=materializer)
+    job = submit(service, seeds=(3, 1), draft_id="draft-1", baseline_draft_id="draft-0")
+    jobs.update(job["id"], {"status": "running"})
+    for variant, seed in (("A", 3), ("B", 3)):
+        jobs.append_run(job["id"], run_record(variant, seed))
+    jobs.update(job["id"], {"status": "interrupted"})
+    assert service.resume(job["id"])["status"] == "queued"
+    final = service.start_next()
+    assert final is not None
+    assert final["status"] == "completed"
+    assert final["completed"] == 4
+    prefix = f"/tmp/experiments/{job['id']}"
+    assert fake.tasks == [
+        {"variant": "A", "seed": 1, "config": f"{prefix}/A-1.bin"},
+        {"variant": "B", "seed": 1, "config": f"{prefix}/B-1.bin"},
+    ]
+    assert len(materializer.calls) == 1
+    assert materializer.discarded == []
+
+
+class ProbeLock:
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self.holder: str | None = None
+        self.starter_attempted = threading.Event()
+        self.starter_holder: str | None = None
+
+    def __enter__(self) -> ProbeLock:
+        if threading.current_thread().name == "starter":
+            self.starter_holder = self.holder
+            self.starter_attempted.set()
+        self._lock.acquire()
+        self.holder = threading.current_thread().name
+        return self
+
+    def __exit__(self, *exc_info: object) -> None:
+        self.holder = None
+        self._lock.release()
+
+
+class GatedMaterializer(FakeMaterializer):
+    def __init__(self) -> None:
+        super().__init__()
+        self.entered = threading.Event()
+        self.release = threading.Event()
+
+    def prepare(self, *, job_id, draft_id, baseline_draft_id, seeds):
+        self.entered.set()
+        assert self.release.wait(5)
+        return super().prepare(
+            job_id=job_id,
+            draft_id=draft_id,
+            baseline_draft_id=baseline_draft_id,
+            seeds=seeds,
+        )
+
+
+class JobMutatingMaterializer(FakeMaterializer):
+    def __init__(self, mutate: Callable[[str], None]) -> None:
+        super().__init__()
+        self._mutate = mutate
+
+    def prepare(self, *, job_id, draft_id, baseline_draft_id, seeds):
+        prepared = super().prepare(
+            job_id=job_id,
+            draft_id=draft_id,
+            baseline_draft_id=baseline_draft_id,
+            seeds=seeds,
+        )
+        self._mutate(job_id)
+        return prepared
+
+
+def test_start_next_waits_for_submit_and_dispatches_materialized_configs(tmp_path: Path):
+    jobs = job_service(tmp_path)
+    engine = FakeEngine()
+    materializer = GatedMaterializer()
+    service = ExperimentService(jobs, engine, PLAN, materializer=materializer)
+    probe = ProbeLock()
+    service._lock = probe
+    submitted: list[dict[str, Any]] = []
+    started: list[dict[str, Any] | None] = []
+    failures: list[BaseException] = []
+
+    def run_submit() -> None:
+        try:
+            submitted.append(submit(service, seeds=(1,), draft_id="draft-1", baseline_draft_id="draft-0"))
+        except BaseException as error:
+            failures.append(error)
+
+    def run_start() -> None:
+        try:
+            started.append(service.start_next())
+        except BaseException as error:
+            failures.append(error)
+
+    submit_thread = threading.Thread(target=run_submit, name="submit")
+    submit_thread.start()
+    assert materializer.entered.wait(5)
+    start_thread = threading.Thread(target=run_start, name="starter")
+    start_thread.start()
+    try:
+        assert probe.starter_attempted.wait(5)
+        assert probe.starter_holder == "submit"
+        assert start_thread.is_alive()
+        assert engine.tasks == []
+    finally:
+        materializer.release.set()
+        submit_thread.join(timeout=5)
+        start_thread.join(timeout=5)
+    assert not submit_thread.is_alive()
+    assert not start_thread.is_alive()
+    assert failures == []
+    final = started[0]
+    assert final is not None
+    assert final["status"] == "completed"
+    assert final["completed"] == 2
+    job = submitted[0]
+    assert final["id"] == job["id"]
+    assert job["config"]["materialized"]["configs"]
+    assert [(task["variant"], task["seed"]) for task in engine.tasks] == [("A", 1), ("B", 1)]
+    assert all(Path(task["config"]).is_absolute() for task in engine.tasks)
+
+
+def test_submit_discards_job_when_job_deleted_during_materialization(tmp_path: Path):
+    jobs = job_service(tmp_path)
+    materializer = JobMutatingMaterializer(jobs.delete)
+    service = ExperimentService(jobs, FakeEngine(), PLAN, materializer=materializer)
+
+    with pytest.raises(ValueError, match="任务创建失败"):
+        submit(service, seeds=(1,), draft_id="draft-1")
+
+    assert jobs.list()["items"] == []
+    assert materializer.discarded == [materializer.calls[0]["job_id"]]
+
+
+def test_submit_removes_job_when_summary_update_returns_none(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    materializer = FakeMaterializer()
+    service, _, jobs = make_service(tmp_path, materializer=materializer)
+    monkeypatch.setattr(jobs, "update", lambda job_id, changes: None)
+
+    with pytest.raises(ValueError, match="任务创建失败"):
+        submit(service, seeds=(1,), draft_id="draft-1")
+
+    assert jobs.list()["items"] == []
+    assert materializer.discarded == [materializer.calls[0]["job_id"]]
+
+
+def test_submit_discards_job_when_job_cancelled_during_materialization(tmp_path: Path):
+    jobs = job_service(tmp_path)
+
+    def cancel_job(job_id: str) -> None:
+        jobs.update(job_id, {"status": "cancelled"})
+
+    materializer = JobMutatingMaterializer(cancel_job)
+    service = ExperimentService(jobs, FakeEngine(), PLAN, materializer=materializer)
+
+    with pytest.raises(ValueError, match="仅排队中的任务可以更新配置"):
+        submit(service, seeds=(1,), draft_id="draft-1")
+
+    assert jobs.list()["items"] == []
+    assert materializer.discarded == [materializer.calls[0]["job_id"]]
+
+
+def test_start_next_marks_new_config_without_materialized_scenarios_error(tmp_path: Path):
+    service, fake, jobs = make_service(tmp_path)
+    job = jobs.create(
+        "experiment",
+        config={"seeds": [1], "variants": ["B"], "draft_id": "draft-1"},
+        total=1,
+    )
+
+    final = service.start_next()
+
+    assert final is not None
+    assert final["id"] == job["id"]
+    assert final["status"] == "error"
+    assert final["summary"]["error"] == "实验配置缺少比赛场景"
+    assert fake.tasks == []
+    assert jobs.runs(job["id"])["total"] == 0

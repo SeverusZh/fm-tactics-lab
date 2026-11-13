@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Any
 
@@ -20,9 +20,19 @@ class JobService:
         "cancelled": set(),
     }
 
-    def __init__(self, repository: JobRepository, publisher: EventPublisher | None = None):
+    def __init__(
+        self,
+        repository: JobRepository,
+        publisher: EventPublisher | None = None,
+        *,
+        cleanup: Callable[[str], None] | None = None,
+    ):
         self.repository = repository
         self.publisher = publisher
+        self._cleanup = cleanup
+
+    def set_cleanup(self, cleanup: Callable[[str], None] | None) -> None:
+        self._cleanup = cleanup
 
     def create(
         self,
@@ -91,6 +101,20 @@ class JobService:
             self._publish("job.updated", self._snapshot(updated))
         return updated
 
+    def set_config(self, job_id: str, config: Mapping[str, Any]) -> dict[str, Any] | None:
+        if not isinstance(config, Mapping):
+            raise ValueError("任务配置无效")
+        with self.repository.database.transaction() as connection:
+            current = self.repository.get(job_id, connection=connection)
+            if current is None:
+                return None
+            if current["status"] != "queued":
+                raise ValueError("仅排队中的任务可以更新配置")
+            updated = self.repository.update(job_id, {"config": dict(config)}, connection=connection)
+        if updated is not None:
+            self._publish("job.updated", self._snapshot(updated))
+        return updated
+
     def cancel(self, job_id: str) -> dict[str, Any] | None:
         return self.update(job_id, {"status": "cancelled"})
 
@@ -134,6 +158,7 @@ class JobService:
             self._publish("job.deleted", {"job_id": job_id, "deleted": True})
         else:
             self._publish("job.deleted", {**self._snapshot(current), "deleted": True})
+        self._run_cleanup(job_id)
         return True
 
     def batch_delete(self, ids: Sequence[str]) -> dict[str, Any]:
@@ -154,7 +179,16 @@ class JobService:
                     continue
             deleted.append(job_id)
             self._publish("job.deleted", {**self._snapshot(current), "deleted": True})
+            self._run_cleanup(job_id)
         return {"deleted": deleted, "failed": failed}
+
+    def _run_cleanup(self, job_id: str) -> None:
+        if self._cleanup is None:
+            return
+        try:
+            self._cleanup(job_id)
+        except Exception:
+            return
 
     @staticmethod
     def _snapshot(job: Mapping[str, Any]) -> dict[str, Any]:

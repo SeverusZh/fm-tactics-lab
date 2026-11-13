@@ -481,7 +481,17 @@ class JobRepository:
         PoolRepository._validate_id(job_id)
         if not isinstance(changes, Mapping) or not changes:
             raise ValueError("任务更新字段无效")
-        allowed = {"status", "name", "summary", "workers", "total", "completed", "started_at", "finished_at"}
+        allowed = {
+            "status",
+            "name",
+            "config",
+            "summary",
+            "workers",
+            "total",
+            "completed",
+            "started_at",
+            "finished_at",
+        }
         if set(changes) - allowed:
             raise ValueError("任务更新字段无效")
         with self._connection(connection) as (active, owned):
@@ -497,13 +507,7 @@ class JobRepository:
                     active.rollback()
                 return None
             current = self._row(row)
-            normalized = self._validate_job(
-                {
-                    **current,
-                    **dict(changes),
-                    "config": current["config"],
-                }
-            )
+            normalized = self._validate_job({**current, **dict(changes)})
             cursor = active.execute(
                 "UPDATE jobs SET status=?, name=?, config_json=?, summary_json=?, workers=?, "
                 "total=?, completed=?, created_at=?, started_at=?, finished_at=? WHERE id=?",

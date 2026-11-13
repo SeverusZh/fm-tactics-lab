@@ -76,6 +76,7 @@ EXPECTED_NAMES = frozenset(
         "experiments_resume",
         "catalog_snapshot",
         "results_compare",
+        "system_resources",
     }
 )
 
@@ -268,6 +269,19 @@ def test_extended_capabilities_declare_mapped_cli_and_mcp_surfaces():
 
 def test_every_capability_declares_cli_surface():
     assert [item.name for item in CAPABILITIES if item.cli is None] == []
+
+
+def test_system_resources_serves_http_and_cli_without_mcp(tmp_path: Path):
+    assert len(CAPABILITIES) == 51
+    item = capability("system_resources")
+    assert item.description.strip()
+    assert item.http == ("GET", "/api/system/resources")
+    assert item.cli == ("system", "resources")
+    assert item.mcp is None
+    app, *_ = make_app(tmp_path)
+    assert item.http in _openapi_operations(app)
+    assert item.cli in set(_cli_leaves())
+    assert detect_drift(CAPABILITIES) == []
 
 
 def test_saves_payload_import_keeps_existing_surfaces():

@@ -6,19 +6,30 @@ from collections.abc import AsyncIterator
 
 from fastapi import Depends, FastAPI, Header, Request
 from fastapi.responses import JSONResponse, StreamingResponse
+from pydantic import BaseModel
 
 import fm27lab
+from fm27lab.adapters.host_resources import HostResources, probe_host_resources
 from fm27lab.application.events import (
     KEEPALIVE_COMMENT,
     KEEPALIVE_INTERVAL_SECONDS,
     EventPublisher,
     format_event,
 )
-from fm27lab.interfaces.http.common import error_body, require_token
+from fm27lab.domain.concurrency import recommend_workers
+from fm27lab.interfaces.http.common import ErrorEnvelope, error_body, require_token
 
 ERROR_RESPONSE_STATUSES = ("400", "401", "404", "409")
 PAGINATION_PARAMETERS = ("limit", "offset")
 INVALID_LAST_EVENT_ID_CODE = "invalid_last_event_id"
+RESOURCE_PROBE_ERROR_CODE = "resource_probe_failed"
+
+
+class SystemResourcesOutput(BaseModel):
+    cpu_count: int
+    available_memory_bytes: int
+    free_disk_bytes: int
+    recommended_workers: int
 
 
 def register(app: FastAPI) -> None:
@@ -49,6 +60,32 @@ def register(app: FastAPI) -> None:
             "capabilities": [],
             "limits": {"max_workers": 256, "max_seeds": 10000},
         }
+
+    @app.get(
+        "/api/system/resources",
+        response_model=SystemResourcesOutput,
+        responses={
+            401: {"model": ErrorEnvelope},
+            503: {"model": ErrorEnvelope, "description": "宿主资源探测失败"},
+        },
+    )
+    def system_resources(_: None = Depends(require_token)) -> SystemResourcesOutput | JSONResponse:
+        try:
+            resources: HostResources = probe_host_resources(settings.data_dir)
+        except RuntimeError as error:
+            return JSONResponse(
+                status_code=503,
+                content=error_body(RESOURCE_PROBE_ERROR_CODE, str(error), 503),
+            )
+        return SystemResourcesOutput(
+            cpu_count=resources.cpu_count,
+            available_memory_bytes=resources.available_memory_bytes,
+            free_disk_bytes=resources.free_disk_bytes,
+            recommended_workers=recommend_workers(
+                cpu_count=resources.cpu_count,
+                available_memory_bytes=resources.available_memory_bytes,
+            ),
+        )
 
     @app.post("/api/shutdown", status_code=202)
     def shutdown_sidecar(_: None = Depends(require_token)):

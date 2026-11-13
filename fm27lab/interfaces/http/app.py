@@ -22,6 +22,7 @@ from fm27lab.application.catalog import CatalogService
 from fm27lab.application.draft_attributes import DraftAttributeService
 from fm27lab.application.drafts import DraftService
 from fm27lab.application.events import EventPublisher
+from fm27lab.application.experiment_material import ExperimentMaterializer
 from fm27lab.application.experiments import ExperimentService
 from fm27lab.application.idempotency import IdempotencyService
 from fm27lab.application.jobs import JobService
@@ -96,6 +97,7 @@ def create_app(
     fmf_service: FmfService | None = None,
     job_service: JobService | None = None,
     experiment_service: ExperimentService | None = None,
+    experiment_materializer: ExperimentMaterializer | None = None,
     saves_service: SavesService | None = None,
     save_import_service: SaveImportService | None = None,
     idempotency_service: IdempotencyService | None = None,
@@ -117,12 +119,23 @@ def create_app(
     app.state.draft_attributes = draft_attribute_service or DraftAttributeService(app.state.drafts)
     app.state.fmf_service = fmf_service or FmfService(FmfCodec(), app.state.drafts)
     app.state.jobs = job_service or JobService(JobRepository(database), publisher=app.state.events)
-    app.state.experiments = experiment_service or ExperimentService(
-        app.state.jobs,
-        MissingEngine(),
-        EXPERIMENT_RUNTIME_PLAN,
-        publisher=app.state.events,
-    )
+    if experiment_service is not None:
+        app.state.experiments = experiment_service
+    else:
+        materializer = experiment_materializer or ExperimentMaterializer(
+            app.state.drafts,
+            settings,
+        )
+        app.state.experiments = ExperimentService(
+            app.state.jobs,
+            MissingEngine(),
+            EXPERIMENT_RUNTIME_PLAN,
+            publisher=app.state.events,
+            materializer=materializer,
+        )
+        set_cleanup = getattr(app.state.jobs, "set_cleanup", None)
+        if set_cleanup is not None:
+            set_cleanup(materializer.discard)
     app.state.saves = saves_service or SavesService(SavesRepository(database))
     app.state.save_import = save_import_service or SaveImportService(
         app.state.saves,

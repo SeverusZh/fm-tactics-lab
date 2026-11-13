@@ -4,20 +4,26 @@ from __future__ import annotations
 
 import threading
 from collections.abc import Mapping, Sequence
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from fm27lab.application.events import EventPublisher
 from fm27lab.application.jobs import JobService
 from fm27lab.domain.concurrency import resource_check
 from fm27lab.ports.engine import EnginePort, RuntimePlan
 
+if TYPE_CHECKING:
+    from fm27lab.application.experiment_material import ExperimentMaterializer
+
 JOB_PAGE_SIZE = 256
 RUN_PAGE_SIZE = 200
 MAX_SEED = 0xFFFFFFFF
+MAX_TOTAL_MATCHES = 10000
 ALLOWED_VARIANTS = ("A", "B")
 CONFIG_ERROR = "实验配置必须包含 seeds 与 variants"
+MISSING_SCENARIO_ERROR = "实验配置缺少比赛场景"
 SEED_ERROR = "种子必须为非空且不重复的 0–4294967295 整数列表"
 VARIANT_ERROR = "变体必须为非空且不重复的 A/B 列表"
+TOTAL_LIMIT_ERROR = "实验总场数不能超过 10000"
 RUNNING_ERROR = "已有任务在运行"
 CANCEL_ERROR = "任务状态不允许取消"
 RESUME_ERROR = "任务状态不允许续跑"
@@ -69,6 +75,46 @@ def _batch_tasks(config: Any) -> list[dict[str, Any]]:
     return [{"variant": variant, "seed": seed} for seed in seeds for variant in variants]
 
 
+def _materialized_configs(config: Any) -> list[dict[str, Any]] | None:
+    if not isinstance(config, Mapping):
+        raise ValueError(CONFIG_ERROR)
+    materialized = config.get("materialized")
+    if not isinstance(materialized, Mapping):
+        return None
+    configs = materialized.get("configs")
+    if not isinstance(configs, Sequence) or isinstance(configs, (str, bytes)):
+        return None
+    if not configs:
+        return None
+    tasks: list[dict[str, Any]] = []
+    for item in configs:
+        if not isinstance(item, Mapping):
+            raise ValueError(CONFIG_ERROR)
+        variant = item.get("variant")
+        seed = item.get("seed")
+        config_file = item.get("config_file")
+        if (
+            not isinstance(variant, str)
+            or variant not in ALLOWED_VARIANTS
+            or type(seed) is not int
+            or not 0 <= seed <= MAX_SEED
+            or not isinstance(config_file, str)
+            or not config_file
+        ):
+            raise ValueError(CONFIG_ERROR)
+        tasks.append({"variant": variant, "seed": seed, "config": config_file})
+    return tasks
+
+
+def _tasks(config: Any) -> list[dict[str, Any]]:
+    materialized = _materialized_configs(config)
+    if materialized is not None:
+        return materialized
+    if isinstance(config, Mapping) and config.get("draft_id") is not None:
+        raise ValueError(MISSING_SCENARIO_ERROR)
+    return _batch_tasks(config)
+
+
 class ExperimentService:
     """Submit experiments, dispatch queued batches serially and cancel runs.
 
@@ -83,11 +129,13 @@ class ExperimentService:
         engine: EnginePort,
         runtime_plan: RuntimePlan,
         publisher: EventPublisher | None = None,
+        materializer: ExperimentMaterializer | None = None,
     ):
         self._job_service = job_service
         self._engine = engine
         self._runtime_plan = runtime_plan
         self._publisher = publisher
+        self._materializer = materializer
         self._lock = threading.Lock()
         self._cancel_requested: dict[str, threading.Event] = {}
 
@@ -101,11 +149,19 @@ class ExperimentService:
         available_memory_bytes: int,
         free_disk_bytes: int,
         allow_oversubscription: bool = False,
+        draft_id: str | None = None,
+        baseline_draft_id: str | None = None,
     ) -> dict[str, Any]:
         if not isinstance(config, Mapping):
             raise ValueError(CONFIG_ERROR)
         seeds = _validate_seeds(config.get("seeds"))
-        variants = _validate_variants(config.get("variants"))
+        if draft_id is None:
+            variants = _validate_variants(config.get("variants"))
+        else:
+            variants = ["A", "B"] if baseline_draft_id is not None else ["B"]
+        total = len(seeds) * len(variants)
+        if total > MAX_TOTAL_MATCHES:
+            raise ValueError(TOTAL_LIMIT_ERROR)
         preflight = resource_check(
             workers,
             cpu_count=cpu_count,
@@ -115,26 +171,88 @@ class ExperimentService:
         )
         if not preflight["allowed"]:
             raise ResourceBlocked(preflight["code"])
-        job = self._job_service.create(
-            kind="experiment",
-            name=name,
-            config={"seeds": seeds, "variants": variants},
-            workers=workers,
-            total=len(seeds) * len(variants),
+        created_config: dict[str, Any] = {"seeds": seeds, "variants": variants}
+        if draft_id is not None:
+            created_config["draft_id"] = draft_id
+            created_config["baseline_draft_id"] = baseline_draft_id
+        with self._lock:
+            job = self._job_service.create(
+                kind="experiment",
+                name=name,
+                config=created_config,
+                workers=workers,
+                total=total,
+            )
+            summary: dict[str, Any] = {
+                "provenance": dict(self._runtime_plan.provenance),
+                "runtime_mode": self._runtime_plan.runtime_mode,
+            }
+            try:
+                if self._materializer is not None and draft_id is not None:
+                    job = self._materialize(
+                        job,
+                        summary,
+                        seeds=seeds,
+                        variants=variants,
+                        draft_id=draft_id,
+                        baseline_draft_id=baseline_draft_id,
+                    )
+                updated = self._job_service.update(job["id"], {"summary": summary})
+                if updated is None:
+                    raise ValueError("任务创建失败")
+            except BaseException:
+                self._discard_submission(job["id"])
+                raise
+            self._publish("experiment.submitted", updated)
+            return updated
+
+    def _materialize(
+        self,
+        job: Mapping[str, Any],
+        summary: dict[str, Any],
+        *,
+        seeds: list[int],
+        variants: list[str],
+        draft_id: str,
+        baseline_draft_id: str | None,
+    ) -> dict[str, Any]:
+        assert self._materializer is not None
+        job_id = job["id"]
+        materialized = self._materializer.prepare(
+            job_id=job_id,
+            draft_id=draft_id,
+            baseline_draft_id=baseline_draft_id,
+            seeds=seeds,
         )
-        updated = self._job_service.update(
-            job["id"],
+        updated = self._job_service.set_config(
+            job_id,
             {
-                "summary": {
-                    "provenance": dict(self._runtime_plan.provenance),
-                    "runtime_mode": self._runtime_plan.runtime_mode,
-                }
+                "seeds": list(seeds),
+                "variants": list(variants),
+                "draft_id": draft_id,
+                "baseline_draft_id": baseline_draft_id,
+                "materialized": materialized,
             },
         )
         if updated is None:
             raise ValueError("任务创建失败")
-        self._publish("experiment.submitted", updated)
+        summary["configs_count"] = len(materialized.get("configs") or ())
+        pool = materialized.get("pool")
+        if pool is not None:
+            summary["pool"] = pool
         return updated
+
+    def _discard_submission(self, job_id: str) -> None:
+        try:
+            self._job_service.delete(job_id)
+        except Exception:
+            pass
+        if self._materializer is None:
+            return
+        try:
+            self._materializer.discard(job_id)
+        except Exception:
+            pass
 
     def start_next(self) -> dict[str, Any] | None:
         with self._lock:
@@ -161,7 +279,7 @@ class ExperimentService:
             completed_pairs = {(run["variant"], run["seed"]) for run in self._existing_runs(job_id)}
             remaining = [
                 task
-                for task in _batch_tasks(running["config"])
+                for task in _tasks(running["config"])
                 if (task["variant"], task["seed"]) not in completed_pairs
             ]
             if remaining:

@@ -35,6 +35,7 @@ CAPABILITY_GROUPS: dict[str, tuple[str, str | None]] = {
     "results": ("/api/results", None),
     "saves": ("/api/saves", "save_id"),
     "settings": ("/api/settings", "key"),
+    "system": ("/api/system", None),
 }
 ACTION_METHODS: dict[str, str] = {
     "apply_roster": "POST",
@@ -56,6 +57,7 @@ ACTION_METHODS: dict[str, str] = {
     "list": "GET",
     "pool_summary": "GET",
     "put": "PUT",
+    "resources": "GET",
     "resume": "POST",
     "runs": "GET",
     "snapshot": "GET",
@@ -409,6 +411,13 @@ CAPABILITIES: tuple[Capability, ...] = (
         ("POST", "/api/results/compare"),
         ("results", "compare"),
         "results_compare",
+    ),
+    Capability(
+        "system_resources",
+        "探测宿主可用资源并给出推荐并行数",
+        ("GET", "/api/system/resources"),
+        ("system", "resources"),
+        None,
     ),
 )
 

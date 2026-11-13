@@ -490,6 +490,67 @@ def test_batch_delete_reads_and_deletes_with_same_transaction_connection(tmp_pat
     assert observed[1][2] is True
 
 
+def test_delete_calls_cleanup_only_for_deleted_job(tmp_path: Path):
+    discarded: list[str] = []
+    jobs = JobService(JobRepository(database(tmp_path)), cleanup=discarded.append)
+    make_completed(jobs, "job1")
+
+    assert jobs.delete("job1") is True
+    assert discarded == ["job1"]
+
+    assert jobs.delete("job1") is False
+    assert discarded == ["job1"]
+
+
+def test_batch_delete_calls_cleanup_only_for_deleted_jobs(tmp_path: Path):
+    discarded: list[str] = []
+    jobs = JobService(JobRepository(database(tmp_path)), cleanup=discarded.append)
+    make_completed(jobs, "first")
+    jobs.create("experiment", job_id="active")
+    jobs.update("active", {"status": "running"})
+    make_completed(jobs, "second")
+
+    result = jobs.batch_delete(["first", "absent", "active", "second"])
+
+    assert result == {
+        "deleted": ["first", "second"],
+        "failed": [
+            {"id": "absent", "error": "任务不存在"},
+            {"id": "active", "error": "任务正在运行或排队"},
+        ],
+    }
+    assert discarded == ["first", "second"]
+
+
+def test_cleanup_failure_does_not_change_delete_results(tmp_path: Path):
+    def failing_cleanup(job_id: str) -> None:
+        raise RuntimeError(f"清理失败：{job_id}")
+
+    jobs = JobService(JobRepository(database(tmp_path)), cleanup=failing_cleanup)
+    make_completed(jobs, "first")
+    make_completed(jobs, "second")
+
+    assert jobs.delete("first") is True
+    assert jobs.get("first") is None
+    assert jobs.batch_delete(["second"]) == {"deleted": ["second"], "failed": []}
+    assert jobs.get("second") is None
+
+
+def test_set_cleanup_replaces_callback(tmp_path: Path):
+    discarded: list[str] = []
+    jobs = service(tmp_path)
+    jobs.set_cleanup(discarded.append)
+    make_completed(jobs, "job1")
+
+    assert jobs.delete("job1") is True
+    assert discarded == ["job1"]
+
+    jobs.set_cleanup(None)
+    make_completed(jobs, "job2")
+    assert jobs.delete("job2") is True
+    assert discarded == ["job1"]
+
+
 class FakePublisher:
     def __init__(self, error: Exception | None = None):
         self.events: list[tuple[str, dict]] = []
@@ -634,3 +695,73 @@ def test_publisher_failure_keeps_job_operations_successful(tmp_path: Path):
         "job.updated",
         "job.deleted",
     ]
+
+def test_set_config_updates_queued_job_config(tmp_path: Path):
+    jobs = service(tmp_path)
+    created = jobs.create("experiment", config={"seeds": [1]}, total=1)
+    materialized = {"seeds": [1], "materialized": {"configs": [{"variant": "B", "seed": 1}]}}
+    updated = jobs.set_config(created["id"], materialized)
+    assert updated["id"] == created["id"]
+    assert updated["status"] == "queued"
+    assert updated["config"] == materialized
+    assert jobs.get(created["id"])["config"] == materialized
+
+
+def test_set_config_preserves_other_fields(tmp_path: Path):
+    jobs = service(tmp_path)
+    created = jobs.create("experiment", name="批次", config={"seeds": [1]}, workers=3, total=5)
+    jobs.set_config(created["id"], {"seeds": [2]})
+    row = jobs.get(created["id"])
+    assert row["name"] == "批次"
+    assert row["workers"] == 3
+    assert row["total"] == 5
+    assert row["summary"] == {}
+
+
+def test_set_config_rejects_non_queued_jobs(tmp_path: Path):
+    jobs = service(tmp_path)
+    running = jobs.create("experiment", job_id="running-job", total=1)
+    jobs.update(running["id"], {"status": "running"})
+    with pytest.raises(ValueError, match="仅排队中的任务可以更新配置"):
+        jobs.set_config(running["id"], {"seeds": [1]})
+
+    finished = jobs.create("experiment", job_id="finished-job", total=1)
+    jobs.update(finished["id"], {"status": "running"})
+    jobs.update(finished["id"], {"status": "completed"})
+    with pytest.raises(ValueError, match="仅排队中的任务可以更新配置"):
+        jobs.set_config(finished["id"], {"seeds": [1]})
+    assert jobs.get(running["id"])["config"] == {}
+
+
+def test_set_config_returns_none_for_missing_job(tmp_path: Path):
+    jobs = service(tmp_path)
+    assert jobs.set_config("missing", {"seeds": [1]}) is None
+
+
+def test_set_config_rejects_non_json_config(tmp_path: Path):
+    jobs = service(tmp_path)
+    created = jobs.create("experiment", total=1)
+    with pytest.raises(ValueError, match="JSON"):
+        jobs.set_config(created["id"], {"x": float("nan")})
+    with pytest.raises(ValueError, match="JSON"):
+        jobs.set_config(created["id"], {"x": object()})
+    assert jobs.get(created["id"])["config"] == {}
+
+
+def test_set_config_rejects_non_mapping_config(tmp_path: Path):
+    jobs = service(tmp_path)
+    created = jobs.create("experiment", total=1)
+    with pytest.raises(ValueError):
+        jobs.set_config(created["id"], ["seeds"])
+    assert jobs.get(created["id"])["config"] == {}
+
+
+def test_set_config_does_not_alias_caller_config(tmp_path: Path):
+    jobs = service(tmp_path)
+    created = jobs.create("experiment", total=1)
+    config = {"seeds": [1]}
+    updated = jobs.set_config(created["id"], config)
+    config["seeds"].append(2)
+    assert updated["config"] == {"seeds": [1]}
+    assert jobs.get(created["id"])["config"] == {"seeds": [1]}
+

@@ -29,6 +29,7 @@ concurrency_app = typer.Typer(add_completion=False, no_args_is_help=True, help="
 experiments_app = typer.Typer(add_completion=False, no_args_is_help=True, help="实验调度")
 catalog_app = typer.Typer(add_completion=False, no_args_is_help=True, help="运行时目录")
 results_app = typer.Typer(add_completion=False, no_args_is_help=True, help="结果对比")
+system_app = typer.Typer(add_completion=False, no_args_is_help=True, help="宿主资源")
 
 app.add_typer(pools_app, name="pools")
 app.add_typer(drafts_app, name="drafts")
@@ -40,6 +41,7 @@ app.add_typer(concurrency_app, name="concurrency")
 app.add_typer(experiments_app, name="experiments")
 app.add_typer(catalog_app, name="catalog")
 app.add_typer(results_app, name="results")
+app.add_typer(system_app, name="system")
 
 
 @app.callback()
@@ -801,15 +803,59 @@ def concurrency_check(
     _emit(_invoke(ctx, lambda client: client.request_json("GET", "/api/concurrency/check", query=query)))
 
 
+def _resolved_resources(
+    ctx: typer.Context,
+    cpu_count: int | None,
+    available_memory_bytes: int | None,
+    free_disk_bytes: int | None,
+) -> dict[str, int]:
+    def resolve(client: SidecarClient) -> dict[str, int]:
+        given = {
+            "cpu_count": cpu_count,
+            "available_memory_bytes": available_memory_bytes,
+            "free_disk_bytes": free_disk_bytes,
+        }
+        probed: dict[str, Any] = {}
+        if any(value is None for value in given.values()):
+            payload = client.request_json("GET", "/api/system/resources")
+            if not isinstance(payload, dict):
+                raise SidecarError("invalid_response", "宿主资源响应不是对象")
+            probed = payload
+        resolved: dict[str, int] = {}
+        for name, value in given.items():
+            if value is not None:
+                resolved[name] = value
+                continue
+            fallback = probed.get(name)
+            minimum = 1 if name == "cpu_count" else 0
+            if isinstance(fallback, bool) or not isinstance(fallback, int) or fallback < minimum:
+                raise SidecarError("invalid_response", f"宿主资源字段无效：{name}")
+            resolved[name] = fallback
+        return resolved
+
+    return _invoke(ctx, resolve)
+
+
 @experiments_app.command("submit")
 def experiments_submit(
     ctx: typer.Context,
-    seeds: str = typer.Option(..., "--seeds", help="种子 JSON 数组，可用 @文件"),
-    variants: str = typer.Option(..., "--variants", help="变体 JSON 数组，可用 @文件"),
+    draft_id: str = typer.Option(..., "--draft-id", help="草案标识"),
+    seed: list[int] = typer.Option(..., "--seed", help="随机种子，可重复"),
     workers: int = typer.Option(..., "--workers", min=1, max=256, help="并行数"),
-    cpu_count: int = typer.Option(..., "--cpu-count", min=1, help="CPU 数量"),
-    available_memory_bytes: int = typer.Option(..., "--available-memory-bytes", min=0, help="可用内存字节"),
-    free_disk_bytes: int = typer.Option(..., "--free-disk-bytes", min=0, help="空闲磁盘字节"),
+    cpu_count: int | None = typer.Option(None, "--cpu-count", min=1, help="缺省时自动探测 CPU 数量"),
+    available_memory_bytes: int | None = typer.Option(
+        None,
+        "--available-memory-bytes",
+        min=0,
+        help="缺省时自动探测 可用内存字节",
+    ),
+    free_disk_bytes: int | None = typer.Option(
+        None,
+        "--free-disk-bytes",
+        min=0,
+        help="缺省时自动探测 空闲磁盘字节",
+    ),
+    baseline_draft_id: str | None = typer.Option(None, "--baseline-draft-id", help="基线草案标识"),
     name: str | None = typer.Option(None, "--name", help="批次名称"),
     allow_oversubscription: bool = typer.Option(
         False,
@@ -819,14 +865,14 @@ def experiments_submit(
 ) -> None:
     """提交实验批次。"""
     body: dict[str, Any] = {
-        "seeds": _json_array(seeds, "seeds"),
-        "variants": _json_array(variants, "variants"),
+        "seeds": list(seed),
+        "draft_id": draft_id,
         "workers": workers,
-        "cpu_count": cpu_count,
-        "available_memory_bytes": available_memory_bytes,
-        "free_disk_bytes": free_disk_bytes,
         "allow_oversubscription": allow_oversubscription,
+        **_resolved_resources(ctx, cpu_count, available_memory_bytes, free_disk_bytes),
     }
+    if baseline_draft_id is not None:
+        body["baseline_draft_id"] = baseline_draft_id
     if name is not None:
         body["name"] = name
     _emit(_invoke(ctx, lambda client: client.request_json("POST", "/api/experiments", body=body)))
@@ -854,6 +900,12 @@ def experiments_resume(ctx: typer.Context, job_id: str = typer.Argument(..., hel
 def catalog_show(ctx: typer.Context) -> None:
     """读取运行时目录快照。"""
     _emit(_invoke(ctx, lambda client: client.request_json("GET", "/api/catalog")))
+
+
+@system_app.command("resources")
+def system_resources(ctx: typer.Context) -> None:
+    """探测宿主可用资源并给出推荐并行数。"""
+    _emit(_invoke(ctx, lambda client: client.request_json("GET", "/api/system/resources")))
 
 
 @results_app.command("compare")
