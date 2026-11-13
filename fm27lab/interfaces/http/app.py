@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Mapping, Sequence
+from typing import Any
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -9,12 +10,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from fm27lab.adapters.engine_native.capabilities import parse_capabilities, plan_runtime
 from fm27lab.adapters.storage_sqlite.db import Database
 from fm27lab.adapters.storage_sqlite.idempotency import IdempotencyRepository
 from fm27lab.adapters.storage_sqlite.repositories import DraftRepository, JobRepository, PoolRepository
 from fm27lab.adapters.storage_sqlite.saves import SavesRepository
 from fm27lab.application.drafts import DraftService
 from fm27lab.application.events import EventPublisher
+from fm27lab.application.experiments import ExperimentService
 from fm27lab.application.idempotency import IdempotencyService
 from fm27lab.application.jobs import JobService
 from fm27lab.application.pools import PoolService
@@ -31,9 +34,16 @@ from fm27lab.interfaces.http.common import (
 )
 from fm27lab.interfaces.http.idempotency import IdempotencyMiddleware
 from fm27lab.interfaces.http.routes import register_routes
+from fm27lab.ports.engine import EngineCapabilities
 
 TAURI_ORIGINS = ("tauri://localhost", "http://tauri.localhost")
 DEV_ORIGINS = ("http://localhost:1420",)
+ENGINE_UNAVAILABLE_MESSAGE = "原生引擎未配置"
+EXPERIMENT_RUNTIME_PLAN = plan_runtime(
+    parse_capabilities(None),
+    has_pool_variants=False,
+    has_experimental_execution=False,
+)
 LOGGER = logging.getLogger(__name__)
 
 __all__ = [
@@ -41,6 +51,7 @@ __all__ = [
     "ErrorBody",
     "ErrorEnvelope",
     "ID_PATTERN",
+    "MissingEngine",
     "SECURITY",
     "TAURI_ORIGINS",
     "_query_integer",
@@ -50,6 +61,24 @@ __all__ = [
 ]
 
 
+class MissingEngine:
+    """Engine port placeholder used until a native engine host is configured."""
+
+    def capabilities(self) -> EngineCapabilities:
+        return parse_capabilities(None)
+
+    def run_batch(
+        self,
+        tasks: Sequence[Mapping[str, Any]],
+        on_result: Callable[[Mapping[str, Any]], None],
+        on_progress: Callable[[Sequence[Mapping[str, Any]]], None],
+    ) -> None:
+        raise RuntimeError(ENGINE_UNAVAILABLE_MESSAGE)
+
+    def cancel(self) -> None:
+        return None
+
+
 def create_app(
     settings: Settings,
     database: Database,
@@ -57,6 +86,7 @@ def create_app(
     pool_service: PoolService | None = None,
     draft_service: DraftService | None = None,
     job_service: JobService | None = None,
+    experiment_service: ExperimentService | None = None,
     saves_service: SavesService | None = None,
     idempotency_service: IdempotencyService | None = None,
     events: EventPublisher | None = None,
@@ -74,6 +104,12 @@ def create_app(
     app.state.pools = pool_service or PoolService(PoolRepository(database))
     app.state.drafts = draft_service or DraftService(DraftRepository(database))
     app.state.jobs = job_service or JobService(JobRepository(database), publisher=app.state.events)
+    app.state.experiments = experiment_service or ExperimentService(
+        app.state.jobs,
+        MissingEngine(),
+        EXPERIMENT_RUNTIME_PLAN,
+        publisher=app.state.events,
+    )
     app.state.saves = saves_service or SavesService(SavesRepository(database))
     app.state.idempotency = idempotency_service or IdempotencyService(IdempotencyRepository(database))
     app.state.shutdown = shutdown
