@@ -64,7 +64,7 @@
 ## Phase 2 存储与引擎
 
 - [x] SQLite 连接、迁移与仓储：settings、pool_entries、drafts、jobs/job_runs、saves/save_leagues/save_clubs、artifacts、idempotency 与 `/api/pools`、`/api/drafts`、`/api/jobs`、`/api/saves`、`/api/results`、`/api/artifacts`、`/api/settings` 均已实现并通过独立审核。
-- [ ] 空库启动与只读旧目录探测。
+- [~] 空库启动已实现；只读旧目录探测与存档读取端口已接入 fmsave 适配器。
 - [~] 原生宿主适配器与 counted-session 能力协商：能力解析、运行时计划与文件协议适配器已实现并通过审核；真实 Windows 宿主联调待后续。
 - [~] 1–256 路调度、取消、续跑、磁盘/内存预检：并发预检、串行调度与引擎分道（1/4/8 路身份一致）已实现并 PASS，1/8/256 真机验收待后续。
 - [~] 旧宿主回退到 64 场或执行力隔离模式，并记录 provenance：运行时计划与 provenance 进行中。
@@ -102,7 +102,7 @@
 - [ ] 设计 token、字体、组件库与 FM 配色。
 - [~] 战术板双阶段：只读板、阶段切换与 catalog 中文标签已实现，拖拽/键盘编辑待后续。
 - [~] 球员属性与隐藏属性分组：只读分组页已实现，批量编辑 UI 待后续。
-- [ ] 存档战术库与真实 AI 生成。
+- [~] 存档战术库与真实 AI 生成：fmsave 读取适配器与 FMF 导入导出已实现，战术库页面接入与 AI 生成待后续。
 - [ ] 结果页、对比、历史与批量管理。
 - [ ] 设置、说明、空/加载/错误状态。
 - [ ] Playwright 主流程与可访问性检查。
