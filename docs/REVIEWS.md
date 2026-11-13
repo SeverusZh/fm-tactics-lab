@@ -84,6 +84,10 @@
 | 2026-11-13 | MCP stdio 命令接线 | cli.py mcp、test_cli_mcp.py | PASS | 22 工具、stdout 纯净、启动失败退出码 1、health 就绪探测与 data-dir 优先级；11 项 MINOR。 |
 | 2026-11-13 | 前端设置页 | SettingsPage、api.ts、tests | PASS | 设置 CRUD、JSON 校验、删除确认、并发预检面板；77 项 Vitest、typecheck 与 build 通过；11 项 MINOR。 |
 | 2026-11-13 | 任务批量操作 HTTP | routes/jobs.py、test_http_jobs.py | PASS | 批量 cancel/delete、失败明细与顺序、边界与 OpenAPI；17 项 jobs HTTP 测试。 |
+| 2026-11-13 | Issue 5 属性分组领域 | domain/attributes.py、tests | PASS | 六类分组互斥完整、half-up 对齐 Math.round、默认只改可见属性、快照精确恢复与参考复制、脚配对参数化；51 项测试；多轮 MINOR 收口。 |
+| 2026-11-13 | Issue 6 批量删除与多选 | application/jobs.py、routes/jobs.py、JobsPage、tests | FAIL | 批删 get→delete 非原子可删运行中任务；确认框缺焦点与键盘语义。 |
+| 2026-11-13 | Issue 6 修复轮 | 同上 | PASS | 服务层事务内 get→delete、DI 恢复、真实并发回归、焦点/Esc/结果聚焦与勾选收敛；后端 58 与前端 90 测试。 |
+| 2026-11-13 | PR 10 客队战术池摘要 | application/results.py、routes/results.py、tests | PASS | enabled 语义、draws 零填充与 A/B 去重、优先级与 400/404 契约；69 项相关测试。 |
 
 ## 审核规则
 
@@ -92,6 +96,6 @@
 - 先列 findings，再列已验证项，最后给结论。
 - Critical 或 Important 未闭环时不得标记 PASS。
 - 审核通过不等于整体发布就绪；发布仍需最终验收与 Windows 真机验证。
-- 旧 `tests/` 当前 281 项通过，覆盖 legacy UI/HTTP/CLI/MCP、存档战术库、池与名单；新 `fm27lab/tests` 当前 960 项通过，覆盖包版本、CLI 环境继承、配置/路径边界、SQLite 迁移/事务与池/草案/任务/存档/产物/幂等仓储、HTTP 健康/池/草案/任务 CRUD、鉴权、错误封套、Origin、ACL 失败清理、sidecar serve、23 人名单、真实名单应用、scenario 归一化、catalog/双阶段战术、客队战术池选择、结果指标、任务状态机、存档状态机与应用服务；Vitest 当前 77 项。
+- 旧 `tests/` 当前 281 项通过，覆盖 legacy UI/HTTP/CLI/MCP、存档战术库、池与名单；新 `fm27lab/tests` 当前 1062 项通过，覆盖包版本、CLI 环境继承、配置/路径边界、SQLite 迁移/事务与池/草案/任务/存档/产物/幂等仓储、HTTP 健康/池/草案/任务 CRUD、鉴权、错误封套、Origin、ACL 失败清理、sidecar serve、23 人名单、真实名单应用、scenario 归一化、catalog/双阶段战术、客队战术池选择、结果指标、任务状态机、存档状态机与应用服务；Vitest 当前 90 项。
 - Tauri sidecar supervisor 的静态实现已存在，但 Linux 无 WebKitGTK，Windows CI 的 `cargo build`/`cargo test`/安装包构建是唯一编译证据。PyInstaller onedir sidecar 已在 Linux 构建并通过 ready/health/shutdown 冒烟测试。
 - Rust 核心 crate 当前 4 项 cargo test 通过；React 壳当前 9 项 Vitest 通过、类型检查与生产构建通过。Windows CI 已通过 cargo build/test、NSIS 安装包与 sidecar 资源断言；Linux 本机仍无 WebKitGTK。合并、设计、sidecar、壳层、名单五个审核门均已 PASS。
