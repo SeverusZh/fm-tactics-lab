@@ -1,15 +1,18 @@
 from __future__ import annotations
 
 import json
+import sys
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, BinaryIO, TextIO
 
 import typer
 
 import fm27lab
 from fm27lab.client import SidecarClient, SidecarError, discover_endpoint
 from fm27lab.config import Settings
+from fm27lab.interfaces.mcp.protocol import McpServer
+from fm27lab.interfaces.mcp.tools import build_tools
 from fm27lab.sidecar import run
 
 app = typer.Typer(add_completion=False, no_args_is_help=True)
@@ -67,6 +70,12 @@ def serve(
     raise typer.Exit(run(settings))
 
 
+@app.command()
+def mcp(ctx: typer.Context) -> None:
+    """以 MCP stdio 服务暴露 sidecar 工具。"""
+    raise typer.Exit(run_mcp(_resolve_data_dir(ctx), sys.stdin.buffer, sys.stdout.buffer))
+
+
 def _resolve_data_dir(ctx: typer.Context) -> Path:
     override = ctx.obj.get("data_dir") if isinstance(ctx.obj, dict) else None
     if override is not None:
@@ -80,6 +89,36 @@ def _resolve_data_dir(ctx: typer.Context) -> Path:
 def _client_for(data_dir: Path) -> SidecarClient:
     endpoint = discover_endpoint(data_dir)
     return SidecarClient(str(endpoint["url"]), str(endpoint["token"]))
+
+
+MCP_SERVER_NAME = "fm27lab"
+MCP_READY_PATH = "/api/health"
+
+
+def _ready_client(data_dir: Path) -> SidecarClient:
+    client = _client_for(data_dir)
+    client.request_json("GET", MCP_READY_PATH)
+    return client
+
+
+def run_mcp(
+    data_dir: Path,
+    instream: BinaryIO | TextIO,
+    outstream: BinaryIO | TextIO,
+) -> int:
+    try:
+        client = _ready_client(Path(data_dir))
+    except SidecarError as error:
+        sys.stderr.write(f"无法启动 MCP 服务：{error.code}: {error.message}\n")
+        sys.stderr.flush()
+        return 1
+    server = McpServer(
+        name=MCP_SERVER_NAME,
+        version=fm27lab.__version__,
+        tools=build_tools(client),
+    )
+    server.serve(instream, outstream)
+    return 0
 
 
 def _invoke(ctx: typer.Context, request: Callable[[SidecarClient], Any]) -> Any:
