@@ -1,11 +1,18 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { UsersThree } from "@phosphor-icons/react";
-import { useState, type ReactNode } from "react";
+import { useState, type FormEvent, type ReactNode } from "react";
 
 import { useAppContext } from "../app-context";
 import { EmptyState } from "../components/EmptyState";
 import { Panel } from "../components/Panel";
-import { getDraft, listDrafts } from "../lib/api";
+import {
+  applyDraftAttributes,
+  getDraft,
+  listDrafts,
+  type DraftAttributeOperation,
+  type DraftAttributePayload,
+  type DraftAttributeScope,
+} from "../lib/api";
 
 const POSITION_CODES = [
   "GK",
@@ -138,8 +145,57 @@ const ATTRIBUTE_GROUPS: readonly AttributeGroup[] = [
   },
 ];
 
+type BulkGroup = "technical" | "mental" | "physical" | "goalkeeping";
+
+type EditableScope = Exclude<DraftAttributeScope, "squad">;
+
+const BULK_GROUPS: readonly { id: BulkGroup; title: string }[] = [
+  { id: "technical", title: "技术" },
+  { id: "mental", title: "精神" },
+  { id: "physical", title: "身体" },
+  { id: "goalkeeping", title: "门将" },
+];
+
+function defaultBulkGroups(): BulkGroup[] {
+  return BULK_GROUPS.map((group) => group.id);
+}
+
+function orderedGroups(groups: readonly BulkGroup[]): BulkGroup[] {
+  return BULK_GROUPS.filter((group) => groups.includes(group.id)).map((group) => group.id);
+}
+
+function GroupPicker({
+  selected,
+  onChange,
+}: {
+  selected: readonly BulkGroup[];
+  onChange: (groups: BulkGroup[]) => void;
+}) {
+  return (
+    <div className="players-bulk-groups" role="group" aria-label="分组">
+      {BULK_GROUPS.map((group) => (
+        <label className="field-inline" key={group.id}>
+          <input
+            type="checkbox"
+            checked={selected.includes(group.id)}
+            onChange={(event) =>
+              onChange(
+                event.target.checked
+                  ? [...selected, group.id]
+                  : selected.filter((id) => id !== group.id),
+              )
+            }
+          />
+          {group.title}
+        </label>
+      ))}
+    </div>
+  );
+}
+
 type ScenarioPlayer = {
   uid: string;
+  sourceUid: string | number;
   name: string;
   position: number;
   ability: number | null;
@@ -188,8 +244,11 @@ function parsePlayer(value: unknown, index: number): ScenarioPlayer | null {
   const uid = value.source_uid;
   const name =
     typeof value.name === "string" && value.name.trim() !== "" ? value.name.trim() : `球员 ${index + 1}`;
+  const sourceUid =
+    typeof uid === "number" || typeof uid === "string" ? uid : `player-${index}`;
   return {
-    uid: typeof uid === "number" || typeof uid === "string" ? String(uid) : `player-${index}`,
+    uid: String(sourceUid),
+    sourceUid,
     name,
     position: strongestPosition(attributes),
     ability: readAbility(value.ability),
@@ -242,6 +301,18 @@ export function PlayersPage() {
   const [side, setSide] = useState<0 | 1>(0);
   const [selectedPlayer, setSelectedPlayer] = useState(0);
   const [showHidden, setShowHidden] = useState(false);
+  const [operation, setOperation] = useState<DraftAttributeOperation>("bulk");
+  const [scope, setScope] = useState<EditableScope>("all");
+  const [bulkValue, setBulkValue] = useState("10");
+  const [bulkGroups, setBulkGroups] = useState<BulkGroup[]>(defaultBulkGroups);
+  const [includePersonality, setIncludePersonality] = useState(false);
+  const [positionCode, setPositionCode] = useState("ST");
+  const [positionValue, setPositionValue] = useState("10");
+  const [copySourceIndex, setCopySourceIndex] = useState(0);
+  const [copyGroups, setCopyGroups] = useState<BulkGroup[]>(defaultBulkGroups);
+  const [copyPersonality, setCopyPersonality] = useState(true);
+  const [attributeError, setAttributeError] = useState<string | null>(null);
+  const [attributeNotice, setAttributeNotice] = useState<string | null>(null);
 
   const drafts = useQuery({
     queryKey: ["drafts", connection?.url],
@@ -260,14 +331,35 @@ export function PlayersPage() {
     enabled: connection !== null && activeDraftId !== null,
   });
 
+  const queryClient = useQueryClient();
+  const applyAttributes = useMutation({
+    mutationFn: (payload: DraftAttributePayload) =>
+      applyDraftAttributes(connection!, activeDraftId!, payload),
+    onSuccess: async (result) => {
+      setAttributeError(null);
+      setAttributeNotice(`已更新 ${result.changed_players} 名球员`);
+      await queryClient.invalidateQueries({
+        queryKey: ["draft", connection?.url, activeDraftId],
+      });
+    },
+    onError: (error) => {
+      setAttributeNotice(null);
+      setAttributeError(errorMessage(error));
+    },
+  });
+
   const changeDraft = (draftId: string) => {
     setSelectedDraftId(draftId);
     setSelectedPlayer(0);
+    setAttributeError(null);
+    setAttributeNotice(null);
   };
 
   const changeSide = (next: 0 | 1) => {
     setSide(next);
     setSelectedPlayer(0);
+    setAttributeError(null);
+    setAttributeNotice(null);
   };
 
   const scenario = detail.data === undefined ? null : parseScenario(detail.data.scenario);
@@ -278,6 +370,203 @@ export function PlayersPage() {
   const visibleGroups = ATTRIBUTE_GROUPS.filter(
     (group) => group.id !== "hidden" || showHidden,
   );
+
+  const referenceIndex = players[copySourceIndex] === undefined ? 0 : copySourceIndex;
+  const missingGroups =
+    (operation === "bulk" && bulkGroups.length === 0) ||
+    (operation === "copy" && copyGroups.length === 0);
+
+  const submitAttributes = (event: FormEvent) => {
+    event.preventDefault();
+    if (connection === null || activeDraftId === null) return;
+    const payload: DraftAttributePayload = {
+      side: side === 0 ? "home" : "away",
+      scope,
+      operation,
+      params: {},
+    };
+    if (scope === "player") payload.player_index = playerIndex;
+    if (operation === "bulk") {
+      payload.params = {
+        value: Number(bulkValue),
+        groups: orderedGroups(bulkGroups),
+        include_personality: includePersonality,
+      };
+    } else if (operation === "position") {
+      payload.params = { position: positionCode, value: Number(positionValue) };
+    } else if (operation === "copy") {
+      payload.params = {
+        source_uid: players[referenceIndex].sourceUid,
+        groups: orderedGroups(copyGroups),
+        copy_personality: copyPersonality,
+      };
+    }
+    applyAttributes.mutate(payload);
+  };
+
+  const undoAttributes = () => {
+    if (connection === null || activeDraftId === null) return;
+    applyAttributes.mutate({
+      side: side === 0 ? "home" : "away",
+      scope: "all",
+      operation: "undo",
+      params: {},
+    });
+  };
+
+  const attributeEditor =
+    connection === null ||
+    activeDraftId === null ||
+    scenario === null ||
+    team === null ||
+    player === undefined ? null : (
+      <section className="players-bulk" aria-label="批量属性编辑">
+        <form
+          className="players-bulk-form"
+          aria-label="批量属性编辑表单"
+          onSubmit={submitAttributes}
+        >
+          <label className="field">
+            操作
+            <select
+              aria-label="操作"
+              value={operation}
+              onChange={(event) =>
+                setOperation(event.target.value as DraftAttributeOperation)
+              }
+            >
+              <option value="bulk">统一属性</option>
+              <option value="position">位置熟练度</option>
+              <option value="copy">从参考球员复制</option>
+              <option value="undo">撤销</option>
+            </select>
+          </label>
+          {operation === "undo" ? null : (
+            <label className="field">
+              范围
+              <select
+                aria-label="范围"
+                value={scope}
+                onChange={(event) => setScope(event.target.value as EditableScope)}
+              >
+                <option value="all">全队</option>
+                <option value="starters">首发</option>
+                <option value="player">当前球员</option>
+              </select>
+            </label>
+          )}
+          {operation === "bulk" ? (
+            <>
+              <label className="field players-bulk-value">
+                显示值
+                <input
+                  aria-label="显示值"
+                  type="number"
+                  min={1}
+                  max={20}
+                  step={0.2}
+                  value={bulkValue}
+                  onChange={(event) => setBulkValue(event.target.value)}
+                />
+              </label>
+              <GroupPicker selected={bulkGroups} onChange={setBulkGroups} />
+              <label className="field-inline">
+                <input
+                  type="checkbox"
+                  checked={includePersonality}
+                  onChange={(event) => setIncludePersonality(event.target.checked)}
+                />
+                包含性格
+              </label>
+            </>
+          ) : null}
+          {operation === "position" ? (
+            <>
+              <label className="field">
+                位置
+                <select
+                  aria-label="位置"
+                  value={positionCode}
+                  onChange={(event) => setPositionCode(event.target.value)}
+                >
+                  {POSITION_CODES.map((code) => (
+                    <option key={code} value={code}>
+                      {code}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="field players-bulk-value">
+                位置熟练度
+                <input
+                  aria-label="位置熟练度"
+                  type="number"
+                  min={0}
+                  max={20}
+                  step={1}
+                  value={positionValue}
+                  onChange={(event) => setPositionValue(event.target.value)}
+                />
+              </label>
+            </>
+          ) : null}
+          {operation === "copy" ? (
+            <>
+              <label className="field players-bulk-reference">
+                参考球员
+                <select
+                  aria-label="参考球员"
+                  value={String(referenceIndex)}
+                  onChange={(event) => setCopySourceIndex(Number(event.target.value))}
+                >
+                  {players.map((item, index) => (
+                    <option key={`${item.uid}-${index}`} value={index}>
+                      {item.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <GroupPicker selected={copyGroups} onChange={setCopyGroups} />
+              <label className="field-inline">
+                <input
+                  type="checkbox"
+                  checked={copyPersonality}
+                  onChange={(event) => setCopyPersonality(event.target.checked)}
+                />
+                复制性格
+              </label>
+            </>
+          ) : null}
+          <div className="players-bulk-actions">
+            <button
+              className="button primary"
+              type="submit"
+              disabled={applyAttributes.isPending || missingGroups}
+            >
+              应用
+            </button>
+            <button
+              className="button"
+              type="button"
+              disabled={applyAttributes.isPending}
+              onClick={undoAttributes}
+            >
+              撤销
+            </button>
+          </div>
+        </form>
+        {attributeError === null ? null : (
+          <div className="inline-alert" role="alert">
+            {attributeError}
+          </div>
+        )}
+        {attributeNotice === null ? null : (
+          <p className="jobs-notice" role="status" aria-live="polite">
+            {attributeNotice}
+          </p>
+        )}
+      </section>
+    );
 
   let body: ReactNode;
   if (connection === null) {
@@ -438,6 +727,7 @@ export function PlayersPage() {
             显示隐藏属性
           </label>
         </div>
+        {attributeEditor}
         {content}
       </>
     );

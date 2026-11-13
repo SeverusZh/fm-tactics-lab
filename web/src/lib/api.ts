@@ -427,6 +427,41 @@ export async function deleteDraft(connection: Connection, draftId: string): Prom
   await apiFetch(connection, `/api/drafts/${encodeURIComponent(draftId)}`, { method: "DELETE" });
 }
 
+export type DraftAttributeSide = "home" | "away";
+
+export type DraftAttributeScope = "all" | "starters" | "player" | "squad";
+
+export type DraftAttributeOperation = "bulk" | "position" | "copy" | "pair_feet" | "undo";
+
+export type DraftAttributePayload = {
+  side: DraftAttributeSide;
+  scope: DraftAttributeScope;
+  player_index?: number | null;
+  operation: DraftAttributeOperation;
+  params: Record<string, unknown>;
+};
+
+export type DraftAttributeResult = {
+  draft: DraftSummary;
+  snapshot: Record<string, unknown> | null;
+  changed_players: number;
+};
+
+export function applyDraftAttributes(
+  connection: Connection,
+  draftId: string,
+  payload: DraftAttributePayload,
+): Promise<DraftAttributeResult> {
+  return apiJson<DraftAttributeResult>(
+    connection,
+    `/api/drafts/${encodeURIComponent(draftId)}/attributes`,
+    {
+      method: "POST",
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
 export type CatalogOption = {
   id: number | string;
   label: string;

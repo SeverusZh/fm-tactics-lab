@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AppContext } from "../app-context";
 import {
+  applyDraftAttributes,
   createDraft,
   deleteDraft,
   getDraft,
@@ -159,6 +160,23 @@ function makeDraftList(
   nextOffset: number | null = null,
 ): DraftList {
   return { items, total, next_offset: nextOffset };
+}
+
+function makeAttributeResult(overrides: Partial<{ changed_players: number }> = {}) {
+  return {
+    draft: makeSummary(),
+    snapshot: { side: "home", scope: "all", operation: "bulk", indices: [15] },
+    changed_players: 23,
+    ...overrides,
+  };
+}
+
+function attributeCalls() {
+  return fetchCalls().filter((call) => call.url.endsWith("/api/drafts/draft-1/attributes"));
+}
+
+function detailCalls(draftId = "draft-1") {
+  return fetchCalls().filter((call) => call.url.endsWith(`/api/drafts/${draftId}`));
 }
 
 function renderPlayersPage(activeConnection: Connection | null = connection) {
@@ -389,6 +407,7 @@ describe("PlayersPage", () => {
 
     expect(await screen.findByText("暂无草稿")).toBeInTheDocument();
     expect(screen.queryByRole("combobox", { name: "选择草稿" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "批量属性编辑" })).not.toBeInTheDocument();
     expect(callsTo("/api/drafts/")).toHaveLength(0);
   });
 
@@ -457,6 +476,157 @@ describe("PlayersPage", () => {
 
     expect(await screen.findByText("sidecar 未连接")).toBeInTheDocument();
     expect(fetchCalls()).toHaveLength(0);
+  });
+
+  it("批量编辑提交分组、性格与显示值并在成功后刷新草稿", async () => {
+    const applied = makeAttributeResult({ changed_players: 18 });
+    stubFetch((url) => {
+      if (url.endsWith("/api/drafts")) return jsonResponse(makeDraftList([makeSummary()]));
+      if (url.endsWith("/attributes")) return jsonResponse(applied);
+      return jsonResponse(makeDraft());
+    });
+    renderPlayersPage();
+
+    const panel = await screen.findByRole("region", { name: "批量属性编辑" });
+    fireEvent.change(within(panel).getByLabelText("显示值"), { target: { value: "12" } });
+    fireEvent.click(within(panel).getByRole("checkbox", { name: "门将" }));
+    fireEvent.click(within(panel).getByRole("checkbox", { name: "包含性格" }));
+    fireEvent.click(within(panel).getByRole("button", { name: "应用" }));
+
+    await waitFor(() => expect(attributeCalls()).toHaveLength(1));
+    const [call] = attributeCalls();
+    expect(call.url).toBe("http://127.0.0.1:43210/api/drafts/draft-1/attributes");
+    expect(call.init.method).toBe("POST");
+    expect(new Headers(call.init.headers).get("Authorization")).toBe("Bearer test-token");
+    expect(new Headers(call.init.headers).get("Content-Type")).toBe("application/json");
+    expect(JSON.parse(String(call.init.body))).toEqual({
+      side: "home",
+      scope: "all",
+      operation: "bulk",
+      params: {
+        value: 12,
+        groups: ["technical", "mental", "physical"],
+        include_personality: true,
+      },
+    });
+
+    const notice = await screen.findByText("已更新 18 名球员");
+    expect(notice).toHaveAttribute("aria-live", "polite");
+    await waitFor(() => expect(detailCalls()).toHaveLength(2));
+  });
+
+  it("位置操作按客队首发提交位置与熟练度", async () => {
+    stubFetch((url) => {
+      if (url.endsWith("/api/drafts")) return jsonResponse(makeDraftList([makeSummary()]));
+      if (url.endsWith("/attributes")) return jsonResponse(makeAttributeResult({ changed_players: 11 }));
+      return jsonResponse(makeDraft());
+    });
+    renderPlayersPage();
+
+    await screen.findByRole("region", { name: "批量属性编辑" });
+    fireEvent.click(screen.getByRole("button", { name: "客队" }));
+    const panel = screen.getByRole("region", { name: "批量属性编辑" });
+    fireEvent.change(within(panel).getByRole("combobox", { name: "操作" }), {
+      target: { value: "position" },
+    });
+    fireEvent.change(within(panel).getByRole("combobox", { name: "范围" }), {
+      target: { value: "starters" },
+    });
+    fireEvent.change(within(panel).getByRole("combobox", { name: "位置" }), {
+      target: { value: "ST" },
+    });
+    fireEvent.change(within(panel).getByLabelText("位置熟练度"), { target: { value: "9" } });
+    fireEvent.click(within(panel).getByRole("button", { name: "应用" }));
+
+    await waitFor(() => expect(attributeCalls()).toHaveLength(1));
+    expect(JSON.parse(String(attributeCalls()[0].init.body))).toEqual({
+      side: "away",
+      scope: "starters",
+      operation: "position",
+      params: { position: "ST", value: 9 },
+    });
+    expect(await screen.findByText("已更新 11 名球员")).toBeInTheDocument();
+  });
+
+  it("复制操作提交当前球员范围与参考球员标识", async () => {
+    stubFetch((url) => {
+      if (url.endsWith("/api/drafts")) return jsonResponse(makeDraftList([makeSummary()]));
+      if (url.endsWith("/attributes")) return jsonResponse(makeAttributeResult({ changed_players: 1 }));
+      return jsonResponse(makeDraft());
+    });
+    renderPlayersPage();
+
+    const homeRoster = await screen.findByRole("complementary", { name: "主队球员名单" });
+    fireEvent.click(within(homeRoster).getByRole("button", { name: /主队球员 03/ }));
+    const panel = screen.getByRole("region", { name: "批量属性编辑" });
+    fireEvent.change(within(panel).getByRole("combobox", { name: "操作" }), {
+      target: { value: "copy" },
+    });
+    fireEvent.change(within(panel).getByRole("combobox", { name: "范围" }), {
+      target: { value: "player" },
+    });
+    fireEvent.change(within(panel).getByRole("combobox", { name: "参考球员" }), {
+      target: { value: "1" },
+    });
+    fireEvent.click(within(panel).getByRole("checkbox", { name: "门将" }));
+    fireEvent.click(within(panel).getByRole("checkbox", { name: "复制性格" }));
+    fireEvent.click(within(panel).getByRole("button", { name: "应用" }));
+
+    await waitFor(() => expect(attributeCalls()).toHaveLength(1));
+    expect(JSON.parse(String(attributeCalls()[0].init.body))).toEqual({
+      side: "home",
+      scope: "player",
+      player_index: 2,
+      operation: "copy",
+      params: {
+        source_uid: 101,
+        groups: ["technical", "mental", "physical"],
+        copy_personality: false,
+      },
+    });
+  });
+
+  it("撤销按钮提交 undo 操作并刷新草稿", async () => {
+    stubFetch((url) => {
+      if (url.endsWith("/api/drafts")) return jsonResponse(makeDraftList([makeSummary()]));
+      if (url.endsWith("/attributes")) return jsonResponse(makeAttributeResult());
+      return jsonResponse(makeDraft());
+    });
+    renderPlayersPage();
+
+    const panel = await screen.findByRole("region", { name: "批量属性编辑" });
+    fireEvent.click(within(panel).getByRole("button", { name: "撤销" }));
+
+    await waitFor(() => expect(attributeCalls()).toHaveLength(1));
+    expect(JSON.parse(String(attributeCalls()[0].init.body))).toEqual({
+      side: "home",
+      scope: "all",
+      operation: "undo",
+      params: {},
+    });
+    expect(await screen.findByText("已更新 23 名球员")).toBeInTheDocument();
+    await waitFor(() => expect(detailCalls()).toHaveLength(2));
+  });
+
+  it("批量编辑失败时展示后端错误信息且不刷新草稿", async () => {
+    stubFetch((url) => {
+      if (url.endsWith("/api/drafts")) return jsonResponse(makeDraftList([makeSummary()]));
+      if (url.endsWith("/attributes")) {
+        return jsonResponse(
+          { error: { code: "validation_failed", message: "属性显示值必须在 1–20 之间" } },
+          400,
+        );
+      }
+      return jsonResponse(makeDraft());
+    });
+    renderPlayersPage();
+
+    const panel = await screen.findByRole("region", { name: "批量属性编辑" });
+    fireEvent.click(within(panel).getByRole("button", { name: "应用" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("属性显示值必须在 1–20 之间");
+    expect(screen.queryByText(/已更新/)).not.toBeInTheDocument();
+    expect(detailCalls()).toHaveLength(1);
   });
 });
 
@@ -545,5 +715,31 @@ describe("草稿 API 客户端", () => {
     const [call] = fetchCalls();
     expect(call.url).toBe("http://127.0.0.1:43210/api/drafts/draft-1");
     expect(call.init.method).toBe("DELETE");
+  });
+
+  it("applyDraftAttributes 使用 POST 提交属性操作", async () => {
+    stubFetch(() => jsonResponse(makeAttributeResult({ changed_players: 7 })));
+
+    const result = await applyDraftAttributes(connection, "draft/1", {
+      side: "away",
+      scope: "player",
+      player_index: 6,
+      operation: "position",
+      params: { position: "ST", value: 9 },
+    });
+
+    expect(result.changed_players).toBe(7);
+    const [call] = fetchCalls();
+    expect(call.url).toBe("http://127.0.0.1:43210/api/drafts/draft%2F1/attributes");
+    expect(call.init.method).toBe("POST");
+    expect(new Headers(call.init.headers).get("Authorization")).toBe("Bearer test-token");
+    expect(new Headers(call.init.headers).get("Content-Type")).toBe("application/json");
+    expect(JSON.parse(String(call.init.body))).toEqual({
+      side: "away",
+      scope: "player",
+      player_index: 6,
+      operation: "position",
+      params: { position: "ST", value: 9 },
+    });
   });
 });
