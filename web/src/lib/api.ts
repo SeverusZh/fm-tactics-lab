@@ -651,6 +651,46 @@ export function checkConcurrency(
   return apiJson<ConcurrencyCheck>(connection, `/api/concurrency/check${search}`);
 }
 
+export type HostResources = {
+  cpu_count: number;
+  available_memory_bytes: number;
+  free_disk_bytes: number;
+  recommended_workers: number;
+};
+
+export type ExperimentSubmitInput = {
+  name: string | null;
+  seeds: number[];
+  draft_id: string;
+  baseline_draft_id: string | null;
+  workers: number;
+  cpu_count: number;
+  available_memory_bytes: number;
+  free_disk_bytes: number;
+  allow_oversubscription: boolean;
+};
+
+export function getHostResources(connection: Connection): Promise<HostResources> {
+  return apiJson<HostResources>(connection, "/api/system/resources");
+}
+
+export function submitExperiment(
+  connection: Connection,
+  input: ExperimentSubmitInput,
+): Promise<Job> {
+  return apiJson<Job>(connection, "/api/experiments", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export async function startExperiment(connection: Connection): Promise<Job | null> {
+  const response = await apiFetch(connection, "/api/experiments/start", { method: "POST" });
+  if (response.status === 204) return null;
+  const body = (await response.json()) as { job: Job };
+  return body.job;
+}
+
 export type SaveFileImportInput = {
   source_path: string;
   replace?: boolean;

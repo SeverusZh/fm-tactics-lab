@@ -1,18 +1,21 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { ChartBar } from "@phosphor-icons/react";
-import { useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import { useAppContext } from "../app-context";
 import { EmptyState } from "../components/EmptyState";
 import { Panel } from "../components/Panel";
 import {
   compareResults,
+  deleteJobsBatch,
   downloadJobCsv,
   getJobPoolSummary,
   getJobSummary,
   listJobRuns,
   listJobs,
   type CompareResult,
+  type Job,
+  type JobBatchDeleteResult,
   type JobMetrics,
   type JobStatus,
   type JobSummary,
@@ -22,6 +25,39 @@ import {
 const PAGE_SIZE = 20;
 const JOB_PAGE_SIZE = 50;
 const COMPARE_MAX_CANDIDATES = 5;
+const POOL_EXPANDED_KEY = "fm27lab.results.pool-expanded";
+
+function readPoolExpanded(): Record<string, boolean> {
+  try {
+    const raw = sessionStorage.getItem(POOL_EXPANDED_KEY);
+    if (raw === null) return {};
+    const parsed: unknown = JSON.parse(raw);
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return {};
+    const expanded: Record<string, boolean> = {};
+    for (const [jobId, value] of Object.entries(parsed)) {
+      if (typeof value === "boolean") expanded[jobId] = value;
+    }
+    return expanded;
+  } catch {
+    return {};
+  }
+}
+
+function writePoolExpanded(expanded: Record<string, boolean>): void {
+  try {
+    sessionStorage.setItem(POOL_EXPANDED_KEY, JSON.stringify(expanded));
+  } catch {
+    return;
+  }
+}
+
+function jobLabel(job: Job): string {
+  return job.name === null ? job.id : `${job.name}（${job.id}）`;
+}
+
+function jobCheckboxLabel(job: Job): string {
+  return job.name === null ? `选择任务 ${job.id}` : `选择任务 ${job.name}（${job.id}）`;
+}
 
 const STATUS_LABELS: Record<JobStatus, string> = {
   queued: "排队中",
@@ -145,21 +181,36 @@ function metricCards(metrics: JobMetrics, paired: JobSummary["paired"]): MetricC
 export function ResultsPage() {
   const { connection } = useAppContext();
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
+  const [jobStatus, setJobStatus] = useState<JobStatus | "">("");
   const [side, setSide] = useState<0 | 1>(0);
   const [runsOffset, setRunsOffset] = useState(0);
   const [downloading, setDownloading] = useState(false);
   const [downloadError, setDownloadError] = useState<string | null>(null);
-  const [poolExpandedJobs, setPoolExpandedJobs] = useState<Record<string, boolean>>({});
+  const [poolExpandedJobs, setPoolExpandedJobs] = useState<Record<string, boolean>>(
+    readPoolExpanded,
+  );
   const [selectedCandidateIds, setSelectedCandidateIds] = useState<ReadonlySet<string>>(
     () => new Set(),
   );
   const [compareVariant, setCompareVariant] = useState<"A" | "B">("B");
   const [compareView, setCompareView] = useState<CompareView | null>(null);
+  const [selected, setSelected] = useState<ReadonlySet<string>>(new Set<string>());
+  const [batchConfirmOpen, setBatchConfirmOpen] = useState(false);
+  const [batchResult, setBatchResult] = useState<JobBatchDeleteResult | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const compareRequestRef = useRef(0);
+  const batchTriggerRef = useRef<HTMLButtonElement>(null);
+  const batchCancelRef = useRef<HTMLButtonElement>(null);
+  const batchResultRef = useRef<HTMLDivElement>(null);
 
   const jobs = useQuery({
-    queryKey: ["results-jobs", connection?.url],
-    queryFn: () => listJobs(connection!, { limit: JOB_PAGE_SIZE, offset: 0 }),
+    queryKey: ["results-jobs", connection?.url, jobStatus],
+    queryFn: () =>
+      listJobs(connection!, {
+        status: jobStatus === "" ? undefined : jobStatus,
+        limit: JOB_PAGE_SIZE,
+        offset: 0,
+      }),
     enabled: connection !== null,
   });
 
@@ -208,6 +259,101 @@ export function ResultsPage() {
     compareRequestRef.current += 1;
   };
 
+  const selectedJobs = jobItems.filter((job) => selected.has(job.id));
+  const selectedCount = selectedJobs.length;
+  const allSelected = jobItems.length > 0 && selectedCount === jobItems.length;
+  const someSelected = selectedCount > 0 && !allSelected;
+
+  const batchRemove = useMutation({
+    mutationFn: (ids: string[]) => deleteJobsBatch(connection!, ids),
+    onSuccess: (result) => {
+      setBatchConfirmOpen(false);
+      setActionError(null);
+      setBatchResult(result);
+      setSelected(new Set<string>());
+      if (activeJobId !== null && result.deleted.includes(activeJobId)) {
+        const nextJob = jobItems.find((job) => !result.deleted.includes(job.id));
+        setSelectedJobId(nextJob?.id ?? null);
+        setRunsOffset(0);
+        setDownloadError(null);
+        setSelectedCandidateIds(new Set());
+        clearCompare();
+      }
+      void jobs.refetch();
+    },
+    onError: (error) => {
+      setBatchConfirmOpen(false);
+      setBatchResult(null);
+      setActionError(errorMessage(error));
+      batchTriggerRef.current?.focus();
+    },
+  });
+
+  useEffect(() => {
+    if (!batchConfirmOpen) return;
+    batchCancelRef.current?.focus();
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      setBatchConfirmOpen(false);
+      batchTriggerRef.current?.focus();
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [batchConfirmOpen]);
+
+  useEffect(() => {
+    if (batchResult === null) return;
+    batchResultRef.current?.focus();
+  }, [batchResult]);
+
+  useEffect(() => {
+    setSelected((previous) => {
+      if (previous.size === 0) return previous;
+      const available = new Set(jobItems.map((job) => job.id));
+      const next = new Set([...previous].filter((id) => available.has(id)));
+      return next.size === previous.size ? previous : next;
+    });
+  }, [jobs.data]);
+
+  const toggleJob = (jobId: string, checked: boolean) => {
+    setSelected((previous) => {
+      const next = new Set(previous);
+      if (checked) next.add(jobId);
+      else next.delete(jobId);
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    setSelected((previous) => {
+      const all = jobItems.length > 0 && jobItems.every((job) => previous.has(job.id));
+      return all ? new Set<string>() : new Set(jobItems.map((job) => job.id));
+    });
+  };
+
+  const clearSelection = () => {
+    setSelected(new Set<string>());
+    setBatchConfirmOpen(false);
+  };
+
+  const closeBatchConfirm = () => {
+    setBatchConfirmOpen(false);
+    batchTriggerRef.current?.focus();
+  };
+
+  const openBatchConfirm = () => {
+    if (selectedCount === 0 || connection === null || batchRemove.isPending) return;
+    setActionError(null);
+    setBatchResult(null);
+    setBatchConfirmOpen(true);
+  };
+
+  const confirmBatchDelete = () => {
+    if (connection === null || selectedJobs.length === 0 || batchRemove.isPending) return;
+    batchRemove.mutate(selectedJobs.map((job) => job.id));
+  };
+
   const toggleCandidate = (jobId: string) => {
     setSelectedCandidateIds((previous) => {
       const next = new Set(previous);
@@ -232,6 +378,19 @@ export function ResultsPage() {
     setSelectedJobId(jobId);
     setRunsOffset(0);
     setDownloadError(null);
+    setSelectedCandidateIds(new Set());
+    clearCompare();
+  };
+
+  const changeJobStatus = (next: JobStatus | "") => {
+    setJobStatus(next);
+    setSelectedJobId(null);
+    setRunsOffset(0);
+    setDownloadError(null);
+    setActionError(null);
+    setBatchResult(null);
+    setSelected(new Set<string>());
+    setBatchConfirmOpen(false);
     setSelectedCandidateIds(new Set());
     clearCompare();
   };
@@ -272,14 +431,20 @@ export function ResultsPage() {
 
   const togglePool = () => {
     if (activeJobId === null) return;
-    setPoolExpandedJobs((previous) => ({
-      ...previous,
-      [activeJobId]: !(previous[activeJobId] ?? false),
-    }));
+    const next = {
+      ...poolExpandedJobs,
+      [activeJobId]: !(poolExpandedJobs[activeJobId] ?? false),
+    };
+    setPoolExpandedJobs(next);
+    writePoolExpanded(next);
   };
 
   const refresh = () => {
     setDownloadError(null);
+    setActionError(null);
+    setBatchResult(null);
+    setBatchConfirmOpen(false);
+    setSelected(new Set<string>());
     void jobs.refetch();
     if (activeJobId !== null) {
       void summary.refetch();
@@ -692,6 +857,174 @@ export function ResultsPage() {
       </section>
     ) : null;
 
+  const jobSelection =
+    jobItems.length === 0 && jobStatus === "" ? null : (
+      <section className="results-jobs" aria-label="实验任务">
+        <div className="results-jobs-head">
+          <label className="field results-jobs-filter">
+            状态筛选
+            <select
+              value={jobStatus}
+              onChange={(event) => changeJobStatus(event.target.value as JobStatus | "")}
+            >
+              <option value="">全部</option>
+              {(Object.keys(STATUS_LABELS) as JobStatus[]).map((status) => (
+                <option key={status} value={status}>
+                  {STATUS_LABELS[status]}
+                </option>
+              ))}
+            </select>
+          </label>
+          <div className="results-jobs-actions" aria-busy={batchRemove.isPending}>
+            <label className="results-jobs-select-all">
+              <input
+                type="checkbox"
+                aria-label="全选当前筛选结果"
+                aria-checked={allSelected ? "true" : someSelected ? "mixed" : "false"}
+                checked={allSelected}
+                disabled={jobItems.length === 0}
+                ref={(element) => {
+                  if (element !== null) element.indeterminate = someSelected;
+                }}
+                onChange={toggleSelectAll}
+              />
+              <span>全选</span>
+            </label>
+            <button
+              className="button small"
+              type="button"
+              onClick={clearSelection}
+              disabled={selectedCount === 0}
+            >
+              清空选择
+            </button>
+            <span className="jobs-bulk-count" aria-live="polite">
+              已选 {selectedCount} 个任务
+            </span>
+            <button
+              ref={batchTriggerRef}
+              className="button small danger"
+              type="button"
+              disabled={selectedCount === 0 || batchRemove.isPending}
+              onClick={openBatchConfirm}
+            >
+              {batchRemove.isPending ? "删除中…" : "删除所选"}
+            </button>
+          </div>
+        </div>
+        {jobItems.length === 0 ? (
+          jobs.isPending ? null : <p className="results-note">当前筛选条件下没有任务。</p>
+        ) : (
+          <ul className="results-jobs-list">
+            {jobItems.map((job) => {
+              const current = job.id === activeJobId;
+              return (
+                <li className="results-job" key={job.id}>
+                  <input
+                    type="checkbox"
+                    className="results-job-check"
+                    aria-label={jobCheckboxLabel(job)}
+                    checked={selected.has(job.id)}
+                    onChange={(event) => toggleJob(job.id, event.target.checked)}
+                  />
+                  <button
+                    className="results-job-name"
+                    type="button"
+                    aria-current={current ? "true" : undefined}
+                    onClick={() => changeJob(job.id)}
+                  >
+                    {job.name ?? job.id}
+                  </button>
+                  <span className="jobs-id">{job.id}</span>
+                  <span className="badge" data-tone={STATUS_TONES[job.status]}>
+                    {STATUS_LABELS[job.status]}
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+        {batchConfirmOpen ? (
+          <div
+            className="jobs-batch-confirm"
+            role="alertdialog"
+            aria-label="确认批量删除"
+            aria-describedby="results-batch-confirm-summary"
+          >
+            <p id="results-batch-confirm-summary">将删除 {selectedJobs.length} 个任务：</p>
+            <ul className="jobs-batch-confirm-list">
+              {selectedJobs.map((job) => (
+                <li key={job.id}>
+                  {jobLabel(job)}（总场数 {job.total}）
+                </li>
+              ))}
+            </ul>
+            <p>运行中或排队中的任务会被服务端跳过，失败原因会显示在结果中。</p>
+            <div className="jobs-batch-confirm-actions">
+              <button
+                className="button small danger"
+                type="button"
+                disabled={batchRemove.isPending || selectedJobs.length === 0}
+                onClick={confirmBatchDelete}
+              >
+                确认删除
+              </button>
+              <button
+                ref={batchCancelRef}
+                className="button small"
+                type="button"
+                onClick={closeBatchConfirm}
+              >
+                放弃
+              </button>
+            </div>
+          </div>
+        ) : null}
+      </section>
+    );
+
+  const batchFeedback = (
+    <>
+      {actionError === null ? null : (
+        <div className="inline-alert" role="alert">
+          {actionError}
+        </div>
+      )}
+      {batchResult === null ? null : (
+        <div
+          ref={batchResultRef}
+          className="jobs-batch-result"
+          role="status"
+          aria-label="批量删除结果"
+          tabIndex={-1}
+        >
+          <p className="jobs-notice">已删除 {batchResult.deleted.length} 个任务</p>
+          {batchResult.deleted.length === 0 ? null : (
+            <ul className="jobs-batch-deleted" aria-label="已删除任务 ID">
+              {batchResult.deleted.map((jobId) => (
+                <li key={jobId}>{jobId}</li>
+              ))}
+            </ul>
+          )}
+          {batchResult.failed.length === 0 ? null : (
+            <div className="inline-alert" role="alert">
+              <div>
+                <p>{batchResult.failed.length} 个任务删除失败</p>
+                <ul className="jobs-batch-failures">
+                  {batchResult.failed.map((failure) => (
+                    <li key={failure.id}>
+                      {failure.id}：{failure.error}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </>
+  );
+
   let body: ReactNode;
   if (connection === null) {
     body = (
@@ -701,46 +1034,41 @@ export function ResultsPage() {
         description="连接 sidecar 后可以查看实验结果、切换视角并导出 CSV。"
       />
     );
-  } else if (jobs.isPending) {
+  } else if (jobs.isError) {
+    body = (
+      <>
+        {batchFeedback}
+        <div className="inline-alert" role="alert">
+          <span>{errorMessage(jobs.error)}</span>
+          <button className="button small" type="button" onClick={() => void jobs.refetch()}>
+            重试
+          </button>
+        </div>
+      </>
+    );
+  } else if (jobs.isPending && jobStatus === "") {
     body = (
       <p className="jobs-loading" role="status">
         正在加载实验任务…
       </p>
     );
-  } else if (jobs.isError) {
+  } else if (jobItems.length === 0 && jobStatus === "") {
     body = (
-      <div className="inline-alert" role="alert">
-        <span>{errorMessage(jobs.error)}</span>
-        <button className="button small" type="button" onClick={() => void jobs.refetch()}>
-          重试
-        </button>
-      </div>
-    );
-  } else if (jobItems.length === 0) {
-    body = (
-      <EmptyState
-        icon={ChartBar}
-        title="尚无实验结果"
-        description="提交实验后，这里会显示批次摘要、A/B 指标、配对差值与逐场记录。"
-      />
+      <>
+        {batchFeedback}
+        <EmptyState
+          icon={ChartBar}
+          title="尚无实验结果"
+          description="提交实验后，这里会显示批次摘要、A/B 指标、配对差值与逐场记录。"
+        />
+      </>
     );
   } else {
     body = (
       <>
+        {jobSelection}
+        {batchFeedback}
         <div className="results-toolbar">
-          <label className="field results-select">
-            实验任务
-            <select
-              value={activeJobId ?? ""}
-              onChange={(event) => changeJob(event.target.value)}
-            >
-              {jobItems.map((job) => (
-                <option key={job.id} value={job.id}>
-                  {job.name ?? job.id}
-                </option>
-              ))}
-            </select>
-          </label>
           <div className="segmented" role="group" aria-label="统计视角">
             <button type="button" aria-pressed={side === 0} onClick={() => changeSide(0)}>
               主队
@@ -773,8 +1101,20 @@ export function ResultsPage() {
             {downloadError}
           </div>
         )}
-        {summaryContent}
-        {compareContent}
+        {activeJobId === null ? (
+          jobs.isPending ? null : (
+            <EmptyState
+              icon={ChartBar}
+              title="没有符合条件的任务"
+              description="切换状态筛选，或提交新的实验后再查看结果。"
+            />
+          )
+        ) : (
+          <>
+            {summaryContent}
+            {compareContent}
+          </>
+        )}
       </>
     );
   }

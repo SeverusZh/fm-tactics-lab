@@ -1,6 +1,7 @@
 import {
   Archive,
   ChartBar,
+  Flask,
   GearSix,
   ListChecks,
   SquaresFour,
@@ -14,6 +15,7 @@ const links = [
   { to: "/tactics", label: "战术板", icon: SquaresFour },
   { to: "/players", label: "球员属性", icon: UsersThree },
   { to: "/library", label: "存档战术库", icon: Archive },
+  { to: "/experiments", label: "实验", icon: Flask },
   { to: "/results", label: "实验结果", icon: ChartBar },
   { to: "/jobs", label: "任务管理", icon: ListChecks },
   { to: "/settings", label: "设置", icon: GearSix },

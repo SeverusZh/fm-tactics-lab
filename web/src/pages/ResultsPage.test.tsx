@@ -71,6 +71,10 @@ function callsTo(fragment: string) {
   return fetchCalls().filter((call) => call.url.includes(fragment));
 }
 
+function runsOffsets(fragment: string): (string | null)[] {
+  return callsTo(fragment).map((call) => new URL(call.url).searchParams.get("offset"));
+}
+
 function deferred<T>() {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>((settle) => {
@@ -363,10 +367,29 @@ function captureDownload() {
   return { blobs, objectUrls, clicked, createObjectURL, revokeObjectURL, clickSpy };
 }
 
+function jobRegion(): HTMLElement {
+  return screen.getByRole("region", { name: "实验任务" });
+}
+
+function jobButton(name: string): HTMLElement {
+  return within(jobRegion()).getByRole("button", { name });
+}
+
+function jobCheckbox(name: string, jobId: string): HTMLElement {
+  return within(jobRegion()).getByRole("checkbox", { name: `选择任务 ${name}（${jobId}）` });
+}
+
+function jobActions(): HTMLElement {
+  const actions = jobRegion().querySelector(".results-jobs-actions");
+  if (!(actions instanceof HTMLElement)) throw new Error("未找到任务批量操作区");
+  return actions;
+}
+
 describe("ResultsPage", () => {
   beforeEach(() => {
     fetchMock.mockReset();
     vi.stubGlobal("fetch", fetchMock);
+    sessionStorage.clear();
   });
 
   afterEach(() => {
@@ -386,11 +409,9 @@ describe("ResultsPage", () => {
 
     pending.resolve(jsonResponse({ items: [makeJob()], total: 1, next_offset: null }));
 
-    expect(await screen.findByLabelText("实验任务")).toBeInTheDocument();
+    expect(await screen.findByRole("region", { name: "实验任务" })).toBeInTheDocument();
     expect(await screen.findByText("场次")).toBeInTheDocument();
-    expect(
-      within(screen.getByLabelText("实验任务")).getByRole("option", { name: "批次一" }),
-    ).toBeInTheDocument();
+    expect(jobButton("批次一")).toHaveAttribute("aria-current", "true");
 
     const [listCall] = callsTo("/api/jobs?");
     expect(listCall.url).toBe("http://127.0.0.1:43210/api/jobs?limit=50&offset=0");
@@ -495,8 +516,8 @@ describe("ResultsPage", () => {
     );
     renderResultsPage();
 
-    await screen.findByLabelText("实验任务");
-    fireEvent.change(screen.getByLabelText("实验任务"), { target: { value: "job-2" } });
+    await screen.findByRole("region", { name: "实验任务" });
+    fireEvent.click(jobButton("批次二"));
 
     await waitFor(() => expect(callsTo("/job-2/summary")).toHaveLength(1));
     expect(callsTo("/job-2/summary")[0].url).toBe(
@@ -563,7 +584,7 @@ describe("ResultsPage", () => {
     expect(
       screen.getByText("提交实验后，这里会显示批次摘要、A/B 指标、配对差值与逐场记录。"),
     ).toBeInTheDocument();
-    expect(screen.queryByLabelText("实验任务")).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "实验任务" })).not.toBeInTheDocument();
     expect(callsTo("/summary")).toHaveLength(0);
   });
 
@@ -587,7 +608,7 @@ describe("ResultsPage", () => {
     expect(alert).toHaveTextContent("任务列表查询失败");
     fireEvent.click(screen.getByRole("button", { name: "重试" }));
 
-    expect(await screen.findByLabelText("实验任务")).toBeInTheDocument();
+    expect(await screen.findByRole("region", { name: "实验任务" })).toBeInTheDocument();
     expect(attempts).toBe(2);
   });
 
@@ -771,7 +792,7 @@ describe("ResultsPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "展开" }));
     expect(screen.getByText("客队战术 1")).toBeInTheDocument();
 
-    fireEvent.change(screen.getByLabelText("实验任务"), { target: { value: "job-2" } });
+    fireEvent.click(jobButton("批次二"));
 
     expect(await screen.findByRole("button", { name: "展开" })).toBeInTheDocument();
     expect(screen.queryByText("客队战术 B")).not.toBeInTheDocument();
@@ -779,7 +800,7 @@ describe("ResultsPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "展开" }));
     expect(await screen.findByText("客队战术 B")).toBeInTheDocument();
 
-    fireEvent.change(screen.getByLabelText("实验任务"), { target: { value: "job-1" } });
+    fireEvent.click(jobButton("批次一"));
 
     expect(await screen.findByRole("button", { name: "折叠" })).toBeInTheDocument();
     expect(screen.getByText("客队战术 1")).toBeInTheDocument();
@@ -805,7 +826,7 @@ describe("ResultsPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "展开" }));
     expect(screen.getByText("客队战术 1")).toBeInTheDocument();
 
-    fireEvent.change(screen.getByLabelText("实验任务"), { target: { value: "job-2" } });
+    fireEvent.click(jobButton("批次二"));
 
     expect(await screen.findByText("正在加载客队战术池…")).toBeInTheDocument();
     expect(screen.queryByText("客队战术 1")).not.toBeInTheDocument();
@@ -875,6 +896,7 @@ describe("ResultsPage 任务对比", () => {
   beforeEach(() => {
     fetchMock.mockReset();
     vi.stubGlobal("fetch", fetchMock);
+    sessionStorage.clear();
   });
 
   afterEach(() => {
@@ -1165,7 +1187,7 @@ describe("ResultsPage 任务对比", () => {
     fireEvent.click(within(comparePanel()).getByRole("button", { name: "开始对比" }));
     await screen.findByRole("table", { name: "任务对比结果" });
 
-    fireEvent.change(screen.getByLabelText("实验任务"), { target: { value: "job-2" } });
+    fireEvent.click(jobButton("批次二"));
 
     await waitFor(() => expect(comparePanel()).toHaveTextContent("批次二"));
     expect(screen.queryByRole("table", { name: "任务对比结果" })).not.toBeInTheDocument();
@@ -1204,6 +1226,460 @@ describe("ResultsPage 任务对比", () => {
 
     expect(candidateCheckbox("批次七", "job-7")).toBeDisabled();
     expect(candidateCheckbox("批次二", "job-2")).toBeEnabled();
+  });
+});
+
+describe("ResultsPage 任务多选与批量删除", () => {
+  beforeEach(() => {
+    fetchMock.mockReset();
+    vi.stubGlobal("fetch", fetchMock);
+    sessionStorage.clear();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it("全选只覆盖当前筛选结果并支持清空选择", async () => {
+    const allJobs = {
+      items: [
+        makeJob(),
+        makeJob({ id: "job-2", name: "批次二", status: "running" }),
+        makeJob({ id: "job-3", name: "批次三", status: "queued" }),
+      ],
+      total: 3,
+      next_offset: null,
+    };
+    const completedJobs = { items: [makeJob()], total: 1, next_offset: null };
+    const base = resultsFetch({ jobs: allJobs });
+    stubFetch((url, init) => {
+      if (!url.includes("/api/jobs?")) return base(url, init);
+      return jsonResponse(url.includes("status=completed") ? completedJobs : allJobs);
+    });
+    renderResultsPage();
+
+    expect(await screen.findByRole("region", { name: "实验任务" })).toBeInTheDocument();
+    await waitFor(() => expect(within(jobRegion()).getAllByRole("listitem")).toHaveLength(3));
+    expect(within(jobRegion()).getByText("已选 0 个任务")).toBeInTheDocument();
+
+    fireEvent.click(within(jobRegion()).getByRole("checkbox", { name: "全选当前筛选结果" }));
+
+    expect(within(jobRegion()).getByText("已选 3 个任务")).toBeInTheDocument();
+    expect(jobCheckbox("批次一", "job-1")).toBeChecked();
+    expect(jobCheckbox("批次二", "job-2")).toBeChecked();
+    expect(jobCheckbox("批次三", "job-3")).toBeChecked();
+
+    fireEvent.click(within(jobRegion()).getByRole("button", { name: "清空选择" }));
+
+    expect(within(jobRegion()).getByText("已选 0 个任务")).toBeInTheDocument();
+    expect(jobCheckbox("批次一", "job-1")).not.toBeChecked();
+
+    fireEvent.change(within(jobRegion()).getByLabelText("状态筛选"), {
+      target: { value: "completed" },
+    });
+
+    expect(within(jobRegion()).getByText("已选 0 个任务")).toBeInTheDocument();
+    await waitFor(() => expect(within(jobRegion()).getAllByRole("listitem")).toHaveLength(1));
+    expect(jobCheckbox("批次一", "job-1")).not.toBeChecked();
+    const filtered = await waitFor(() => {
+      const call = callsTo("/api/jobs?").find((item) => item.url.includes("status=completed"));
+      if (call === undefined) throw new Error("未发送状态筛选请求");
+      return call;
+    });
+    expect(filtered.url).toBe(
+      "http://127.0.0.1:43210/api/jobs?status=completed&limit=50&offset=0",
+    );
+
+    fireEvent.click(within(jobRegion()).getByRole("checkbox", { name: "全选当前筛选结果" }));
+
+    expect(within(jobRegion()).getByText("已选 1 个任务")).toBeInTheDocument();
+    expect(jobCheckbox("批次一", "job-1")).toBeChecked();
+  });
+
+  it("点击任务名切换当前任务而不改变选择", async () => {
+    stubFetch(
+      resultsFetch({
+        jobs: {
+          items: [makeJob(), makeJob({ id: "job-2", name: "批次二" })],
+          total: 2,
+          next_offset: null,
+        },
+        summary: (url) => {
+          const jobId = url.includes("job-2") ? "job-2" : "job-1";
+          return makeSummary({
+            job: makeJob({ id: jobId, name: jobId === "job-2" ? "批次二" : "批次一" }),
+          });
+        },
+      }),
+    );
+    renderResultsPage();
+
+    await screen.findByRole("region", { name: "实验任务" });
+    fireEvent.click(jobCheckbox("批次二", "job-2"));
+
+    expect(jobCheckbox("批次二", "job-2")).toBeChecked();
+    expect(jobButton("批次一")).toHaveAttribute("aria-current", "true");
+
+    fireEvent.click(jobButton("批次二"));
+
+    await waitFor(() => expect(callsTo("/job-2/summary")).toHaveLength(1));
+    expect(jobButton("批次二")).toHaveAttribute("aria-current", "true");
+    expect(jobButton("批次一")).not.toHaveAttribute("aria-current");
+    expect(jobCheckbox("批次二", "job-2")).toBeChecked();
+    expect(jobCheckbox("批次一", "job-1")).not.toBeChecked();
+  });
+
+  it("删除确认列出任务明细且确认前不发送删除请求", async () => {
+    stubFetch(
+      resultsFetch({
+        jobs: {
+          items: [makeJob(), makeJob({ id: "job-2", name: "批次二", total: 6 })],
+          total: 2,
+          next_offset: null,
+        },
+      }),
+    );
+    renderResultsPage();
+
+    await screen.findByRole("region", { name: "实验任务" });
+    fireEvent.click(jobCheckbox("批次一", "job-1"));
+    fireEvent.click(jobCheckbox("批次二", "job-2"));
+    fireEvent.click(within(jobRegion()).getByRole("button", { name: "删除所选" }));
+
+    const dialog = screen.getByRole("alertdialog", { name: "确认批量删除" });
+    expect(within(dialog).getByText(/将删除 2 个任务/)).toBeInTheDocument();
+    expect(within(dialog).getAllByRole("listitem")).toHaveLength(2);
+    expect(within(dialog).getByText("批次一（job-1）（总场数 4）")).toBeInTheDocument();
+    expect(within(dialog).getByText("批次二（job-2）（总场数 6）")).toBeInTheDocument();
+    expect(
+      callsTo("/api/jobs").filter((call) => call.init.method === "DELETE"),
+    ).toHaveLength(0);
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "放弃" }));
+
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    expect(
+      callsTo("/api/jobs").filter((call) => call.init.method === "DELETE"),
+    ).toHaveLength(0);
+    expect(within(jobRegion()).getByText("已选 2 个任务")).toBeInTheDocument();
+  });
+
+  it("确认框可用 Escape 关闭且保留选择", async () => {
+    stubFetch(resultsFetch());
+    renderResultsPage();
+
+    await screen.findByRole("region", { name: "实验任务" });
+    fireEvent.click(jobCheckbox("批次一", "job-1"));
+    fireEvent.click(within(jobRegion()).getByRole("button", { name: "删除所选" }));
+    expect(screen.getByRole("alertdialog")).toBeInTheDocument();
+
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    expect(jobCheckbox("批次一", "job-1")).toBeChecked();
+    expect(
+      callsTo("/api/jobs").filter((call) => call.init.method === "DELETE"),
+    ).toHaveLength(0);
+  });
+
+  it("确认后批量删除展示已删除与失败原因，当前任务被删后切到剩余首个", async () => {
+    const initialJobs = {
+      items: [
+        makeJob(),
+        makeJob({ id: "job-2", name: "批次二", status: "running" }),
+        makeJob({ id: "job-3", name: "批次三" }),
+      ],
+      total: 3,
+      next_offset: null,
+    };
+    const remainingJobs = {
+      items: [
+        makeJob({ id: "job-2", name: "批次二", status: "running" }),
+        makeJob({ id: "job-3", name: "批次三" }),
+      ],
+      total: 2,
+      next_offset: null,
+    };
+    let listCalls = 0;
+    const base = resultsFetch({
+      summary: (url) => {
+        const jobId = url.includes("job-2") ? "job-2" : url.includes("job-3") ? "job-3" : "job-1";
+        if (jobId === "job-2") return makeSummary({ job: makeJob({ id: "job-2", name: "批次二" }) });
+        if (jobId === "job-3") return makeSummary({ job: makeJob({ id: "job-3", name: "批次三" }) });
+        return makeSummary();
+      },
+    });
+    stubFetch((url, init) => {
+      if ((init.method ?? "GET") === "DELETE") {
+        return jsonResponse({
+          deleted: ["job-1"],
+          failed: [{ id: "job-2", error: "任务正在运行或排队" }],
+        });
+      }
+      if (url.includes("/api/jobs?")) {
+        listCalls += 1;
+        return jsonResponse(listCalls === 1 ? initialJobs : remainingJobs);
+      }
+      return base(url, init);
+    });
+    renderResultsPage();
+
+    await screen.findByRole("region", { name: "实验任务" });
+    await waitFor(() => expect(callsTo("/job-1/summary")).toHaveLength(1));
+    fireEvent.click(jobCheckbox("批次一", "job-1"));
+    fireEvent.click(jobCheckbox("批次二", "job-2"));
+    fireEvent.click(within(jobRegion()).getByRole("button", { name: "删除所选" }));
+    fireEvent.click(screen.getByRole("button", { name: "确认删除" }));
+
+    const deleteCall = await waitFor(() => {
+      const call = callsTo("/api/jobs").find((item) => item.init.method === "DELETE");
+      if (call === undefined) throw new Error("未发送批量删除请求");
+      return call;
+    });
+    expect(JSON.parse(String(deleteCall.init.body))).toEqual({ ids: ["job-1", "job-2"] });
+
+    const result = await screen.findByRole("status", { name: "批量删除结果" });
+    expect(within(result).getByText("已删除 1 个任务")).toBeInTheDocument();
+    expect(within(result).getByText("job-1")).toBeInTheDocument();
+    expect(within(result).getByText("job-2：任务正在运行或排队")).toBeInTheDocument();
+
+    await waitFor(() =>
+      expect(within(jobRegion()).queryByText("批次一")).not.toBeInTheDocument(),
+    );
+    expect(jobButton("批次二")).toHaveAttribute("aria-current", "true");
+    await waitFor(() => expect(callsTo("/job-2/summary")).toHaveLength(1));
+  });
+
+  it("批量删除请求失败时保留选择并展示错误", async () => {
+    const base = resultsFetch();
+    stubFetch((url, init) => {
+      if ((init.method ?? "GET") === "DELETE") {
+        return jsonResponse(
+          { error: { code: "batch_delete_failed", message: "批量删除失败" } },
+          400,
+        );
+      }
+      return base(url, init);
+    });
+    renderResultsPage();
+
+    await screen.findByRole("region", { name: "实验任务" });
+    fireEvent.click(jobCheckbox("批次一", "job-1"));
+    fireEvent.click(within(jobRegion()).getByRole("button", { name: "删除所选" }));
+    fireEvent.click(screen.getByRole("button", { name: "确认删除" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("批量删除失败");
+    expect(jobCheckbox("批次一", "job-1")).toBeChecked();
+    expect(within(jobRegion()).getByText("已选 1 个任务")).toBeInTheDocument();
+    expect(screen.queryByRole("status", { name: "批量删除结果" })).not.toBeInTheDocument();
+  });
+
+  it("批量删除进行中展示忙碌状态", async () => {
+    const pending = deferred<Response>();
+    const base = resultsFetch({
+      jobs: {
+        items: [makeJob(), makeJob({ id: "job-2", name: "批次二" })],
+        total: 2,
+        next_offset: null,
+      },
+    });
+    stubFetch((url, init) => {
+      if ((init.method ?? "GET") === "DELETE") return pending.promise;
+      return base(url, init);
+    });
+    renderResultsPage();
+
+    await screen.findByRole("region", { name: "实验任务" });
+    fireEvent.click(jobCheckbox("批次一", "job-1"));
+    fireEvent.click(within(jobRegion()).getByRole("button", { name: "删除所选" }));
+    fireEvent.click(screen.getByRole("button", { name: "确认删除" }));
+
+    expect(await within(jobRegion()).findByRole("button", { name: "删除中…" })).toBeDisabled();
+    expect(jobActions()).toHaveAttribute("aria-busy", "true");
+    expect(screen.getByRole("button", { name: "确认删除" })).toBeDisabled();
+
+    await act(async () => {
+      pending.resolve(jsonResponse({ deleted: ["job-1"], failed: [] }));
+    });
+
+    expect(await screen.findByRole("status", { name: "批量删除结果" })).toHaveTextContent(
+      "已删除 1 个任务",
+    );
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    expect(within(jobRegion()).getByRole("button", { name: "删除所选" })).toBeDisabled();
+    expect(jobActions()).toHaveAttribute("aria-busy", "false");
+  });
+
+  it("删除当前任务后立即切换基线并重置分页候选与下载错误", async () => {
+    const initialJobs = {
+      items: [
+        makeJob(),
+        makeJob({ id: "job-2", name: "批次二" }),
+        makeJob({ id: "job-3", name: "批次三" }),
+      ],
+      total: 3,
+      next_offset: null,
+    };
+    const remainingJobs = {
+      items: [makeJob(), makeJob({ id: "job-3", name: "批次三" })],
+      total: 2,
+      next_offset: null,
+    };
+    const pendingList = deferred<Response>();
+    let listCalls = 0;
+    const base = resultsFetch({
+      summary: (url) => {
+        const jobId = url.includes("/job-2/") ? "job-2" : url.includes("/job-3/") ? "job-3" : "job-1";
+        const name = jobId === "job-2" ? "批次二" : jobId === "job-3" ? "批次三" : "批次一";
+        return makeSummary({ job: makeJob({ id: jobId, name }) });
+      },
+      runs: (url) => {
+        const jobId = url.includes("/job-2/") ? "job-2" : url.includes("/job-3/") ? "job-3" : "job-1";
+        const offset = Number(new URL(url).searchParams.get("offset") ?? "0");
+        if (jobId === "job-2" && offset === 0) {
+          return {
+            items: [makeRun({ job_id: "job-2" }), makeRun({ job_id: "job-2", sequence: 2 })],
+            total: 40,
+            next_offset: 20,
+          };
+        }
+        return { items: [makeRun({ job_id: jobId })], total: 1, next_offset: null };
+      },
+    });
+    stubFetch((url, init) => {
+      if ((init.method ?? "GET") === "DELETE") {
+        return jsonResponse({ deleted: ["job-2"], failed: [] });
+      }
+      if (url.includes("/export.csv")) {
+        return jsonResponse({ error: { code: "export_failed", message: "导出失败" } }, 500);
+      }
+      if (url.includes("/api/jobs?")) {
+        listCalls += 1;
+        return listCalls === 1 ? jsonResponse(initialJobs) : pendingList.promise;
+      }
+      return base(url, init);
+    });
+    renderResultsPage();
+
+    await screen.findByRole("region", { name: "实验任务" });
+    await waitFor(() => expect(callsTo("/job-1/summary")).toHaveLength(1));
+    const job1RunsBefore = runsOffsets("/job-1/runs").length;
+
+    fireEvent.click(jobButton("批次二"));
+
+    await waitFor(() => expect(callsTo("/job-2/summary")).toHaveLength(1));
+    expect(jobButton("批次二")).toHaveAttribute("aria-current", "true");
+    expect(jobButton("批次一")).not.toHaveAttribute("aria-current");
+
+    fireEvent.click(screen.getByRole("button", { name: "下载 CSV" }));
+    expect(await screen.findByText("导出失败")).toBeInTheDocument();
+
+    const nextPage = await screen.findByRole("button", { name: "下一页" });
+    await waitFor(() => expect(nextPage).toBeEnabled());
+    fireEvent.click(nextPage);
+    await waitFor(() => expect(runsOffsets("/job-2/runs")).toContain("20"));
+
+    fireEvent.click(candidateCheckbox("批次三", "job-3"));
+    expect(candidateCheckbox("批次三", "job-3")).toBeChecked();
+    fireEvent.click(screen.getByRole("button", { name: "开始对比" }));
+    expect(await screen.findByRole("table", { name: "任务对比结果" })).toBeInTheDocument();
+
+    fireEvent.click(jobCheckbox("批次二", "job-2"));
+    fireEvent.click(within(jobRegion()).getByRole("button", { name: "删除所选" }));
+    fireEvent.click(screen.getByRole("button", { name: "确认删除" }));
+
+    await waitFor(() => expect(jobButton("批次一")).toHaveAttribute("aria-current", "true"));
+    expect(jobButton("批次二")).toBeInTheDocument();
+    expect(jobButton("批次二")).not.toHaveAttribute("aria-current");
+    expect(screen.queryByRole("table", { name: "任务对比结果" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "开始对比" })).toBeDisabled();
+    expect(candidateCheckbox("批次三", "job-3")).not.toBeChecked();
+    expect(screen.queryByText("导出失败")).not.toBeInTheDocument();
+
+    await waitFor(() =>
+      expect(runsOffsets("/job-1/runs").length).toBeGreaterThan(job1RunsBefore),
+    );
+    expect(runsOffsets("/job-1/runs")).not.toContain("20");
+    expect(runsOffsets("/job-1/runs")[runsOffsets("/job-1/runs").length - 1]).toBe("0");
+
+    await act(async () => {
+      pendingList.resolve(jsonResponse(remainingJobs));
+    });
+
+    const result = await screen.findByRole("status", { name: "批量删除结果" });
+    expect(result).toHaveTextContent("已删除 1 个任务");
+    await waitFor(() =>
+      expect(within(jobRegion()).queryByText("批次二")).not.toBeInTheDocument(),
+    );
+    expect(jobButton("批次一")).toHaveAttribute("aria-current", "true");
+    expect(jobCheckbox("批次三", "job-3")).not.toBeChecked();
+  });
+
+  it("客队战术池折叠状态跨组件卸载保留且只写入折叠布尔", async () => {
+    stubFetch(resultsFetch({ pool: makePoolSummary() }));
+    const first = renderResultsPage();
+
+    expect(await screen.findByText("客队战术池")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "展开" }));
+    expect(screen.getByText("客队战术 1")).toBeInTheDocument();
+
+    const stored: unknown = JSON.parse(
+      String(sessionStorage.getItem("fm27lab.results.pool-expanded")),
+    );
+    expect(stored).toEqual({ "job-1": true });
+    expect(localStorage.length).toBe(0);
+
+    first.unmount();
+
+    renderResultsPage();
+
+    expect(await screen.findByText("客队战术池")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "折叠" })).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
+    expect(await screen.findByText("客队战术 1")).toBeInTheDocument();
+  });
+
+  it.each([
+    ["非法 JSON", "not-json{"],
+    ["JSON 字符串", '"展开"'],
+    ["JSON 数字", "42"],
+    ["JSON null", "null"],
+    ["JSON 数组", "[true]"],
+    ["非布尔字段值", JSON.stringify({ "job-1": "true", "job-2": 1, "job-3": null })],
+  ])("客队战术池折叠状态在会话数据为%s时回退默认折叠", async (_label, raw) => {
+    sessionStorage.setItem("fm27lab.results.pool-expanded", raw);
+    stubFetch(resultsFetch({ pool: makePoolSummary() }));
+    renderResultsPage();
+
+    expect(await screen.findByRole("region", { name: "实验任务" })).toBeInTheDocument();
+    expect(await screen.findByText("客队战术池")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "展开" })).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByText("客队战术 1")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "折叠" })).not.toBeInTheDocument();
+  });
+
+  it("任务列表与批量操作提供窄屏可换行结构", async () => {
+    stubFetch(resultsFetch());
+    renderResultsPage();
+
+    const region = await screen.findByRole("region", { name: "实验任务" });
+    expect(region).toHaveClass("results-jobs");
+    expect(region.querySelector(".results-jobs-head")).not.toBeNull();
+    expect(region.querySelector(".results-jobs-actions")).not.toBeNull();
+    expect(region.querySelector(".results-jobs-list")).not.toBeNull();
+    expect(within(region).getByRole("button", { name: "删除所选" })).toBeInTheDocument();
+    expect(within(region).getAllByRole("listitem")[0]).toHaveClass("results-job");
+    expect(
+      (await screen.findByRole("table", { name: "逐场记录" })).closest(".jobs-table-wrap"),
+    ).not.toBeNull();
+
+    fireEvent.click(jobCheckbox("批次一", "job-1"));
+    fireEvent.click(within(region).getByRole("button", { name: "删除所选" }));
+
+    expect(screen.getByRole("alertdialog")).toHaveClass("jobs-batch-confirm");
   });
 });
 
