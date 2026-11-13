@@ -12,6 +12,7 @@ import { TopBar } from "./components/TopBar";
 import { apiJson, type Health } from "./lib/api";
 import type { Connection } from "./lib/connection";
 import { loadConnection } from "./lib/connection";
+import { JobsPage } from "./pages/JobsPage";
 import { LibraryPage } from "./pages/LibraryPage";
 import { PlayersPage } from "./pages/PlayersPage";
 import { ResultsPage } from "./pages/ResultsPage";
@@ -23,6 +24,7 @@ const titles: Record<string, string> = {
   "/players": "球员属性",
   "/library": "存档战术库",
   "/results": "实验结果",
+  "/jobs": "任务管理",
   "/settings": "设置",
 };
 
@@ -140,6 +142,7 @@ export function App() {
               <Route path="/players" element={<PlayersPage />} />
               <Route path="/library" element={<LibraryPage />} />
               <Route path="/results" element={<ResultsPage />} />
+              <Route path="/jobs" element={<JobsPage />} />
               <Route path="/settings" element={<SettingsPage />} />
               <Route path="*" element={<Navigate to="/tactics" replace />} />
             </Routes>

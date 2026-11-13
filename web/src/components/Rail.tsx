@@ -2,6 +2,7 @@ import {
   Archive,
   ChartBar,
   GearSix,
+  ListChecks,
   SquaresFour,
   UsersThree,
 } from "@phosphor-icons/react";
@@ -14,6 +15,7 @@ const links = [
   { to: "/players", label: "球员属性", icon: UsersThree },
   { to: "/library", label: "存档战术库", icon: Archive },
   { to: "/results", label: "实验结果", icon: ChartBar },
+  { to: "/jobs", label: "任务管理", icon: ListChecks },
   { to: "/settings", label: "设置", icon: GearSix },
 ];
 
