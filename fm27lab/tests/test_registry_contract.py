@@ -38,6 +38,8 @@ EXPECTED_NAMES = frozenset(
         "drafts_attributes",
         "drafts_export_fmf",
         "drafts_import_fmf",
+        "drafts_apply_roster",
+        "drafts_undo_roster",
         "jobs_list",
         "jobs_get",
         "jobs_create",
@@ -56,6 +58,8 @@ EXPECTED_NAMES = frozenset(
         "saves_update",
         "saves_delete",
         "saves_import",
+        "saves_squad",
+        "saves_import_payload",
         "artifacts_list",
         "artifacts_get",
         "artifacts_content",
@@ -239,3 +243,29 @@ def test_draft_attributes_capability_registers_http_only_surface():
     assert item.http == ("POST", "/api/drafts/{draft_id}/attributes")
     assert item.cli is None
     assert item.mcp is None
+
+
+def test_save_import_capabilities_register_http_only_surfaces():
+    file_import = capability("saves_import")
+    assert file_import.http == ("POST", "/api/saves/import")
+    assert file_import.cli is None
+    assert file_import.mcp is None
+    squad = capability("saves_squad")
+    assert squad.http == ("GET", "/api/saves/{save_id}/squad")
+    assert squad.cli is None
+    assert squad.mcp is None
+    payload_import = capability("saves_import_payload")
+    assert payload_import.http == ("POST", "/api/saves/{save_id}/import")
+    assert payload_import.cli == ("saves", "import")
+    assert payload_import.mcp == "saves_import"
+
+
+def test_draft_roster_capabilities_register_http_only_surfaces():
+    apply_roster = capability("drafts_apply_roster")
+    assert apply_roster.http == ("POST", "/api/drafts/{draft_id}/apply-roster")
+    assert apply_roster.cli is None
+    assert apply_roster.mcp is None
+    undo_roster = capability("drafts_undo_roster")
+    assert undo_roster.http == ("POST", "/api/drafts/{draft_id}/undo-roster")
+    assert undo_roster.cli is None
+    assert undo_roster.mcp is None

@@ -12,6 +12,7 @@ from fm27lab.interfaces.http.routes import (
     jobs,
     pools,
     results,
+    save_import,
     saves,
     settings,
     system,
@@ -28,6 +29,7 @@ def register_routes(app: FastAPI) -> None:
     jobs.register(app)
     experiments.register(app)
     results.register(app)
+    save_import.register(app)
     saves.register(app)
     artifacts.register(app)
     settings.register(app)

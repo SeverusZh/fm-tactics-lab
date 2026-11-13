@@ -289,6 +289,23 @@ def _default_references(selected: Sequence[Mapping[str, Any]], key: str) -> tupl
     return tuple(pool[:3])
 
 
+def _remap_references(
+    values: Any,
+    old_uids: Sequence[Any],
+    uid_to_new: Mapping[Any, int],
+) -> list[int]:
+    if not isinstance(values, (list, tuple)):
+        return []
+    mapped: list[int] = []
+    for old_index in values:
+        if type(old_index) is not int or not 0 <= old_index < len(old_uids):
+            continue
+        new_index = uid_to_new.get(old_uids[old_index])
+        if new_index is not None and new_index not in mapped:
+            mapped.append(new_index)
+    return mapped
+
+
 def normalize_roster(
     players: Sequence[Mapping[str, Any]],
     lineup: Sequence[int] = (),
@@ -540,29 +557,108 @@ def apply_saved_roster(
 
     uid_to_new = {player["source_uid"]: index for index, player in enumerate(new_players)}
 
-    def remap(values: Any) -> list[int]:
-        if not isinstance(values, (list, tuple)):
-            return []
-        mapped: list[int] = []
-        for old_index in values:
-            if type(old_index) is not int or not 0 <= old_index < len(old_uids):
-                continue
-            new_index = uid_to_new.get(old_uids[old_index])
-            if new_index is not None and new_index not in mapped:
-                mapped.append(new_index)
-        return mapped
-
-    result["captains"] = remap(team.get("captains", []))
+    result["captains"] = _remap_references(team.get("captains", []), old_uids, uid_to_new)
     takers = team.get("takers") or {}
     if not isinstance(takers, Mapping):
         raise ValueError("主罚名单格式无效")
-    result["takers"] = {key: remap(values) for key, values in takers.items()}
+    result["takers"] = {
+        key: _remap_references(values, old_uids, uid_to_new) for key, values in takers.items()
+    }
     raw_setpieces = team.get("setpieces") or {}
     if not isinstance(raw_setpieces, Mapping):
         raise ValueError("定位球配置格式无效")
     setpieces = copy.deepcopy(dict(raw_setpieces))
     priorities = setpieces.get("role_priorities")
     if isinstance(priorities, Mapping):
-        setpieces["role_priorities"] = {key: remap(values) for key, values in priorities.items()}
+        setpieces["role_priorities"] = {
+            key: _remap_references(values, old_uids, uid_to_new) for key, values in priorities.items()
+        }
+    result["setpieces"] = setpieces
+    return result
+
+
+def apply_roster_selection(
+    team: Mapping[str, Any],
+    *,
+    starters: Sequence[Mapping[str, Any] | None],
+    substitutes: Sequence[Mapping[str, Any] | None],
+) -> dict[str, Any]:
+    """Apply a partial saved selection to a match team.
+
+    starters and substitutes map one-to-one onto slots 0-10 and 11-22. None or
+    the player already occupying the target slot keeps that slot; every other
+    entry is validated as a new real player. Native IDs stay tied to the target
+    slots and captain/taker/set-piece indices are remapped by source_uid.
+    """
+    if not isinstance(team, Mapping):
+        raise ValueError("球队格式无效")
+    team_players = team.get("players")
+    if not isinstance(team_players, list) or len(team_players) < MATCH_ROSTER_SIZE:
+        raise ValueError("比赛球队至少需要 23 名球员")
+    old_players = list(team_players[:MATCH_ROSTER_SIZE])
+    if any(not isinstance(item, Mapping) for item in old_players):
+        raise ValueError("比赛球队球员格式无效")
+    old_uids = [item.get("source_uid") for item in old_players]
+    if any(not _valid_uid(uid) for uid in old_uids) or len(set(old_uids)) != MATCH_ROSTER_SIZE:
+        raise ValueError("比赛球队球员 source_uid 必须唯一")
+    new_players = [copy.deepcopy(dict(item)) for item in old_players]
+    for values, offset, count, label in (
+        (starters, 0, STARTERS, "首发"),
+        (substitutes, STARTERS, BENCH, "替补"),
+    ):
+        if not isinstance(values, (list, tuple)) or len(values) != count:
+            raise ValueError(f"{label}必须恰好 {count} 名球员")
+        for position, entry in enumerate(values):
+            slot = offset + position
+            if entry is None:
+                continue
+            if not isinstance(entry, Mapping):
+                raise ValueError(f"{label}第 {position + 1} 名球员格式无效")
+            if entry.get("source_uid") == old_uids[slot]:
+                continue
+            _validate_saved_player(entry, slot)
+            target = copy.deepcopy(dict(entry))
+            target.pop("generated", None)
+            target["name"] = entry["name"].strip()
+            if "native_id" in old_players[slot]:
+                target["native_id"] = old_players[slot]["native_id"]
+            else:
+                target.pop("native_id", None)
+            new_players[slot] = target
+    new_uids = [item.get("source_uid") for item in new_players]
+    if any(not _valid_uid(uid) for uid in new_uids) or len(set(new_uids)) != MATCH_ROSTER_SIZE:
+        raise ValueError("阵容球员 source_uid 必须唯一")
+
+    result = copy.deepcopy(dict(team))
+    result["players"] = new_players
+    result["roster_size"] = MATCH_ROSTER_SIZE
+    result["lineup"] = list(range(STARTERS))
+    if "substitutes" in result:
+        result["substitutes"] = list(range(STARTERS, MATCH_ROSTER_SIZE))
+    result.pop("squad", None)
+
+    uid_to_new = {player["source_uid"]: index for index, player in enumerate(new_players)}
+    captains = _remap_references(team.get("captains", []), old_uids, uid_to_new)
+    result["captains"] = (
+        captains or [index for index in range(STARTERS) if not new_players[index].get("generated")][:1]
+    )
+    raw_takers = team.get("takers") or {}
+    if not isinstance(raw_takers, Mapping):
+        raise ValueError("主罚名单格式无效")
+    result["takers"] = {
+        key: _remap_references(values, old_uids, uid_to_new) or list(_default_references(new_players, key))
+        for key, values in raw_takers.items()
+    }
+    raw_setpieces = team.get("setpieces") or {}
+    if not isinstance(raw_setpieces, Mapping):
+        raise ValueError("定位球配置格式无效")
+    setpieces = copy.deepcopy(dict(raw_setpieces))
+    priorities = setpieces.get("role_priorities")
+    if isinstance(priorities, Mapping):
+        setpieces["role_priorities"] = {
+            key: _remap_references(values, old_uids, uid_to_new)
+            or list(_default_references(new_players, key))
+            for key, values in priorities.items()
+        }
     result["setpieces"] = setpieces
     return result

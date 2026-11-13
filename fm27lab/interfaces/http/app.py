@@ -13,6 +13,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from fm27lab.adapters.catalog_native.catalog import CatalogRepository
 from fm27lab.adapters.engine_native.capabilities import parse_capabilities, plan_runtime
 from fm27lab.adapters.fmf import FmfCodec
+from fm27lab.adapters.save_fmsave import FmsaveReader
 from fm27lab.adapters.storage_sqlite.db import Database
 from fm27lab.adapters.storage_sqlite.idempotency import IdempotencyRepository
 from fm27lab.adapters.storage_sqlite.repositories import DraftRepository, JobRepository, PoolRepository
@@ -25,6 +26,7 @@ from fm27lab.application.experiments import ExperimentService
 from fm27lab.application.idempotency import IdempotencyService
 from fm27lab.application.jobs import JobService
 from fm27lab.application.pools import PoolService
+from fm27lab.application.save_import import SaveImportService
 from fm27lab.application.saves import SavesService
 from fm27lab.config import Settings
 from fm27lab.interfaces.http.common import (
@@ -95,6 +97,7 @@ def create_app(
     job_service: JobService | None = None,
     experiment_service: ExperimentService | None = None,
     saves_service: SavesService | None = None,
+    save_import_service: SaveImportService | None = None,
     idempotency_service: IdempotencyService | None = None,
     events: EventPublisher | None = None,
     catalog_service: CatalogService | None = None,
@@ -121,6 +124,11 @@ def create_app(
         publisher=app.state.events,
     )
     app.state.saves = saves_service or SavesService(SavesRepository(database))
+    app.state.save_import = save_import_service or SaveImportService(
+        app.state.saves,
+        app.state.drafts,
+        FmsaveReader,
+    )
     app.state.catalog_service = catalog_service or CatalogService(
         CatalogRepository(settings.engine_root, settings.data_dir)
     )

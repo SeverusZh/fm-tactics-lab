@@ -4,7 +4,7 @@ import copy
 
 import pytest
 
-from fm27lab.domain.roster import apply_saved_roster
+from fm27lab.domain.roster import apply_roster_selection, apply_saved_roster
 
 
 def player(uid, position=7, ability=10, name=None):
@@ -248,3 +248,209 @@ def test_setpiece_routines_without_role_priorities_are_preserved():
     original["setpieces"] = {"routines": {"1": [{"name": "corner"}]}}
     result = apply_saved_roster(original, roster())
     assert result["setpieces"] == original["setpieces"]
+
+
+def generated(uid):
+    attributes = [10] * 69
+    attributes[7] = 15
+    return {
+        "source_uid": uid,
+        "name": f"占位 {uid}",
+        "attributes": attributes,
+        "ability": 10,
+        "generated": True,
+    }
+
+
+def selection_players(base, count):
+    return [player(base + index, 0 if index == 0 else 12, ability=12) for index in range(count)]
+
+
+def test_apply_roster_selection_writes_starters_and_keeps_bench_placeholders():
+    original = team()
+    original["players"][11:] = [generated(f"generated:{index}") for index in range(1, 13)]
+    snapshot = copy.deepcopy(original)
+
+    result = apply_roster_selection(
+        original,
+        starters=selection_players(300, 11),
+        substitutes=snapshot["players"][11:],
+    )
+
+    assert original == snapshot
+    assert [item["source_uid"] for item in result["players"][:11]] == list(range(300, 311))
+    assert [item["native_id"] for item in result["players"][:11]] == list(range(5000, 5011))
+    assert result["players"][11:] == snapshot["players"][11:]
+    assert all(item["generated"] is True for item in result["players"][11:])
+    assert result["lineup"] == list(range(11))
+    assert result["roster_size"] == 23
+    assert result["captains"] == [0]
+    assert result["takers"]["penalties"] == [1, 2, 3]
+    assert result["takers"]["corners"] == [1, 2, 3]
+    assert result["setpieces"]["role_priorities"]["8"] == [1, 2, 3]
+    assert result["setpieces"]["routines"] == {}
+
+
+def test_apply_roster_selection_writes_bench_and_keeps_placeholder_starters():
+    original = team()
+    original["players"][:11] = [generated(f"generated:{index}") for index in range(1, 12)]
+    snapshot = copy.deepcopy(original)
+
+    result = apply_roster_selection(
+        original,
+        starters=snapshot["players"][:11],
+        substitutes=[player(400 + index, 7, ability=12) for index in range(12)],
+    )
+
+    assert original == snapshot
+    assert result["players"][:11] == snapshot["players"][:11]
+    assert [item["source_uid"] for item in result["players"][11:]] == list(range(400, 412))
+    assert [item["native_id"] for item in result["players"][11:]] == list(range(5011, 5023))
+    assert result["lineup"] == list(range(11))
+    assert result["captains"] == [5]
+    assert result["takers"]["penalties"] == [6]
+    assert result["takers"]["corners"] == [7]
+    assert result["setpieces"]["role_priorities"]["8"] == [8]
+
+
+def test_apply_roster_selection_keeps_unprovided_slots():
+    original = team()
+    snapshot = copy.deepcopy(original)
+    starters = [player(300 + index) if index % 2 == 0 else None for index in range(11)]
+
+    result = apply_roster_selection(original, starters=starters, substitutes=[None] * 12)
+
+    assert original == snapshot
+    assert [item["source_uid"] for item in result["players"][:11]] == [
+        300 + index if index % 2 == 0 else 100 + index for index in range(11)
+    ]
+    assert result["players"][11:] == snapshot["players"][11:]
+
+
+def test_apply_roster_selection_requires_eleven_starters_and_twelve_substitutes():
+    starters = selection_players(300, 11)
+    substitutes = [player(400 + index) for index in range(12)]
+    for value in (starters[:10], starters + [player(999)], None, "bad"):
+        with pytest.raises(ValueError, match="11"):
+            apply_roster_selection(team(), starters=value, substitutes=substitutes)
+    for value in (substitutes[:11], substitutes + [player(999)], None, "bad"):
+        with pytest.raises(ValueError, match="12"):
+            apply_roster_selection(team(), starters=starters, substitutes=value)
+
+
+def test_apply_roster_selection_rejects_duplicate_source_uids():
+    starters = selection_players(300, 11)
+    substitutes = [player(400 + index) for index in range(12)]
+    duplicated = [copy.deepcopy(item) for item in starters]
+    duplicated[1] = copy.deepcopy(duplicated[0])
+    with pytest.raises(ValueError, match="唯一"):
+        apply_roster_selection(team(), starters=duplicated, substitutes=substitutes)
+    colliding = [copy.deepcopy(item) for item in substitutes]
+    colliding[0]["source_uid"] = 300
+    with pytest.raises(ValueError, match="唯一"):
+        apply_roster_selection(team(), starters=starters, substitutes=colliding)
+
+
+def test_apply_roster_selection_rejects_generated_placeholders_as_new_players():
+    starters = selection_players(300, 11)
+    substitutes = [player(400 + index) for index in range(12)]
+    replaced_starter = list(starters)
+    replaced_starter[2] = generated("generated:99")
+    with pytest.raises(ValueError, match="generated"):
+        apply_roster_selection(team(), starters=replaced_starter, substitutes=substitutes)
+    replaced_substitute = list(substitutes)
+    replaced_substitute[0] = generated("generated:98")
+    with pytest.raises(ValueError, match="generated"):
+        apply_roster_selection(team(), starters=starters, substitutes=replaced_substitute)
+
+
+def test_apply_roster_selection_falls_back_references_removed_from_selection():
+    starters = [
+        player(300, 0, ability=1),
+        player(301, 12, ability=20),
+        player(302, 10, ability=15),
+        player(303, 7, ability=5),
+        player(304, 2, ability=18),
+        player(305, 8, ability=14),
+        player(306, 9, ability=12),
+        player(307, 12, ability=4),
+        player(308, 12, ability=3),
+        player(309, 12, ability=2),
+        player(310, 12, ability=1),
+    ]
+    substitutes = [player(400 + index, 7, ability=1) for index in range(12)]
+
+    result = apply_roster_selection(team(), starters=starters, substitutes=substitutes)
+
+    assert result["captains"] == [0]
+    assert result["takers"]["penalties"] == [1, 2, 6]
+    assert result["takers"]["corners"] == [4, 5, 6]
+    assert result["setpieces"]["role_priorities"]["8"] == [1, 4, 2]
+    assert result["setpieces"]["routines"] == {}
+
+
+def test_apply_roster_selection_keeps_native_id_by_target_slot():
+    original = team()
+    original["players"][3].pop("native_id")
+    starters = selection_players(300, 11)
+    starters[3]["native_id"] = 9999
+    starters[4]["name"] = "  New Name  "
+
+    result = apply_roster_selection(original, starters=starters, substitutes=[None] * 12)
+
+    assert "native_id" not in result["players"][3]
+    assert result["players"][4]["native_id"] == 5004
+    assert result["players"][4]["name"] == "New Name"
+    assert "generated" not in result["players"][0]
+    assert [item["native_id"] for item in result["players"][:11] if "native_id" in item] == [
+        5000,
+        5001,
+        5002,
+        5004,
+        5005,
+        5006,
+        5007,
+        5008,
+        5009,
+        5010,
+    ]
+
+
+def test_apply_roster_selection_rejects_invalid_team_and_selection_entries():
+    starters = selection_players(300, 11)
+    substitutes = [player(400 + index) for index in range(12)]
+    with pytest.raises(ValueError, match="23"):
+        apply_roster_selection(team(22), starters=starters, substitutes=substitutes)
+    duplicate_team = team()
+    duplicate_team["players"][1]["source_uid"] = duplicate_team["players"][0]["source_uid"]
+    with pytest.raises(ValueError, match="唯一"):
+        apply_roster_selection(duplicate_team, starters=starters, substitutes=substitutes)
+    bad_entry = list(starters)
+    bad_entry[0] = "not-a-player"
+    with pytest.raises(ValueError, match="格式"):
+        apply_roster_selection(team(), starters=bad_entry, substitutes=substitutes)
+    bad_player = [copy.deepcopy(item) for item in starters]
+    bad_player[0]["attributes"] = [10] * 68
+    with pytest.raises(ValueError, match="69"):
+        apply_roster_selection(team(), starters=bad_player, substitutes=substitutes)
+
+
+def test_apply_roster_selection_returns_new_team_and_drops_squad():
+    original = team()
+    original["phases"] = [{"phase": 0}]
+    original["squad"] = ["stale"]
+    snapshot = copy.deepcopy(original)
+    starters = selection_players(300, 11)
+
+    result = apply_roster_selection(original, starters=starters, substitutes=[None] * 12)
+
+    assert original == snapshot
+    assert result is not original
+    assert result["name"] == "Home"
+    assert result["phases"] == [{"phase": 0}]
+    assert "squad" not in result
+    assert result["players"][0] == {
+        **starters[0],
+        "name": starters[0]["name"].strip(),
+        "native_id": 5000,
+    }
