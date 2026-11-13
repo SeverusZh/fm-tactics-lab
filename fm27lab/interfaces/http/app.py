@@ -10,11 +10,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from fm27lab.adapters.catalog_native.catalog import CatalogRepository
 from fm27lab.adapters.engine_native.capabilities import parse_capabilities, plan_runtime
 from fm27lab.adapters.storage_sqlite.db import Database
 from fm27lab.adapters.storage_sqlite.idempotency import IdempotencyRepository
 from fm27lab.adapters.storage_sqlite.repositories import DraftRepository, JobRepository, PoolRepository
 from fm27lab.adapters.storage_sqlite.saves import SavesRepository
+from fm27lab.application.catalog import CatalogService
 from fm27lab.application.drafts import DraftService
 from fm27lab.application.events import EventPublisher
 from fm27lab.application.experiments import ExperimentService
@@ -90,6 +92,7 @@ def create_app(
     saves_service: SavesService | None = None,
     idempotency_service: IdempotencyService | None = None,
     events: EventPublisher | None = None,
+    catalog_service: CatalogService | None = None,
 ) -> FastAPI:
     app = FastAPI(
         title="FM Tactics Lab Sidecar",
@@ -111,6 +114,9 @@ def create_app(
         publisher=app.state.events,
     )
     app.state.saves = saves_service or SavesService(SavesRepository(database))
+    app.state.catalog_service = catalog_service or CatalogService(
+        CatalogRepository(settings.engine_root, settings.data_dir)
+    )
     app.state.idempotency = idempotency_service or IdempotencyService(IdempotencyRepository(database))
     app.state.shutdown = shutdown
 

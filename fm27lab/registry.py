@@ -26,6 +26,7 @@ SYSTEM_CLI_COMMANDS: frozenset[tuple[str, ...]] = frozenset(
 )
 CAPABILITY_GROUPS: dict[str, tuple[str, str | None]] = {
     "artifacts": ("/api/artifacts", "artifact_id"),
+    "catalog": ("/api/catalog", None),
     "concurrency": ("/api/concurrency", None),
     "drafts": ("/api/drafts", "draft_id"),
     "experiments": ("/api/experiments", "job_id"),
@@ -50,6 +51,7 @@ ACTION_METHODS: dict[str, str] = {
     "put": "PUT",
     "resume": "POST",
     "runs": "GET",
+    "snapshot": "GET",
     "start": "POST",
     "submit": "POST",
     "summary": "GET",
@@ -311,6 +313,7 @@ CAPABILITIES: tuple[Capability, ...] = (
         None,
         None,
     ),
+    Capability("catalog_snapshot", "读取运行时目录快照", ("GET", "/api/catalog"), None, None),
 )
 
 

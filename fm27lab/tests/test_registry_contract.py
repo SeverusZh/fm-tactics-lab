@@ -67,6 +67,7 @@ EXPECTED_NAMES = frozenset(
         "experiments_start",
         "experiments_cancel",
         "experiments_resume",
+        "catalog_snapshot",
     }
 )
 

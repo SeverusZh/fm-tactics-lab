@@ -4,6 +4,7 @@ from fastapi import FastAPI
 
 from fm27lab.interfaces.http.routes import (
     artifacts,
+    catalog,
     drafts,
     experiments,
     jobs,
@@ -17,6 +18,7 @@ from fm27lab.interfaces.http.routes import (
 
 def register_routes(app: FastAPI) -> None:
     system.register(app)
+    catalog.register(app)
     pools.register(app)
     drafts.register(app)
     jobs.register(app)
