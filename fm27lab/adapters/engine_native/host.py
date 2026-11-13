@@ -27,11 +27,13 @@ import threading
 import time
 import uuid
 from collections.abc import Callable, Mapping, Sequence
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from fm27lab.adapters.engine_native.capabilities import parse_capabilities, plan_runtime
+from fm27lab.domain.concurrency import validate_workers
 from fm27lab.ports.engine import EngineCapabilities, RuntimePlan
 
 CAPABILITY_TIMEOUT_SECONDS = 10.0
@@ -196,6 +198,36 @@ def _signal(cancellation: _Cancellation | None) -> None:
         pass
 
 
+class _ProgressMerger:
+    """Merge the active descriptors of every lane and serialize progress emission."""
+
+    def __init__(
+        self,
+        lanes: int,
+        emit: Callable[[Sequence[Mapping[str, Any]]], None],
+    ) -> None:
+        self._lanes = lanes
+        self._emit = emit
+        self._lock = threading.Lock()
+        self._active: dict[int, list[dict[str, Any]]] = {}
+        self._last: list[dict[str, Any]] | None = None
+
+    def active(self, lane: int, descriptors: Sequence[Mapping[str, Any]]) -> None:
+        with self._lock:
+            if descriptors:
+                self._active[lane] = [dict(descriptor) for descriptor in descriptors]
+            else:
+                self._active.pop(lane, None)
+            merged: list[dict[str, Any]] = []
+            for index in sorted(self._active):
+                for descriptor in self._active[index]:
+                    merged.append({"lane": index, **descriptor} if self._lanes > 1 else descriptor)
+            if merged == self._last:
+                return
+            self._last = merged
+            self._emit(merged)
+
+
 class NativeEngineHost:
     """EnginePort implementation that runs batches through the native worker protocol.
 
@@ -208,7 +240,11 @@ class NativeEngineHost:
     cancel request or a session failure before the host process is terminated
     and then killed. A timed out or abnormally exited session is retried with
     only its unresolved matches; matches already accepted are never re-run.
-    cancel() requests the current session to stop through --cancel-event and
+    workers splits the batch into the legacy lanes (tasks[index::effective])
+    that share one ThreadPoolExecutor; every lane chunks its own matches by
+    jobs_per_native_session, retries and reports failures independently, and the
+    user callbacks are serialized so lanes never interleave results or progress.
+    cancel() requests every running session to stop through --cancel-event and
     keeps results already accepted. Diagnostics such as an unconfirmed Steam
     cleanup are appended to the diagnostics list.
     """
@@ -223,6 +259,7 @@ class NativeEngineHost:
         timeout_seconds: float = 190.0,
         retries: int = 1,
         cleanup_seconds: float = CLEANUP_SECONDS,
+        workers: int = 1,
     ) -> None:
         self._root = Path(root)
         self._work_dir = Path(work_dir)
@@ -235,6 +272,7 @@ class NativeEngineHost:
             raise ValueError("重试次数必须为非负整数")
         if type(cleanup_seconds) not in (int, float) or not cleanup_seconds > 0:
             raise ValueError("清理宽限必须为正数")
+        self._workers = validate_workers(workers)
         if plan is not None:
             if not isinstance(plan, RuntimePlan):
                 raise ValueError("运行时计划无效")
@@ -245,8 +283,9 @@ class NativeEngineHost:
         self._cleanup_seconds = float(cleanup_seconds)
         self._retries = retries
         self._lock = threading.Lock()
+        self._callbacks_lock = threading.Lock()
         self._cancelled = threading.Event()
-        self._cancellation: _Cancellation | None = None
+        self._cancellations: dict[str, _Cancellation] = {}
         self._capabilities: EngineCapabilities | None = None
         self.diagnostics: list[dict[str, Any]] = []
         self._plan = plan
@@ -279,19 +318,58 @@ class NativeEngineHost:
             return
         self._cancelled.clear()
         budget = self._plan.jobs_per_native_session
-        pending = list(prepared)
+        lanes = min(self._workers, len(prepared))
+
+        def emit_result(result: Mapping[str, Any]) -> None:
+            with self._callbacks_lock:
+                on_result(result)
+
+        def emit_progress(descriptors: Sequence[Mapping[str, Any]]) -> None:
+            with self._callbacks_lock:
+                on_progress(descriptors)
+
+        progress = _ProgressMerger(lanes, emit_progress)
+        lane_tasks = [prepared[index::lanes] for index in range(lanes)]
+        error: BaseException | None = None
+        with ThreadPoolExecutor(max_workers=lanes, thread_name_prefix="fm27-engine-lane") as executor:
+            futures = [
+                executor.submit(self._run_lane, index, lane_tasks[index], budget, emit_result, progress)
+                for index in range(lanes)
+            ]
+            try:
+                for future in as_completed(futures):
+                    caught = future.exception()
+                    if caught is not None and error is None:
+                        error = caught
+                        self.cancel()
+            except BaseException:
+                self.cancel()
+                raise
+        if error is not None:
+            raise error
+
+    def cancel(self) -> None:
+        """Request cancellation of every running session and keep accepted results."""
+        with self._lock:
+            self._cancelled.set()
+            cancellations = list(self._cancellations.values())
+        for cancellation in cancellations:
+            _signal(cancellation)
+
+    def _run_lane(
+        self,
+        lane: int,
+        tasks: list[_Task],
+        budget: int | None,
+        on_result: Callable[[Mapping[str, Any]], None],
+        progress: _ProgressMerger,
+    ) -> None:
+        pending = list(tasks)
         while pending and not self._cancelled.is_set():
             take = len(pending) if budget is None else min(budget, len(pending))
             chunk = pending[:take]
             pending = pending[take:]
-            self._run_chunk(chunk, on_result, on_progress)
-
-    def cancel(self) -> None:
-        """Request cancellation of the running session and keep accepted results."""
-        with self._lock:
-            self._cancelled.set()
-            cancellation = self._cancellation
-        _signal(cancellation)
+            self._run_chunk(chunk, on_result, progress, lane)
 
     def _probe_capabilities(self) -> EngineCapabilities:
         command = [*self._executable_prefix(), "--worker-capabilities"]
@@ -330,14 +408,15 @@ class NativeEngineHost:
         self,
         chunk: list[_Task],
         on_result: Callable[[Mapping[str, Any]], None],
-        on_progress: Callable[[Sequence[Mapping[str, Any]]], None],
+        progress: _ProgressMerger,
+        lane: int,
     ) -> None:
         remaining = list(chunk)
         attempts = self._retries + 1
         for attempt in range(attempts):
             if self._cancelled.is_set():
                 return
-            outcome = self._run_session(remaining, attempt, on_result, on_progress)
+            outcome = self._run_session(remaining, attempt, on_result, progress, lane)
             if outcome.ok or outcome.cancelled:
                 return
             if not outcome.unresolved:
@@ -361,7 +440,8 @@ class NativeEngineHost:
         tasks: list[_Task],
         attempt: int,
         on_result: Callable[[Mapping[str, Any]], None],
-        on_progress: Callable[[Sequence[Mapping[str, Any]]], None],
+        progress: _ProgressMerger,
+        lane: int,
     ) -> _SessionOutcome:
         try:
             session_dir = self._session_directory()
@@ -378,8 +458,6 @@ class NativeEngineHost:
         startup = session_dir / SESSION_LOG_NAME
         process: subprocess.Popen | None = None
         try:
-            with self._lock:
-                self._cancellation = cancellation
             command = [
                 *self._executable_prefix(),
                 "--worker-manifest",
@@ -405,21 +483,20 @@ class NativeEngineHost:
                 raise RuntimeError(f"原生宿主启动失败：{error}") from error
             try:
                 outcome = self._consume_session(
-                    tasks, outputs, startup, process, cancellation, on_result, on_progress
+                    tasks, outputs, startup, process, cancellation, on_result, progress, lane
                 )
             except BaseException:
                 self._force_stop(process, cancellation)
                 raise
         finally:
-            with self._lock:
-                self._cancellation = None
+            self._release_cancellation(cancellation)
             cancellation.close()
             if process is not None:
                 if process.stdout is not None:
                     process.stdout.close()
                 if process.stderr is not None:
                     process.stderr.close()
-        on_progress([])
+        progress.active(lane, [])
         return outcome
 
     def _force_stop(self, process: subprocess.Popen, cancellation: _Cancellation) -> None:
@@ -446,7 +523,8 @@ class NativeEngineHost:
         process: subprocess.Popen,
         cancellation: _Cancellation,
         on_result: Callable[[Mapping[str, Any]], None],
-        on_progress: Callable[[Sequence[Mapping[str, Any]]], None],
+        progress: _ProgressMerger,
+        lane: int,
     ) -> _SessionOutcome:
         total = len(tasks)
         collector = _StderrCollector()
@@ -511,7 +589,7 @@ class NativeEngineHost:
             if descriptor != last_active:
                 last_active = descriptor
                 try:
-                    on_progress(descriptor)
+                    progress.active(lane, descriptor)
                 except BaseException as error:
                     fatal = error
                     break
@@ -857,7 +935,15 @@ class NativeEngineHost:
     def _new_cancellation(self, session_dir: Path) -> _Cancellation:
         if os.name == "nt" and self._executable.suffix.lower() == ".exe":
             try:
-                return _WindowsEventCancellation()
+                cancellation: _Cancellation = _WindowsEventCancellation()
             except OSError as error:
                 raise RuntimeError(f"无法创建原生取消事件：{error}") from error
-        return _PortableCancellation(session_dir / CANCEL_EVENT_NAME)
+        else:
+            cancellation = _PortableCancellation(session_dir / CANCEL_EVENT_NAME)
+        with self._lock:
+            self._cancellations[str(cancellation.name)] = cancellation
+        return cancellation
+
+    def _release_cancellation(self, cancellation: _Cancellation) -> None:
+        with self._lock:
+            self._cancellations.pop(str(cancellation.name), None)

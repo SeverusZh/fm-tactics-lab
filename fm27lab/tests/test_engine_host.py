@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import time
@@ -52,6 +53,7 @@ SUCCESS_FIELDS = {
 }
 FAILED_FIELDS = {"variant", "seed", "failed", "error", "failure_phase", "log_path"}
 STDERR_MARKER = "fake simulator stderr diagnostic"
+WORKER_ERROR = "并行数必须为 1–256 的整数"
 
 
 def make_host(
@@ -63,6 +65,7 @@ def make_host(
     retries: int = 0,
     timeout_seconds: float = 190.0,
     cleanup_seconds: float = 15.0,
+    workers: int = 1,
 ) -> NativeEngineHost:
     root = tmp_path / name / "engine"
     work = tmp_path / name / "work"
@@ -76,6 +79,7 @@ def make_host(
         timeout_seconds=timeout_seconds,
         cleanup_seconds=cleanup_seconds,
         retries=retries,
+        workers=workers,
     )
 
 
@@ -119,6 +123,41 @@ def run_batch(
     return results, progress
 
 
+def normalized_results(results: list[dict[str, object]]) -> list[dict[str, object]]:
+    """Results without volatile session paths, ordered by variant and seed."""
+    return sorted(
+        ({key: value for key, value in result.items() if key != "log_path"} for result in results),
+        key=lambda item: (item["variant"], item["seed"]),
+    )
+
+
+def fake_simulator_processes() -> list[int]:
+    """Fake simulator child processes of this test process through the proc filesystem."""
+    proc_root = Path("/proc")
+    if not proc_root.is_dir():
+        pytest.skip("当前平台无法枚举残留进程")
+    marker = str(FAKE_SIMULATOR).encode("utf-8")
+    parent = str(os.getpid())
+    found: list[int] = []
+    for entry in proc_root.iterdir():
+        if not entry.name.isdigit():
+            continue
+        try:
+            command = (entry / "cmdline").read_bytes()
+            status = (entry / "status").read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        if marker not in command:
+            continue
+        owner = next(
+            (line.split(":", 1)[1].strip() for line in status.splitlines() if line.startswith("PPid:")),
+            "",
+        )
+        if owner == parent:
+            found.append(int(entry.name))
+    return found
+
+
 def manifest_paths(tmp_path: Path, name: str = "host") -> list[Path]:
     directory = tmp_path / name / "work" / "worker_sessions"
     if not directory.exists():
@@ -138,7 +177,27 @@ def test_package_exports_native_engine_host():
     assert ExportedNativeEngineHost is NativeEngineHost
 
 
-def test_import_does_not_require_windows_apis():
+def test_import_succeeds_without_windows_runtime():
+    program = "\n".join(
+        [
+            "import sys",
+            "import fm27lab.adapters.engine_native as package",
+            "import fm27lab.adapters.engine_native.host",
+            "assert package.NativeEngineHost is fm27lab.adapters.engine_native.host.NativeEngineHost",
+        ]
+    )
+    completed = subprocess.run(
+        [sys.executable, "-c", program],
+        cwd=REPOSITORY_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stderr
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows 解释器会预加载 ctypes")
+def test_import_does_not_load_windows_only_apis():
     program = "\n".join(
         [
             "import sys",
@@ -692,3 +751,184 @@ def test_compatibility_failure_terminates_unresponsive_host(tmp_path, monkeypatc
         )
     assert time.monotonic() - started < 1.0
     assert results == []
+
+
+@pytest.mark.parametrize("workers", [0, 257, -1, True, False, 1.0, 2.5, "4", None])
+def test_constructor_rejects_invalid_worker_counts(tmp_path, workers):
+    root = tmp_path / "root"
+    work = tmp_path / "work"
+    root.mkdir()
+    work.mkdir()
+    with pytest.raises(ValueError, match=WORKER_ERROR):
+        NativeEngineHost(root, work, executable=FAKE_SIMULATOR, workers=workers)
+
+
+def test_invalid_worker_count_is_rejected_before_engine_probe(tmp_path, monkeypatch):
+    probe_log = tmp_path / "probe.log"
+    monkeypatch.setenv("FAKE_SIMULATOR_PROBE_LOG", str(probe_log))
+    root = tmp_path / "root"
+    work = tmp_path / "work"
+    root.mkdir()
+    work.mkdir()
+    with pytest.raises(ValueError, match=WORKER_ERROR):
+        NativeEngineHost(root, work, executable=FAKE_SIMULATOR, workers=0)
+    assert not probe_log.exists()
+
+
+def test_explicit_single_worker_matches_default_batch(tmp_path):
+    tasks = [make_task(tmp_path, variant="A", seed=seed) for seed in range(6)]
+    default_host = make_host(tmp_path, name="default")
+    single_host = make_host(tmp_path, name="single", workers=1)
+    default_results, default_progress = run_batch(default_host, tasks)
+    single_results, single_progress = run_batch(single_host, tasks)
+    assert normalized_results(default_results) == normalized_results(single_results)
+    assert default_progress[-1] == []
+    assert single_progress[-1] == []
+    assert len(manifest_paths(tmp_path, "default")) == 1
+    assert len(manifest_paths(tmp_path, "single")) == 1
+
+
+def test_worker_lanes_clamp_to_task_count(tmp_path):
+    host = make_host(tmp_path, workers=256)
+    tasks = [make_task(tmp_path, variant="A", seed=seed) for seed in range(3)]
+    results, _ = run_batch(host, tasks)
+    assert sorted(result["seed"] for result in results) == [0, 1, 2]
+    assert len(manifest_paths(tmp_path)) == 3
+
+
+def test_worker_lanes_preserve_result_identity(tmp_path):
+    tasks = [make_task(tmp_path, variant=variant, seed=seed) for variant in ("A", "B") for seed in range(6)]
+    expected_pairs = {(task["variant"], task["seed"]) for task in tasks}
+    identities: dict[int, list[dict[str, object]]] = {}
+    session_counts: dict[int, int] = {}
+    for workers in (1, 4, 8):
+        host = make_host(tmp_path, name=f"workers-{workers}", workers=workers, plan=TWO_JOB_PLAN)
+        results, _ = run_batch(host, tasks)
+        assert len(results) == len(tasks)
+        assert {(result["variant"], result["seed"]) for result in results} == expected_pairs
+        assert all(result["verified"] is True and "failed" not in result for result in results)
+        identities[workers] = normalized_results(results)
+        session_counts[workers] = len(manifest_paths(tmp_path, f"workers-{workers}"))
+    assert identities[1] == identities[4] == identities[8]
+    assert session_counts == {1: 6, 4: 8, 8: 8}
+
+
+def test_parallel_lanes_report_every_task_once(tmp_path):
+    host = make_host(tmp_path, workers=8)
+    tasks = [make_task(tmp_path, variant="A", seed=seed) for seed in range(16)]
+    results, _ = run_batch(host, tasks)
+    pairs = [(result["variant"], result["seed"]) for result in results]
+    assert len(pairs) == len(tasks)
+    assert len(set(pairs)) == len(tasks)
+    assert set(pairs) == {(task["variant"], task["seed"]) for task in tasks}
+
+
+def test_parallel_progress_merges_active_lanes(tmp_path):
+    host = make_host(tmp_path, workers=4)
+    tasks = [
+        make_task(tmp_path, variant="A", seed=seed, fixture=f"slow{seed}.pkm") for seed in range(1, 5)
+    ] + [make_task(tmp_path, variant="A", seed=seed) for seed in range(5, 9)]
+    results, progress = run_batch(host, tasks)
+    descriptors = [item for snapshot in progress for item in snapshot]
+    assert set(descriptors[0]) == {
+        "lane",
+        "index",
+        "variant",
+        "seed",
+        "worker_completed",
+        "worker_total",
+    }
+    assert {item["lane"] for item in descriptors} == {0, 1, 2, 3}
+    assert max(len(snapshot) for snapshot in progress) == 4
+    assert all(item["worker_total"] == 2 for item in descriptors)
+    assert progress[-1] == []
+    assert len(results) == 8
+
+
+def test_parallel_lanes_isolate_match_failures(tmp_path):
+    host = make_host(tmp_path, workers=2)
+    tasks = [
+        make_task(tmp_path, variant="A", seed=1),
+        make_task(tmp_path, variant="B", seed=2),
+        make_task(tmp_path, variant="C", seed=3, fixture="fail.pkm"),
+        make_task(tmp_path, variant="D", seed=4),
+    ]
+    results, _ = run_batch(host, tasks)
+    assert len(results) == 4
+    by_variant = {result["variant"]: result for result in results}
+    assert set(by_variant) == {"A", "B", "C", "D"}
+    assert by_variant["C"]["failed"] is True
+    assert by_variant["C"]["error"] == "原生比赛终场记录无效"
+    for variant in ("A", "B", "D"):
+        assert "failed" not in by_variant[variant]
+        assert by_variant[variant]["verified"] is True
+
+
+def test_parallel_lanes_retry_unresolved_matches_only(tmp_path):
+    host = make_host(tmp_path, workers=2, retries=1)
+    tasks = [
+        make_task(tmp_path, variant="A", seed=1, fixture="retry_once.pkm"),
+        make_task(tmp_path, variant="B", seed=2),
+        make_task(tmp_path, variant="C", seed=3),
+        make_task(tmp_path, variant="D", seed=4),
+    ]
+    results, _ = run_batch(host, tasks)
+    assert len(results) == 4
+    assert {(result["variant"], result["seed"]) for result in results} == {
+        ("A", 1),
+        ("B", 2),
+        ("C", 3),
+        ("D", 4),
+    }
+    retried = next(result for result in results if result["variant"] == "A")
+    assert retried.get("failed") is not True
+    assert str(retried["log_path"]).endswith(".retry1.jsonl")
+    assert len(manifest_paths(tmp_path)) == 3
+
+
+def test_cancel_parallel_batch_discards_unfinished_matches(tmp_path):
+    host = make_host(tmp_path, workers=4, timeout_seconds=60.0)
+    tasks = [make_task(tmp_path, variant="A", seed=seed, fixture=f"slow{seed}.pkm") for seed in range(1, 9)]
+    results: list[dict[str, object]] = []
+    progress: list[list[dict[str, object]]] = []
+
+    def on_progress(active):
+        progress.append([dict(item) for item in active])
+        if len(active) >= 2:
+            host.cancel()
+
+    started = time.monotonic()
+    host.run_batch(tasks, results.append, on_progress)
+    elapsed = time.monotonic() - started
+    assert elapsed < 5.0
+    assert max(len(snapshot) for snapshot in progress) >= 2
+    assert results == []
+    assert progress[-1] == []
+    assert fake_simulator_processes() == []
+
+
+def test_lane_failure_stops_other_lanes_and_raises(tmp_path):
+    host = make_host(tmp_path, workers=2, timeout_seconds=60.0)
+    tasks = [
+        make_task(tmp_path, variant="A", seed=1, fixture="bad_ack.pkm"),
+        make_task(tmp_path, variant="B", seed=2, fixture="slow.pkm"),
+    ]
+    results: list[dict[str, object]] = []
+    started = time.monotonic()
+    with pytest.raises(RuntimeError, match="原生逐场释放标记无效"):
+        host.run_batch(tasks, results.append, lambda _: None)
+    assert time.monotonic() - started < 2.0
+    assert results == []
+
+
+def test_parallel_lane_batch_is_stable_across_repeats(tmp_path):
+    tasks = [make_task(tmp_path, variant="A", seed=seed) for seed in range(10)]
+    identities: list[list[dict[str, object]]] = []
+    for attempt in range(3):
+        host = make_host(tmp_path, name=f"repeat-{attempt}", workers=8, plan=TWO_JOB_PLAN)
+        results, _ = run_batch(host, tasks)
+        pairs = [(result["variant"], result["seed"]) for result in results]
+        assert len(pairs) == len(tasks)
+        assert len(set(pairs)) == len(tasks)
+        identities.append(normalized_results(results))
+    assert identities[0] == identities[1] == identities[2]
