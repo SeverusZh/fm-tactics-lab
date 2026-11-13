@@ -14,6 +14,7 @@ from fm27lab.adapters.storage_sqlite.idempotency import IdempotencyRepository
 from fm27lab.adapters.storage_sqlite.repositories import DraftRepository, JobRepository, PoolRepository
 from fm27lab.adapters.storage_sqlite.saves import SavesRepository
 from fm27lab.application.drafts import DraftService
+from fm27lab.application.events import EventPublisher
 from fm27lab.application.idempotency import IdempotencyService
 from fm27lab.application.jobs import JobService
 from fm27lab.application.pools import PoolService
@@ -58,6 +59,7 @@ def create_app(
     job_service: JobService | None = None,
     saves_service: SavesService | None = None,
     idempotency_service: IdempotencyService | None = None,
+    events: EventPublisher | None = None,
 ) -> FastAPI:
     app = FastAPI(
         title="FM Tactics Lab Sidecar",
@@ -68,9 +70,10 @@ def create_app(
     )
     app.state.settings = settings
     app.state.database = database
+    app.state.events = events or EventPublisher()
     app.state.pools = pool_service or PoolService(PoolRepository(database))
     app.state.drafts = draft_service or DraftService(DraftRepository(database))
-    app.state.jobs = job_service or JobService(JobRepository(database))
+    app.state.jobs = job_service or JobService(JobRepository(database), publisher=app.state.events)
     app.state.saves = saves_service or SavesService(SavesRepository(database))
     app.state.idempotency = idempotency_service or IdempotencyService(IdempotencyRepository(database))
     app.state.shutdown = shutdown

@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from fm27lab.adapters.storage_sqlite.repositories import JobRepository
+from fm27lab.application.events import EventPublisher
 
 
 class JobService:
@@ -19,8 +20,9 @@ class JobService:
         "cancelled": set(),
     }
 
-    def __init__(self, repository: JobRepository):
+    def __init__(self, repository: JobRepository, publisher: EventPublisher | None = None):
         self.repository = repository
+        self.publisher = publisher
 
     def create(
         self,
@@ -31,7 +33,7 @@ class JobService:
         total: int = 0,
         job_id: str | None = None,
     ) -> dict[str, Any]:
-        return self.repository.add(
+        created = self.repository.add(
             {
                 "id": job_id,
                 "kind": kind,
@@ -42,6 +44,8 @@ class JobService:
                 "total": total,
             }
         )
+        self._publish("job.created", self._snapshot(created))
+        return created
 
     def get(self, job_id: str) -> dict[str, Any] | None:
         return self.repository.get(job_id)
@@ -82,7 +86,10 @@ class JobService:
                 completed = target["completed"]
                 if type(completed) is not int or not 0 <= completed <= current["total"]:
                     raise ValueError("任务进度无效")
-            return self.repository.update(job_id, target, connection=connection)
+            updated = self.repository.update(job_id, target, connection=connection)
+        if updated is not None:
+            self._publish("job.updated", self._snapshot(updated))
+        return updated
 
     def cancel(self, job_id: str) -> dict[str, Any] | None:
         return self.update(job_id, {"status": "cancelled"})
@@ -97,7 +104,17 @@ class JobService:
                 raise ValueError("任务进度无效")
             record = self.repository.add_run(job_id, run, connection=connection)
             self.repository.update(job_id, {"completed": completed}, connection=connection)
-            return record
+        self._publish(
+            "job.run",
+            {
+                "job_id": job_id,
+                "status": current["status"],
+                "completed": completed,
+                "total": current["total"],
+                "sequence": record["sequence"],
+            },
+        )
+        return record
 
     def runs(self, job_id: str, limit: int = 50, offset: int = 0) -> dict[str, Any]:
         items = self.repository.runs(job_id, limit=limit, offset=offset)
@@ -110,7 +127,14 @@ class JobService:
         }
 
     def delete(self, job_id: str) -> bool:
-        return self.repository.delete(job_id)
+        current = self.repository.get(job_id) if self.publisher is not None else None
+        if not self.repository.delete(job_id):
+            return False
+        if current is None:
+            self._publish("job.deleted", {"job_id": job_id, "deleted": True})
+        else:
+            self._publish("job.deleted", {**self._snapshot(current), "deleted": True})
+        return True
 
     def batch_delete(self, ids: Sequence[str]) -> dict[str, Any]:
         deleted: list[str] = []
@@ -129,4 +153,22 @@ class JobService:
                     failed.append({"id": job_id, "error": "任务不存在"})
                     continue
             deleted.append(job_id)
+            self._publish("job.deleted", {**self._snapshot(current), "deleted": True})
         return {"deleted": deleted, "failed": failed}
+
+    @staticmethod
+    def _snapshot(job: Mapping[str, Any]) -> dict[str, Any]:
+        return {
+            "job_id": job["id"],
+            "status": job["status"],
+            "completed": job["completed"],
+            "total": job["total"],
+        }
+
+    def _publish(self, event: str, data: Mapping[str, Any]) -> None:
+        if self.publisher is None:
+            return
+        try:
+            self.publisher.publish(event, data)
+        except Exception:
+            return

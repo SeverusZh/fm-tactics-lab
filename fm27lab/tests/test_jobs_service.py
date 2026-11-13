@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 import threading
 from concurrent.futures import ThreadPoolExecutor
@@ -487,3 +488,149 @@ def test_batch_delete_reads_and_deletes_with_same_transaction_connection(tmp_pat
     assert get_connection is delete_connection
     assert observed[0][2] is True
     assert observed[1][2] is True
+
+
+class FakePublisher:
+    def __init__(self, error: Exception | None = None):
+        self.events: list[tuple[str, dict]] = []
+        self.error = error
+
+    def publish(self, event: str, data) -> dict:
+        payload = dict(data)
+        self.events.append((event, payload))
+        if self.error is not None:
+            raise self.error
+        return {"event": event, "data": payload}
+
+
+def event_service(tmp_path: Path) -> tuple[JobService, FakePublisher]:
+    publisher = FakePublisher()
+    return JobService(JobRepository(database(tmp_path)), publisher=publisher), publisher
+
+
+def job_snapshot(job) -> dict:
+    return {
+        "job_id": job["id"],
+        "status": job["status"],
+        "completed": job["completed"],
+        "total": job["total"],
+    }
+
+
+def test_create_publishes_job_created(tmp_path: Path):
+    jobs, publisher = event_service(tmp_path)
+    created = jobs.create("experiment", total=4)
+    assert publisher.events == [("job.created", job_snapshot(created))]
+    assert json.dumps(publisher.events[0][1])
+
+
+def test_update_and_cancel_publish_job_updated_in_order(tmp_path: Path):
+    jobs, publisher = event_service(tmp_path)
+    created = jobs.create("experiment", total=2)
+    running = jobs.update(created["id"], {"status": "running"})
+    renamed = jobs.update(created["id"], {"name": "Renamed"})
+    cancelled = jobs.cancel(created["id"])
+    assert [event for event, _ in publisher.events] == [
+        "job.created",
+        "job.updated",
+        "job.updated",
+        "job.updated",
+    ]
+    assert publisher.events[1][1] == job_snapshot(running)
+    assert publisher.events[1][1]["status"] == "running"
+    assert publisher.events[2][1] == job_snapshot(renamed)
+    assert publisher.events[3][1] == job_snapshot(cancelled)
+    assert publisher.events[3][1]["status"] == "cancelled"
+
+
+def test_failed_update_publishes_nothing(tmp_path: Path):
+    jobs, publisher = event_service(tmp_path)
+    created = jobs.create("experiment", total=2)
+    publisher.events.clear()
+    assert jobs.update("missing", {"status": "running"}) is None
+    for changes in ({"status": "completed"}, {"completed": 3}, {"completed": True}):
+        with pytest.raises(ValueError):
+            jobs.update(created["id"], changes)
+    assert publisher.events == []
+
+
+def test_append_run_publishes_job_run(tmp_path: Path):
+    jobs, publisher = event_service(tmp_path)
+    created = jobs.create("experiment", total=2)
+    jobs.update(created["id"], {"status": "running"})
+    publisher.events.clear()
+    record = jobs.append_run(created["id"], run())
+    assert publisher.events == [
+        (
+            "job.run",
+            {
+                "job_id": created["id"],
+                "status": "running",
+                "completed": 1,
+                "total": 2,
+                "sequence": record["sequence"],
+            },
+        )
+    ]
+    assert json.dumps(publisher.events[0][1])
+
+
+def test_append_run_rejection_publishes_nothing(tmp_path: Path):
+    jobs, publisher = event_service(tmp_path)
+    created = jobs.create("experiment", total=1)
+    jobs.update(created["id"], {"status": "running"})
+    jobs.append_run(created["id"], run())
+    publisher.events.clear()
+    with pytest.raises(ValueError, match="进度"):
+        jobs.append_run(created["id"], run(seed=12))
+    assert publisher.events == []
+
+
+def test_delete_publishes_job_deleted_only_on_success(tmp_path: Path):
+    jobs, publisher = event_service(tmp_path)
+    created = jobs.create("experiment", total=2)
+    publisher.events.clear()
+    assert jobs.delete(created["id"]) is True
+    assert publisher.events == [("job.deleted", {**job_snapshot(created), "deleted": True})]
+    assert jobs.delete(created["id"]) is False
+    assert len(publisher.events) == 1
+
+
+def test_batch_delete_publishes_only_deleted_jobs(tmp_path: Path):
+    jobs, publisher = event_service(tmp_path)
+    for job_id in ("first", "second"):
+        make_completed(jobs, job_id)
+    jobs.create("experiment", job_id="active")
+    jobs.update("active", {"status": "running"})
+    publisher.events.clear()
+    result = jobs.batch_delete(["first", "missing", "active", "second"])
+    assert result["deleted"] == ["first", "second"]
+    assert result["failed"] == [
+        {"id": "missing", "error": "任务不存在"},
+        {"id": "active", "error": "任务正在运行或排队"},
+    ]
+    assert [event for event, _ in publisher.events] == ["job.deleted", "job.deleted"]
+    assert [data["job_id"] for _, data in publisher.events] == ["first", "second"]
+    assert [data["status"] for _, data in publisher.events] == ["completed", "completed"]
+
+
+def test_publisher_failure_keeps_job_operations_successful(tmp_path: Path):
+    publisher = FakePublisher(error=RuntimeError("事件发布失败"))
+    jobs = JobService(JobRepository(database(tmp_path)), publisher=publisher)
+    created = jobs.create("experiment", total=1)
+    assert created["status"] == "queued"
+    running = jobs.update(created["id"], {"status": "running"})
+    assert running["status"] == "running"
+    record = jobs.append_run(created["id"], run())
+    assert record["sequence"] == 1
+    cancelled = jobs.cancel(created["id"])
+    assert cancelled["status"] == "cancelled"
+    assert jobs.delete(created["id"]) is True
+    assert jobs.get(created["id"]) is None
+    assert [event for event, _ in publisher.events] == [
+        "job.created",
+        "job.updated",
+        "job.run",
+        "job.updated",
+        "job.deleted",
+    ]

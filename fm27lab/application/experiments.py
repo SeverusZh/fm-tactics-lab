@@ -6,6 +6,7 @@ import threading
 from collections.abc import Mapping, Sequence
 from typing import Any
 
+from fm27lab.application.events import EventPublisher
 from fm27lab.application.jobs import JobService
 from fm27lab.domain.concurrency import resource_check
 from fm27lab.ports.engine import EnginePort, RuntimePlan
@@ -24,6 +25,11 @@ ENGINE_ERROR = "引擎执行失败"
 RESOURCE_ERROR_MESSAGES = {
     "insufficient_memory": "可用内存低于 2 GiB，资源预检未通过",
     "insufficient_disk": "空闲磁盘不足，资源预检未通过",
+}
+FINAL_EVENT_NAMES = {
+    "completed": "experiment.completed",
+    "cancelled": "experiment.cancelled",
+    "error": "experiment.error",
 }
 
 
@@ -71,10 +77,17 @@ class ExperimentService:
     dispatcher can tell an engine stop from a normal batch return.
     """
 
-    def __init__(self, job_service: JobService, engine: EnginePort, runtime_plan: RuntimePlan):
+    def __init__(
+        self,
+        job_service: JobService,
+        engine: EnginePort,
+        runtime_plan: RuntimePlan,
+        publisher: EventPublisher | None = None,
+    ):
         self._job_service = job_service
         self._engine = engine
         self._runtime_plan = runtime_plan
+        self._publisher = publisher
         self._lock = threading.Lock()
         self._cancel_requested: dict[str, threading.Event] = {}
 
@@ -120,6 +133,7 @@ class ExperimentService:
         )
         if updated is None:
             raise ValueError("任务创建失败")
+        self._publish("experiment.submitted", updated)
         return updated
 
     def start_next(self) -> dict[str, Any] | None:
@@ -135,6 +149,7 @@ class ExperimentService:
                 return None
             event = threading.Event()
             self._cancel_requested[job_id] = event
+        self._publish("experiment.started", running)
 
         def on_result(result: Mapping[str, Any]) -> None:
             self._job_service.append_run(job_id, result)
@@ -154,12 +169,16 @@ class ExperimentService:
                 status = "cancelled" if event.is_set() else "completed"
                 final = self._job_service.update(job_id, {"status": status})
             else:
+                status = "completed"
                 final = self._job_service.update(job_id, {"status": "completed"})
         except Exception as error:
+            status = "error"
             final = self._finish_error(job_id, error)
         finally:
             with self._lock:
                 self._cancel_requested.pop(job_id, None)
+        if final is not None:
+            self._publish(FINAL_EVENT_NAMES[status], final)
         return final
 
     def cancel(self, job_id: str) -> dict[str, Any]:
@@ -172,6 +191,7 @@ class ExperimentService:
                 cancelled = self._job_service.update(job_id, {"status": "cancelled"})
                 if cancelled is None:
                     raise ValueError(CANCEL_ERROR)
+                self._publish("experiment.cancelled", cancelled)
                 return cancelled
             if status != "running":
                 raise ValueError(CANCEL_ERROR)
@@ -192,6 +212,7 @@ class ExperimentService:
             resumed = self._job_service.update(job_id, {"status": "queued"})
             if resumed is None:
                 raise ValueError(RESUME_ERROR)
+            self._publish("experiment.resumed", resumed)
             return resumed
 
     def _record_progress(self, job_id: str, active: Sequence[Mapping[str, Any]]) -> None:
@@ -201,7 +222,9 @@ class ExperimentService:
         summary = dict(job["summary"])
         summary["active"] = [dict(item) for item in active]
         summary["current"] = summary["active"][0] if summary["active"] else None
-        self._job_service.update(job_id, {"summary": summary})
+        updated = self._job_service.update(job_id, {"summary": summary})
+        if updated is not None:
+            self._publish("experiment.progress", updated)
 
     def _finish_error(self, job_id: str, error: Exception) -> dict[str, Any] | None:
         job = self._job_service.get(job_id)
@@ -218,6 +241,22 @@ class ExperimentService:
             if page["next_offset"] is None:
                 return runs
             offset = page["next_offset"]
+
+    def _publish(self, event: str, job: Mapping[str, Any]) -> None:
+        if self._publisher is None:
+            return
+        try:
+            self._publisher.publish(
+                event,
+                {
+                    "job_id": job["id"],
+                    "status": job["status"],
+                    "completed": job["completed"],
+                    "total": job["total"],
+                },
+            )
+        except Exception:
+            return
 
     def _running_job(self) -> dict[str, Any] | None:
         page = self._job_service.list(status="running", limit=1)

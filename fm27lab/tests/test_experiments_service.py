@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import threading
 from pathlib import Path
 from typing import Any
@@ -471,3 +472,141 @@ def test_start_next_filters_existing_runs_across_pages(tmp_path: Path):
     assert final["completed"] == 202
     assert fake.tasks == [{"variant": "B", "seed": 201}]
     assert jobs.runs(job["id"], limit=200)["total"] == 202
+
+
+class RecordingPublisher:
+    def __init__(self, error: Exception | None = None):
+        self.events: list[tuple[str, dict]] = []
+        self.error = error
+        self._lock = threading.Lock()
+
+    def publish(self, event: str, data) -> dict:
+        payload = dict(data)
+        with self._lock:
+            self.events.append((event, payload))
+        if self.error is not None:
+            raise self.error
+        return {"event": event, "data": payload}
+
+
+def make_event_service(
+    tmp_path: Path,
+    engine: FakeEngine | None = None,
+) -> tuple[ExperimentService, FakeEngine, JobService, RecordingPublisher]:
+    jobs = job_service(tmp_path)
+    fake = FakeEngine() if engine is None else engine
+    publisher = RecordingPublisher()
+    return ExperimentService(jobs, fake, PLAN, publisher=publisher), fake, jobs, publisher
+
+
+def event_names(publisher: RecordingPublisher) -> list[str]:
+    return [event for event, _ in publisher.events]
+
+
+def experiment_snapshot(job) -> dict:
+    return {
+        "job_id": job["id"],
+        "status": job["status"],
+        "completed": job["completed"],
+        "total": job["total"],
+    }
+
+
+def test_submit_publishes_experiment_submitted(tmp_path: Path):
+    service, fake, jobs, publisher = make_event_service(tmp_path)
+    job = submit(service, seeds=(1,), variants=("B",), workers=1)
+    assert publisher.events == [("experiment.submitted", experiment_snapshot(job))]
+    assert json.dumps(publisher.events[0][1])
+
+
+def test_start_next_publishes_started_progress_and_completed(tmp_path: Path):
+    service, fake, jobs, publisher = make_event_service(tmp_path)
+    job = submit(service, seeds=(1,), variants=("B",), workers=1)
+    publisher.events.clear()
+    final = service.start_next()
+    assert final is not None
+    assert event_names(publisher) == [
+        "experiment.started",
+        "experiment.progress",
+        "experiment.completed",
+    ]
+    assert publisher.events[0][1] == {**experiment_snapshot(job), "status": "running"}
+    assert publisher.events[1][1] == {**experiment_snapshot(job), "status": "running"}
+    assert publisher.events[2][1] == experiment_snapshot(final)
+    assert publisher.events[2][1]["status"] == "completed"
+    assert publisher.events[2][1]["completed"] == 1
+    assert json.dumps(publisher.events[2][1])
+
+
+def test_start_next_engine_error_publishes_experiment_error(tmp_path: Path):
+    engine = FakeEngine(error=RuntimeError("引擎崩溃"))
+    service, fake, jobs, publisher = make_event_service(tmp_path, engine)
+    job = submit(service, seeds=(3, 1), variants=("A", "B"))
+    publisher.events.clear()
+    final = service.start_next()
+    assert final is not None
+    assert event_names(publisher) == ["experiment.started", "experiment.error"]
+    assert publisher.events[1][1] == {**experiment_snapshot(job), "status": "error"}
+
+
+def test_cancel_queued_job_publishes_experiment_cancelled(tmp_path: Path):
+    service, fake, jobs, publisher = make_event_service(tmp_path)
+    job = submit(service)
+    publisher.events.clear()
+    cancelled = service.cancel(job["id"])
+    assert publisher.events == [
+        ("experiment.cancelled", {**experiment_snapshot(job), "status": "cancelled"}),
+    ]
+    assert cancelled["status"] == "cancelled"
+
+
+def test_cancel_running_job_publishes_cancelled_when_batch_stops(tmp_path: Path):
+    engine = FakeEngine(block_until_cancelled=True)
+    service, fake, jobs, publisher = make_event_service(tmp_path, engine)
+    job = submit(service, seeds=(1,), variants=("A", "B"))
+    publisher.events.clear()
+    outcome: list[dict[str, Any]] = []
+    thread = threading.Thread(target=lambda: outcome.append(service.start_next()))
+    thread.start()
+    try:
+        assert fake.started.wait(5)
+        service.cancel(job["id"])
+    finally:
+        thread.join(timeout=5)
+    assert not thread.is_alive()
+    final = outcome[0]
+    assert final["status"] == "cancelled"
+    assert event_names(publisher) == [
+        "experiment.started",
+        "experiment.progress",
+        "experiment.cancelled",
+    ]
+    assert publisher.events[-1][1]["status"] == "cancelled"
+
+
+def test_resume_publishes_experiment_resumed(tmp_path: Path):
+    service, fake, jobs, publisher = make_event_service(tmp_path)
+    job = submit(service)
+    jobs.update(job["id"], {"status": "running"})
+    jobs.update(job["id"], {"status": "interrupted"})
+    publisher.events.clear()
+    resumed = service.resume(job["id"])
+    assert publisher.events == [("experiment.resumed", experiment_snapshot(resumed))]
+    assert resumed["status"] == "queued"
+
+
+def test_publisher_failure_keeps_experiment_flow_working(tmp_path: Path):
+    jobs = job_service(tmp_path)
+    publisher = RecordingPublisher(error=RuntimeError("事件发布失败"))
+    service = ExperimentService(jobs, FakeEngine(), PLAN, publisher=publisher)
+    job = submit(service, seeds=(1,), variants=("B",), workers=1)
+    assert job["status"] == "queued"
+    final = service.start_next()
+    assert final is not None
+    assert final["status"] == "completed"
+    assert event_names(publisher) == [
+        "experiment.submitted",
+        "experiment.started",
+        "experiment.progress",
+        "experiment.completed",
+    ]

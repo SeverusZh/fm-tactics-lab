@@ -7,7 +7,10 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
+from fm27lab.adapters.storage_sqlite.db import Database
 from fm27lab.application.events import EventPublisher
+from fm27lab.config import Settings
+from fm27lab.interfaces.http.app import create_app
 from fm27lab.interfaces.http.routes.system import stream_events
 from fm27lab.tests.test_http_health import make_app
 
@@ -260,3 +263,118 @@ def test_events_cors_preflight_and_method_not_allowed_do_not_regress(tmp_path: P
     method = client.delete("/api/events")
     assert method.status_code == 405
     assert method.json()["error"]["code"] == "method_not_allowed"
+
+
+def make_event_app(tmp_path: Path):
+    settings = Settings.create(data_dir=tmp_path, token="c" * 64, dev=True)
+    settings.ensure_dirs()
+    database = Database(settings.database_path)
+    database.initialize()
+    publisher = EventPublisher()
+    app = create_app(settings, database, shutdown=lambda: None, events=publisher)
+    return app, settings, publisher
+
+
+def job_payload(total: int = 2) -> dict:
+    return {
+        "kind": "experiment",
+        "name": "Experiment",
+        "config": {"seeds": [1]},
+        "workers": 1,
+        "total": total,
+    }
+
+
+def test_create_app_exposes_injected_publisher_used_by_default_jobs_service(tmp_path: Path):
+    app, settings, publisher = make_event_app(tmp_path)
+    assert app.state.events is publisher
+    client = TestClient(app)
+
+    created = client.post("/api/jobs", json=job_payload(), headers=auth(settings))
+
+    assert created.status_code == 201
+    job = created.json()
+    history = publisher.history()
+    assert [event["event"] for event in history] == ["job.created"]
+    assert history[0]["data"] == {
+        "job_id": job["id"],
+        "status": "queued",
+        "completed": 0,
+        "total": 2,
+    }
+
+
+def test_default_create_app_wires_default_jobs_service_to_events_state(tmp_path: Path):
+    app, settings, _, _ = make_app(tmp_path)
+    publisher = app.state.events
+    assert isinstance(publisher, EventPublisher)
+    client = TestClient(app)
+
+    created = client.post("/api/jobs", json=job_payload(), headers=auth(settings))
+
+    assert created.status_code == 201
+    assert [event["event"] for event in publisher.history()] == ["job.created"]
+    assert publisher.history()[0]["data"]["job_id"] == created.json()["id"]
+
+
+def test_job_lifecycle_events_are_delivered_to_sse_client(tmp_path: Path):
+    app, settings, publisher = make_event_app(tmp_path)
+    client = TestClient(app)
+    headers = auth(settings)
+
+    with client.stream("GET", "/api/events", headers={**headers, **SSE_HEADERS}) as response:
+        chunks = response.iter_text()
+        reader = FrameReader(chunks)
+        assert reader.next()["event"] == "ready"
+        wait_for_subscriber_count(publisher, 1)
+
+        created = client.post("/api/jobs", json=job_payload(), headers=headers)
+        assert created.status_code == 201
+        job = created.json()
+        created_frame = reader.next()
+
+        patched = client.patch(f"/api/jobs/{job['id']}", json={"name": "Renamed"}, headers=headers)
+        assert patched.status_code == 200
+        updated_frame = reader.next()
+
+        cancelled = client.post(f"/api/jobs/{job['id']}/cancel", headers=headers)
+        assert cancelled.status_code == 200
+        cancelled_frame = reader.next()
+
+        deleted = client.delete(f"/api/jobs/{job['id']}", headers=headers)
+        assert deleted.status_code == 204
+        deleted_frame = reader.next()
+
+    assert created_frame["event"] == "job.created"
+    assert created_frame["data"] == {
+        "job_id": job["id"],
+        "status": "queued",
+        "completed": 0,
+        "total": 2,
+    }
+    assert updated_frame["event"] == "job.updated"
+    assert updated_frame["data"] == {
+        "job_id": job["id"],
+        "status": "queued",
+        "completed": 0,
+        "total": 2,
+    }
+    assert cancelled_frame["event"] == "job.updated"
+    assert cancelled_frame["data"]["status"] == "cancelled"
+    assert deleted_frame["event"] == "job.deleted"
+    assert deleted_frame["data"] == {
+        "job_id": job["id"],
+        "status": "cancelled",
+        "completed": 0,
+        "total": 2,
+        "deleted": True,
+    }
+    ids = [
+        created_frame["id"],
+        updated_frame["id"],
+        cancelled_frame["id"],
+        deleted_frame["id"],
+    ]
+    assert ids == sorted(set(ids))
+    wait_for_subscriber_count(publisher, 0)
+    assert publisher.subscriber_count == 0
