@@ -362,6 +362,71 @@ export function importSave(
   });
 }
 
+export type Draft = {
+  id: string;
+  name: string;
+  scenario: Record<string, unknown>;
+  source: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+};
+
+export type DraftSummary = Omit<Draft, "scenario">;
+
+export type DraftList = {
+  items: DraftSummary[];
+  total: number;
+  next_offset: number | null;
+};
+
+export type DraftCreate = {
+  name: string;
+  scenario: Record<string, unknown>;
+  source?: Record<string, unknown> | null;
+};
+
+export type DraftUpdate = {
+  name?: string;
+  scenario?: Record<string, unknown>;
+  source?: Record<string, unknown>;
+};
+
+export type DraftQuery = {
+  limit?: number;
+  offset?: number;
+};
+
+export function listDrafts(connection: Connection, query: DraftQuery = {}): Promise<DraftList> {
+  const search = queryString({ limit: query.limit, offset: query.offset });
+  return apiJson<DraftList>(connection, `/api/drafts${search}`);
+}
+
+export function createDraft(connection: Connection, input: DraftCreate): Promise<Draft> {
+  return apiJson<Draft>(connection, "/api/drafts", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export function getDraft(connection: Connection, draftId: string): Promise<Draft> {
+  return apiJson<Draft>(connection, `/api/drafts/${encodeURIComponent(draftId)}`);
+}
+
+export function updateDraft(
+  connection: Connection,
+  draftId: string,
+  changes: DraftUpdate,
+): Promise<Draft> {
+  return apiJson<Draft>(connection, `/api/drafts/${encodeURIComponent(draftId)}`, {
+    method: "PATCH",
+    body: JSON.stringify(changes),
+  });
+}
+
+export async function deleteDraft(connection: Connection, draftId: string): Promise<void> {
+  await apiFetch(connection, `/api/drafts/${encodeURIComponent(draftId)}`, { method: "DELETE" });
+}
+
 export type Setting = {
   key: string;
   value: unknown;

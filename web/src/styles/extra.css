@@ -578,3 +578,207 @@
   color: var(--amber);
   font-size: var(--type-body-sm);
 }
+
+.players-toolbar {
+  display: flex;
+  align-items: end;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-5);
+  padding-bottom: var(--space-4);
+  border-bottom: 1px solid var(--border);
+}
+
+.players-draft select {
+  min-width: 220px;
+}
+
+.players-hidden-toggle {
+  margin-left: auto;
+}
+
+.players-layout {
+  display: grid;
+  grid-template-columns: minmax(220px, 300px) minmax(0, 1fr);
+  gap: var(--space-5);
+  align-items: start;
+}
+
+.players-roster {
+  border-radius: var(--radius-control);
+  background: var(--surface-raised);
+}
+
+.players-list-head,
+.players-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 44px 48px;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.players-list-head {
+  padding: var(--space-3) var(--space-5) var(--space-2);
+  border-bottom: 1px solid var(--border);
+  color: var(--text-subtle);
+  font-size: var(--type-caption);
+}
+
+.players-list-head span:nth-child(2),
+.players-list-head span:nth-child(3) {
+  text-align: right;
+}
+
+.players-list {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: var(--space-2);
+  list-style: none;
+}
+
+.players-row {
+  width: 100%;
+  min-height: 38px;
+  padding: 0 var(--space-3);
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--text-muted);
+  text-align: left;
+}
+
+.players-row:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.players-row[aria-pressed="true"] {
+  background: var(--selected);
+  color: var(--text);
+  box-shadow: inset 2px 0 0 var(--accent-text);
+}
+
+.players-row-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.players-row-position {
+  color: var(--text-subtle);
+  font-family: var(--font-mono);
+  font-size: var(--type-caption);
+  text-align: right;
+}
+
+.players-row-ability {
+  color: var(--text);
+  font-family: var(--font-display);
+  font-size: var(--type-body-lg);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.players-detail {
+  display: grid;
+  gap: var(--space-5);
+  min-width: 0;
+}
+
+.players-selected {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  margin: 0;
+  padding-bottom: var(--space-3);
+  border-bottom: 1px solid var(--border);
+}
+
+.players-selected strong {
+  font-size: var(--type-h3);
+  font-weight: 600;
+}
+
+.players-selected-ability {
+  color: var(--text);
+  font-family: var(--font-display);
+  font-size: var(--type-body-lg);
+  font-variant-numeric: tabular-nums;
+}
+
+.players-ability-label {
+  margin-right: var(--space-1);
+  color: var(--text-subtle);
+  font-family: var(--font-body);
+  font-size: var(--type-caption);
+}
+
+.players-team {
+  margin-left: auto;
+  color: var(--text-subtle);
+  font-size: var(--type-caption);
+}
+
+.players-groups {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: var(--space-5);
+  align-items: start;
+}
+
+.players-group {
+  min-width: 0;
+}
+
+.players-group h3 {
+  margin: 0 0 var(--space-2);
+  color: var(--text);
+  font-size: var(--type-h3);
+  font-weight: 600;
+}
+
+.players-attributes {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 0 var(--space-5);
+  margin: 0;
+}
+
+.players-attribute {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-2) 0;
+  border-bottom: 1px solid rgba(59, 51, 72, 0.5);
+}
+
+.players-attribute dt {
+  color: var(--text-muted);
+  font-size: var(--type-body-sm);
+}
+
+.players-attribute dd {
+  margin: 0;
+  color: var(--text);
+  font-family: var(--font-display);
+  font-size: var(--type-body-lg);
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 900px) {
+  .players-hidden-toggle {
+    margin-left: 0;
+  }
+
+  .players-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .players-list {
+    max-height: 340px;
+    overflow-y: auto;
+  }
+}
