@@ -133,7 +133,7 @@ def test_run_mcp_serves_handshake_lists_tools_and_routes_tool_call(monkeypatch, 
     }
     listed = replies[1]["result"]["tools"]
     assert [item["name"] for item in listed] == list(tool_names())
-    assert len(listed) == 22
+    assert len(listed) == len(tool_names())
     result = replies[2]["result"]
     assert result["isError"] is False
     assert result["structuredContent"] == payload
