@@ -56,20 +56,23 @@ def test_shutdown_requires_full_error_envelope_and_calls_once(tmp_path: Path):
     assert stopped == [True]
 
 
-def test_events_requires_token_and_accepts_last_event_id(tmp_path: Path):
+def test_events_requires_token_and_streams_ready_event(tmp_path: Path):
     app, settings, _, _ = make_app(tmp_path)
     client = TestClient(app)
     assert client.get("/api/events").status_code == 401
-    response = client.get(
+    with client.stream(
+        "GET",
         "/api/events",
         headers={
             "Authorization": f"Bearer {settings.token}",
+            "Accept": "text/event-stream",
             "Last-Event-ID": "41",
         },
-    )
-    assert response.status_code == 200
-    assert response.headers["content-type"].startswith("text/event-stream")
-    assert "id: 41" in response.text
+    ) as response:
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("text/event-stream")
+        ready = next(response.iter_text())
+    assert "event: ready" in ready
 
 
 def test_unknown_routes_and_methods_use_error_envelope(tmp_path: Path):
