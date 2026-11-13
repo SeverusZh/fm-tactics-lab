@@ -109,6 +109,9 @@
 | 2026-11-14 | 属性批量编辑前端 | PlayersPage、api.ts、tests | PASS | bulk/position/copy/undo 参数与后端一致、失效刷新、错误展示、aria-live；142 项 Vitest；12 变异 11 被杀。 |
 | 2026-11-14 | OpenAPI TypeScript 类型 | scripts/generate_web_types.py、api-schema.ts、tests | FAIL | 字节一致性测试在 CRLF checkout 下会失败。 |
 | 2026-11-14 | 类型生成修复轮 | 同上 + .gitattributes | PASS | .ts/.tsx/.json/.yml 固定 LF、补排序与缺文件测试、重生成 56 schema；1425 项全量。 |
+| 2026-11-14 | CLI 全量命令 | cli.py、client.py、registry.py、tests | PASS | 26 命令与 49 能力逐一对应、路径/方法/query/body 与路由一致、三个下载命令按 --output 写文件、退出码 0/1/2 与 token 脱敏；196 项定向测试、1631 项全量、11 个变异全被杀；3 项 MINOR 为下载原子性与测试结构建议。 |
+| 2026-11-14 | MCP 工具面补齐 | interfaces/mcp/tools.py、tests | PASS | 48 工具与 OpenAPI 逐项对齐、下载工具 base64 封套往返、本地校验中文错误、路径编码与 SidecarError 透传；175 项定向、1631 项全量、13 个变异被杀；4 项 MINOR 为可空 body 与上界覆盖缺口。 |
+| 2026-11-14 | 存档库导入与阵容面板 | LibraryPage、api.ts、tests | PASS | 文件导入/覆盖导入/俱乐部与名单展示/阵容同步与撤销全链路，409 与错误态、aria 状态；157 项 Vitest、typecheck 与 build 通过；3 项测试覆盖 MINOR 已补。 |
 
 ## 审核规则
 
@@ -117,6 +120,6 @@
 - 先列 findings，再列已验证项，最后给结论。
 - Critical 或 Important 未闭环时不得标记 PASS。
 - 审核通过不等于整体发布就绪；发布仍需最终验收与 Windows 真机验证。
-- 旧 `tests/` 当前 281 项通过，覆盖 legacy UI/HTTP/CLI/MCP、存档战术库、池与名单；新 `fm27lab/tests` 当前 1450 项通过，覆盖包版本、CLI 环境继承、配置/路径边界、SQLite 迁移/事务与池/草案/任务/存档/产物/幂等仓储、HTTP 健康/池/草案/任务 CRUD、鉴权、错误封套、Origin、ACL 失败清理、sidecar serve、23 人名单、真实名单应用、scenario 归一化、catalog/双阶段战术、客队战术池选择、结果指标、任务状态机、存档状态机与应用服务；Vitest 当前 142 项。
+- 旧 `tests/` 当前 281 项通过，覆盖 legacy UI/HTTP/CLI/MCP、存档战术库、池与名单；新 `fm27lab/tests` 当前 1631 项通过，覆盖包版本、CLI 环境继承、配置/路径边界、SQLite 迁移/事务与池/草案/任务/存档/产物/幂等仓储、HTTP 健康/池/草案/任务 CRUD、鉴权、错误封套、Origin、ACL 失败清理、sidecar serve、23 人名单、真实名单应用、scenario 归一化、catalog/双阶段战术、客队战术池选择、结果指标、任务状态机、存档状态机与应用服务；Vitest 当前 157 项。
 - Tauri sidecar supervisor 的静态实现已存在，但 Linux 无 WebKitGTK，Windows CI 的 `cargo build`/`cargo test`/安装包构建是唯一编译证据。PyInstaller onedir sidecar 已在 Linux 构建并通过 ready/health/shutdown 冒烟测试。
 - Rust 核心 crate 当前 4 项 cargo test 通过；React 壳当前 9 项 Vitest 通过、类型检查与生产构建通过。Windows CI 已通过 cargo build/test、NSIS 安装包与 sidecar 资源断言；Linux 本机仍无 WebKitGTK。合并、设计、sidecar、壳层、名单五个审核门均已 PASS。
