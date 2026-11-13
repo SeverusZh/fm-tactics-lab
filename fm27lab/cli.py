@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 import sys
 from collections.abc import Callable
@@ -22,11 +23,21 @@ pools_app = typer.Typer(add_completion=False, no_args_is_help=True, help="战术
 drafts_app = typer.Typer(add_completion=False, no_args_is_help=True, help="场景草案")
 jobs_app = typer.Typer(add_completion=False, no_args_is_help=True, help="实验任务")
 saves_app = typer.Typer(add_completion=False, no_args_is_help=True, help="存档库")
+artifacts_app = typer.Typer(add_completion=False, no_args_is_help=True, help="产物")
+settings_app = typer.Typer(add_completion=False, no_args_is_help=True, help="设置")
+concurrency_app = typer.Typer(add_completion=False, no_args_is_help=True, help="并发资源预检")
+experiments_app = typer.Typer(add_completion=False, no_args_is_help=True, help="实验调度")
+catalog_app = typer.Typer(add_completion=False, no_args_is_help=True, help="运行时目录")
 
 app.add_typer(pools_app, name="pools")
 app.add_typer(drafts_app, name="drafts")
 app.add_typer(jobs_app, name="jobs")
 app.add_typer(saves_app, name="saves")
+app.add_typer(artifacts_app, name="artifacts")
+app.add_typer(settings_app, name="settings")
+app.add_typer(concurrency_app, name="concurrency")
+app.add_typer(experiments_app, name="experiments")
+app.add_typer(catalog_app, name="catalog")
 
 
 @app.callback()
@@ -172,6 +183,37 @@ def _changes(**values: Any) -> dict[str, Any]:
     return changes
 
 
+def _json_array(raw: str, name: str) -> list[Any]:
+    value = _json_value(raw, name)
+    if not isinstance(value, list):
+        raise typer.BadParameter(f"{name} 必须是 JSON 数组", param_hint=f"--{name}")
+    return value
+
+
+def _base64_file(raw: str, name: str) -> str:
+    path = Path(raw).expanduser()
+    try:
+        payload = path.read_bytes()
+    except OSError as error:
+        raise typer.BadParameter(f"无法读取 {name} 文件：{path}（{error}）") from None
+    return base64.b64encode(payload).decode("ascii")
+
+
+def _download(
+    ctx: typer.Context,
+    request: Callable[[SidecarClient], tuple[bytes, dict[str, str]]],
+    output: Path,
+) -> None:
+    payload, _headers = _invoke(ctx, request)
+    target = output.expanduser()
+    try:
+        target.write_bytes(payload)
+    except OSError as error:
+        typer.echo(f"无法写入文件：{target}（{error}）", err=True)
+        raise typer.Exit(1) from error
+    _emit({"path": str(target), "bytes": len(payload)})
+
+
 POOLS_LIMIT = typer.Option(128, "--limit", min=1, max=128, help="每页数量")
 POOLS_OFFSET = typer.Option(0, "--offset", min=0, help="分页偏移")
 DRAFTS_LIMIT = typer.Option(128, "--limit", min=1, max=128, help="每页数量")
@@ -182,6 +224,9 @@ RUNS_LIMIT = typer.Option(50, "--limit", min=1, max=200, help="每页数量")
 RUNS_OFFSET = typer.Option(0, "--offset", min=0, help="分页偏移")
 SAVES_LIMIT = typer.Option(50, "--limit", min=1, max=256, help="每页数量")
 SAVES_OFFSET = typer.Option(0, "--offset", min=0, help="分页偏移")
+ARTIFACTS_LIMIT = typer.Option(50, "--limit", min=1, max=256, help="每页数量")
+ARTIFACTS_OFFSET = typer.Option(0, "--offset", min=0, help="分页偏移")
+JOB_BATCH_ACTIONS = frozenset({"cancel", "delete"})
 
 
 @pools_app.command("list")
@@ -486,6 +531,327 @@ def saves_import(
             lambda client: client.request_json("POST", f"/api/saves/{save_id}/import", body=body),
         )
     )
+
+
+@drafts_app.command("attributes")
+def drafts_attributes(
+    ctx: typer.Context,
+    draft_id: str = typer.Argument(..., help="草案 ID"),
+    side: str = typer.Option(..., "--side", help="球队视角"),
+    scope: str = typer.Option(..., "--scope", help="编辑范围"),
+    operation: str = typer.Option(..., "--operation", help="属性操作"),
+    params: str = typer.Option(..., "--params", help="操作参数 JSON，可用 @文件"),
+    player_index: int | None = typer.Option(None, "--player-index", min=0, help="球员序号"),
+) -> None:
+    """批量编辑场景草案球员属性。"""
+    body: dict[str, Any] = {
+        "side": side,
+        "scope": scope,
+        "operation": operation,
+        "params": _json_object(params, "params"),
+    }
+    if player_index is not None:
+        body["player_index"] = player_index
+    _emit(
+        _invoke(
+            ctx,
+            lambda client: client.request_json("POST", f"/api/drafts/{draft_id}/attributes", body=body),
+        )
+    )
+
+
+@drafts_app.command("export-fmf")
+def drafts_export_fmf(
+    ctx: typer.Context,
+    draft_id: str = typer.Argument(..., help="草案 ID"),
+    output: Path = typer.Option(..., "--output", help="写入的文件路径"),
+) -> None:
+    """导出场景草案为 FMF 文件。"""
+    _download(
+        ctx,
+        lambda client: client.request_bytes("GET", f"/api/drafts/{draft_id}/export.fmf"),
+        output,
+    )
+
+
+@drafts_app.command("import-fmf")
+def drafts_import_fmf(
+    ctx: typer.Context,
+    name: str = typer.Option(..., "--name", help="草案名称"),
+    file_path: str = typer.Option(..., "--file", help="FMF 文件路径"),
+    source: str | None = typer.Option(None, "--source", help="来源 JSON，可用 @文件"),
+) -> None:
+    """从 FMF 文件导入场景草案。"""
+    body: dict[str, Any] = {"name": name, "content_base64": _base64_file(file_path, "FMF")}
+    source_value = _json_object(source, "source")
+    if source_value is not None:
+        body["source"] = source_value
+    _emit(_invoke(ctx, lambda client: client.request_json("POST", "/api/drafts/import-fmf", body=body)))
+
+
+@drafts_app.command("apply-roster")
+def drafts_apply_roster(
+    ctx: typer.Context,
+    draft_id: str = typer.Argument(..., help="草案 ID"),
+    save_id: str = typer.Option(..., "--save-id", help="存档 ID"),
+    club_uid: int = typer.Option(..., "--club-uid", min=1, help="俱乐部 UID"),
+    side: str = typer.Option(..., "--side", help="球队视角"),
+    scope: str = typer.Option(..., "--scope", help="应用范围"),
+) -> None:
+    """把存档名单同步到场景草案阵容。"""
+    body = {"save_id": save_id, "club_uid": club_uid, "side": side, "scope": scope}
+    _emit(
+        _invoke(
+            ctx,
+            lambda client: client.request_json("POST", f"/api/drafts/{draft_id}/apply-roster", body=body),
+        )
+    )
+
+
+@drafts_app.command("undo-roster")
+def drafts_undo_roster(ctx: typer.Context, draft_id: str = typer.Argument(..., help="草案 ID")) -> None:
+    """撤销场景草案的阵容同步。"""
+    _emit(_invoke(ctx, lambda client: client.request_json("POST", f"/api/drafts/{draft_id}/undo-roster")))
+
+
+@jobs_app.command("batch-action")
+def jobs_batch_actions(
+    ctx: typer.Context,
+    action: str = typer.Option(..., "--action", help="批量动作：cancel 或 delete"),
+    ids: list[str] = typer.Option(..., "--ids", help="任务 ID，可重复"),
+) -> None:
+    """批量取消或删除实验任务。"""
+    if action not in JOB_BATCH_ACTIONS:
+        raise typer.BadParameter(f"批量动作必须是 cancel 或 delete：{action}", param_hint="--action")
+    body = {"action": action, "ids": ids}
+    _emit(_invoke(ctx, lambda client: client.request_json("POST", "/api/jobs/actions", body=body)))
+
+
+@jobs_app.command("batch-delete")
+def jobs_batch_delete(
+    ctx: typer.Context,
+    ids: list[str] = typer.Option(..., "--ids", help="任务 ID，可重复"),
+) -> None:
+    """批量删除实验任务。"""
+    body = {"ids": ids}
+    _emit(_invoke(ctx, lambda client: client.request_json("DELETE", "/api/jobs", body=body)))
+
+
+@jobs_app.command("export")
+def jobs_export(
+    ctx: typer.Context,
+    job_id: str = typer.Argument(..., help="任务 ID"),
+    output: Path = typer.Option(..., "--output", help="写入的文件路径"),
+) -> None:
+    """导出任务结果 CSV。"""
+    _download(ctx, lambda client: client.request_bytes("GET", f"/api/jobs/{job_id}/export.csv"), output)
+
+
+@jobs_app.command("pool-summary")
+def jobs_pool_summary(ctx: typer.Context, job_id: str = typer.Argument(..., help="任务 ID")) -> None:
+    """查看任务客队战术池汇总。"""
+    _emit(
+        _invoke(
+            ctx,
+            lambda client: client.request_json("GET", f"/api/jobs/{job_id}/pool-summary"),
+        )
+    )
+
+
+@saves_app.command("import-file")
+def saves_import_file(
+    ctx: typer.Context,
+    source_path: str = typer.Option(..., "--source-path", help="存档文件路径"),
+    replace: bool = typer.Option(False, "--replace/--no-replace", help="覆盖已有存档"),
+) -> None:
+    """从存档文件导入存档与俱乐部名单。"""
+    body = {"source_path": source_path, "replace": replace}
+    _emit(_invoke(ctx, lambda client: client.request_json("POST", "/api/saves/import", body=body)))
+
+
+@saves_app.command("squad")
+def saves_squad(
+    ctx: typer.Context,
+    save_id: str = typer.Argument(..., help="存档 ID"),
+    club_uid: int = typer.Option(..., "--club-uid", min=1, max=2**31 - 1, help="俱乐部 UID"),
+) -> None:
+    """读取存档中的俱乐部名单。"""
+    query = {"club_uid": club_uid}
+    _emit(
+        _invoke(
+            ctx,
+            lambda client: client.request_json("GET", f"/api/saves/{save_id}/squad", query=query),
+        )
+    )
+
+
+@artifacts_app.command("list")
+def artifacts_list(
+    ctx: typer.Context,
+    kind: str | None = typer.Option(None, "--kind", help="按类型过滤"),
+    job_id: str | None = typer.Option(None, "--job-id", help="按任务 ID 过滤"),
+    limit: int = ARTIFACTS_LIMIT,
+    offset: int = ARTIFACTS_OFFSET,
+) -> None:
+    """分页列出产物。"""
+    query = {"kind": kind, "job_id": job_id, "limit": limit, "offset": offset}
+    _emit(_invoke(ctx, lambda client: client.request_json("GET", "/api/artifacts", query=query)))
+
+
+@artifacts_app.command("get")
+def artifacts_get(ctx: typer.Context, artifact_id: str = typer.Argument(..., help="产物 ID")) -> None:
+    """查看单个产物。"""
+    _emit(_invoke(ctx, lambda client: client.request_json("GET", f"/api/artifacts/{artifact_id}")))
+
+
+@artifacts_app.command("content")
+def artifacts_content(
+    ctx: typer.Context,
+    artifact_id: str = typer.Argument(..., help="产物 ID"),
+    output: Path = typer.Option(..., "--output", help="写入的文件路径"),
+) -> None:
+    """下载产物文件内容。"""
+    _download(
+        ctx,
+        lambda client: client.request_bytes("GET", f"/api/artifacts/{artifact_id}/content"),
+        output,
+    )
+
+
+@artifacts_app.command("create")
+def artifacts_create(
+    ctx: typer.Context,
+    kind: str = typer.Option(..., "--kind", help="产物类型"),
+    filename: str = typer.Option(..., "--filename", help="文件名"),
+    file_path: str = typer.Option(..., "--file", help="产物内容文件路径"),
+    job_id: str | None = typer.Option(None, "--job-id", help="关联任务 ID"),
+) -> None:
+    """登记产物。"""
+    body: dict[str, Any] = {
+        "kind": kind,
+        "filename": filename,
+        "content_base64": _base64_file(file_path, "产物"),
+    }
+    if job_id is not None:
+        body["job_id"] = job_id
+    _emit(_invoke(ctx, lambda client: client.request_json("POST", "/api/artifacts", body=body)))
+
+
+@artifacts_app.command("delete")
+def artifacts_delete(ctx: typer.Context, artifact_id: str = typer.Argument(..., help="产物 ID")) -> None:
+    """删除产物。"""
+    _delete(ctx, f"/api/artifacts/{artifact_id}")
+
+
+@settings_app.command("list")
+def settings_list(ctx: typer.Context) -> None:
+    """列出设置项。"""
+    _emit(_invoke(ctx, lambda client: client.request_json("GET", "/api/settings")))
+
+
+@settings_app.command("get")
+def settings_get(ctx: typer.Context, key: str = typer.Argument(..., help="设置键")) -> None:
+    """查看单个设置项。"""
+    _emit(_invoke(ctx, lambda client: client.request_json("GET", f"/api/settings/{key}")))
+
+
+@settings_app.command("put")
+def settings_put(
+    ctx: typer.Context,
+    key: str = typer.Argument(..., help="设置键"),
+    value: str = typer.Option(..., "--value", help="设置值 JSON，可用 @文件"),
+    note: str | None = typer.Option(None, "--note", help="备注"),
+) -> None:
+    """写入设置项。"""
+    body: dict[str, Any] = {"value": _json_value(value, "value")}
+    if note is not None:
+        body["note"] = note
+    _emit(_invoke(ctx, lambda client: client.request_json("PUT", f"/api/settings/{key}", body=body)))
+
+
+@settings_app.command("delete")
+def settings_delete(ctx: typer.Context, key: str = typer.Argument(..., help="设置键")) -> None:
+    """删除设置项。"""
+    _delete(ctx, f"/api/settings/{key}")
+
+
+@concurrency_app.command("check")
+def concurrency_check(
+    ctx: typer.Context,
+    workers: int = typer.Option(..., "--workers", min=1, max=256, help="并行数"),
+    cpu_count: int = typer.Option(..., "--cpu-count", min=1, help="CPU 数量"),
+    available_memory_bytes: int = typer.Option(..., "--available-memory-bytes", min=0, help="可用内存字节"),
+    free_disk_bytes: int = typer.Option(..., "--free-disk-bytes", min=0, help="空闲磁盘字节"),
+    allow_oversubscription: bool = typer.Option(
+        False,
+        "--allow-oversubscription/--no-allow-oversubscription",
+        help="允许超额订阅",
+    ),
+) -> None:
+    """并发资源预检。"""
+    query = {
+        "workers": workers,
+        "cpu_count": cpu_count,
+        "available_memory_bytes": available_memory_bytes,
+        "free_disk_bytes": free_disk_bytes,
+        "allow_oversubscription": allow_oversubscription,
+    }
+    _emit(_invoke(ctx, lambda client: client.request_json("GET", "/api/concurrency/check", query=query)))
+
+
+@experiments_app.command("submit")
+def experiments_submit(
+    ctx: typer.Context,
+    seeds: str = typer.Option(..., "--seeds", help="种子 JSON 数组，可用 @文件"),
+    variants: str = typer.Option(..., "--variants", help="变体 JSON 数组，可用 @文件"),
+    workers: int = typer.Option(..., "--workers", min=1, max=256, help="并行数"),
+    cpu_count: int = typer.Option(..., "--cpu-count", min=1, help="CPU 数量"),
+    available_memory_bytes: int = typer.Option(..., "--available-memory-bytes", min=0, help="可用内存字节"),
+    free_disk_bytes: int = typer.Option(..., "--free-disk-bytes", min=0, help="空闲磁盘字节"),
+    name: str | None = typer.Option(None, "--name", help="批次名称"),
+    allow_oversubscription: bool = typer.Option(
+        False,
+        "--allow-oversubscription/--no-allow-oversubscription",
+        help="允许超额订阅",
+    ),
+) -> None:
+    """提交实验批次。"""
+    body: dict[str, Any] = {
+        "seeds": _json_array(seeds, "seeds"),
+        "variants": _json_array(variants, "variants"),
+        "workers": workers,
+        "cpu_count": cpu_count,
+        "available_memory_bytes": available_memory_bytes,
+        "free_disk_bytes": free_disk_bytes,
+        "allow_oversubscription": allow_oversubscription,
+    }
+    if name is not None:
+        body["name"] = name
+    _emit(_invoke(ctx, lambda client: client.request_json("POST", "/api/experiments", body=body)))
+
+
+@experiments_app.command("start")
+def experiments_start(ctx: typer.Context) -> None:
+    """启动下一个待运行实验。"""
+    _emit(_invoke(ctx, lambda client: client.request_json("POST", "/api/experiments/start")))
+
+
+@experiments_app.command("cancel")
+def experiments_cancel(ctx: typer.Context, job_id: str = typer.Argument(..., help="任务 ID")) -> None:
+    """取消实验任务。"""
+    _emit(_invoke(ctx, lambda client: client.request_json("POST", f"/api/experiments/{job_id}/cancel")))
+
+
+@experiments_app.command("resume")
+def experiments_resume(ctx: typer.Context, job_id: str = typer.Argument(..., help="任务 ID")) -> None:
+    """恢复实验任务。"""
+    _emit(_invoke(ctx, lambda client: client.request_json("POST", f"/api/experiments/{job_id}/resume")))
+
+
+@catalog_app.command("show")
+def catalog_show(ctx: typer.Context) -> None:
+    """读取运行时目录快照。"""
+    _emit(_invoke(ctx, lambda client: client.request_json("GET", "/api/catalog")))
 
 
 def main() -> None:

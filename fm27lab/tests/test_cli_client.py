@@ -42,9 +42,10 @@ def write_endpoint(data_dir: Path, payload) -> Path:
 
 
 class FakeResponse:
-    def __init__(self, payload: bytes = b"", status: int = 200):
+    def __init__(self, payload: bytes = b"", status: int = 200, headers: dict[str, str] | None = None):
         self.payload = payload
         self.status = status
+        self.headers = dict(headers or {})
 
     def read(self) -> bytes:
         return self.payload
@@ -195,6 +196,7 @@ def test_request_json_serializes_utf8_json_body(monkeypatch):
         ("PATCH", "/api/drafts/d1", {"name": "新名称"}),
         ("POST", "/api/jobs/j1/cancel", None),
         ("DELETE", "/api/pools/p1", None),
+        ("PUT", "/api/settings/theme", {"value": {"mode": "dark"}, "note": "主题"}),
     ],
 )
 def test_request_json_supports_lifecycle_methods(monkeypatch, method, path, body):
@@ -329,6 +331,95 @@ def test_sidecar_client_repr_masks_token():
     client = SidecarClient("http://127.0.0.1:4321", TOKEN)
     assert TOKEN not in repr(client)
     assert "http://127.0.0.1:4321" in repr(client)
+
+
+@pytest.mark.parametrize(
+    ("query", "expected"),
+    [
+        ({"allow_oversubscription": True}, {"allow_oversubscription": ["true"]}),
+        ({"allow_oversubscription": False}, {"allow_oversubscription": ["false"]}),
+        (
+            {"workers": 4, "allow_oversubscription": True},
+            {"workers": ["4"], "allow_oversubscription": ["true"]},
+        ),
+    ],
+)
+def test_request_json_serializes_boolean_query_values(monkeypatch, query, expected):
+    calls = install_urlopen(monkeypatch, lambda request_value: FakeResponse(b"{}", 200))
+    client = SidecarClient("http://127.0.0.1:4321", TOKEN)
+    client.request_json("GET", "/api/concurrency/check", query=query)
+    parsed = urlparse.urlsplit(calls[0]["request"].full_url)
+    assert urlparse.parse_qs(parsed.query) == expected
+
+
+def test_request_json_keeps_lowercase_boolean_strings(monkeypatch):
+    calls = install_urlopen(monkeypatch, lambda request_value: FakeResponse(b"{}", 200))
+    client = SidecarClient("http://127.0.0.1:4321", TOKEN)
+    client.request_json("GET", "/api/concurrency/check", query={"allow_oversubscription": "true"})
+    parsed = urlparse.urlsplit(calls[0]["request"].full_url)
+    assert urlparse.parse_qs(parsed.query) == {"allow_oversubscription": ["true"]}
+
+
+def test_request_bytes_returns_payload_and_lowercase_headers(monkeypatch):
+    payload = b"\x00binary\xff"
+    calls = install_urlopen(
+        monkeypatch,
+        lambda request_value: FakeResponse(
+            payload,
+            200,
+            headers={"ETag": '"abc"', "Content-Disposition": 'attachment; filename="x.bin"'},
+        ),
+    )
+    client = SidecarClient("http://127.0.0.1:4321", TOKEN)
+    body, headers = client.request_bytes("GET", "/api/artifacts/a1/content")
+    assert body == payload
+    assert headers == {"etag": '"abc"', "content-disposition": 'attachment; filename="x.bin"'}
+    request_value = calls[0]["request"]
+    assert request_value.get_method() == "GET"
+    assert request_value.get_header("Accept") == "*/*"
+    assert request_value.get_header("Authorization") == f"Bearer {TOKEN}"
+    assert TOKEN not in repr(headers)
+
+
+def test_request_bytes_accepts_explicit_accept_header(monkeypatch):
+    calls = install_urlopen(monkeypatch, lambda request_value: FakeResponse(b"a,b\n", 200))
+    client = SidecarClient("http://127.0.0.1:4321", TOKEN)
+    body, headers = client.request_bytes("GET", "/api/jobs/j1/export.csv", accept="text/csv")
+    assert body == b"a,b\n"
+    assert headers == {}
+    assert calls[0]["request"].get_header("Accept") == "text/csv"
+
+
+def test_request_bytes_returns_empty_payload_for_204(monkeypatch):
+    install_urlopen(monkeypatch, lambda request_value: FakeResponse(b"", 204))
+    client = SidecarClient("http://127.0.0.1:4321", TOKEN)
+    assert client.request_bytes("GET", "/api/jobs/j1/export.csv") == (b"", {})
+
+
+def test_request_bytes_maps_error_envelope(monkeypatch):
+    envelope = {
+        "error": {
+            "code": "not_found",
+            "message": "产物文件不存在",
+            "details": None,
+            "retriable": False,
+            "retry_after_seconds": None,
+        }
+    }
+
+    def handler(request_value):
+        body = json.dumps(envelope, ensure_ascii=False).encode("utf-8")
+        raise urlerror.HTTPError(request_value.full_url, 404, "Not Found", {}, io.BytesIO(body))
+
+    install_urlopen(monkeypatch, handler)
+    client = SidecarClient("http://127.0.0.1:4321", TOKEN)
+    with pytest.raises(SidecarError) as raised:
+        client.request_bytes("GET", "/api/artifacts/missing/content")
+    error = raised.value
+    assert error.code == "not_found"
+    assert error.message == "产物文件不存在"
+    assert error.status == 404
+    assert TOKEN not in str(error)
 
 
 @pytest.mark.parametrize(

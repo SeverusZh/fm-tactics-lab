@@ -15,7 +15,15 @@ from fm27lab.config import LOOPBACK_HOSTS
 
 DEFAULT_TIMEOUT = 30.0
 ENDPOINT_RELATIVE_PATH = Path("agent") / "endpoint.json"
-SUPPORTED_METHODS = frozenset({"GET", "POST", "PATCH", "DELETE"})
+SUPPORTED_METHODS = frozenset({"GET", "POST", "PUT", "PATCH", "DELETE"})
+
+
+def _query_text(value: Any) -> str:
+    if value is True:
+        return "true"
+    if value is False:
+        return "false"
+    return str(value)
 
 
 class SidecarError(Exception):
@@ -168,7 +176,7 @@ class SidecarClient:
         url = self.url + urlparse.quote(path, safe="/")
         if not query:
             return url
-        pairs = [(str(key), str(value)) for key, value in query.items() if value is not None]
+        pairs = [(str(key), _query_text(value)) for key, value in query.items() if value is not None]
         if not pairs:
             return url
         return f"{url}?{urlparse.urlencode(pairs)}"
@@ -176,14 +184,28 @@ class SidecarClient:
     def _open(self, request_value: request.Request):
         return self._opener.open(request_value, timeout=self.timeout)
 
-    def request_json(
+    def request_bytes(
         self,
         method: str,
         path: str,
         *,
         body: Any = None,
         query: Mapping[str, Any] | None = None,
-    ) -> dict[str, Any]:
+        accept: str = "*/*",
+    ) -> tuple[bytes, dict[str, str]]:
+        """Return raw response bytes and headers for binary or text downloads."""
+        status, headers, raw = self._send(method, path, body=body, query=query, accept=accept)
+        return raw, headers
+
+    def _send(
+        self,
+        method: str,
+        path: str,
+        *,
+        body: Any = None,
+        query: Mapping[str, Any] | None = None,
+        accept: str = "application/json",
+    ) -> tuple[int, dict[str, str], bytes]:
         normalized = method.upper() if isinstance(method, str) else ""
         if normalized not in SUPPORTED_METHODS:
             raise ValueError(f"不支持的 HTTP 方法：{method}")
@@ -196,7 +218,7 @@ class SidecarClient:
                 raise ValueError("请求体无法序列化为 JSON") from None
         try:
             request_value = request.Request(url, data=data, method=normalized)
-            request_value.add_header("Accept", "application/json")
+            request_value.add_header("Accept", accept)
             request_value.add_header("Authorization", f"Bearer {self.token}")
             if data is not None:
                 request_value.add_header("Content-Type", "application/json")
@@ -206,6 +228,12 @@ class SidecarClient:
             with self._open(request_value) as response:
                 raw = response.read()
                 status = response.status
+                raw_headers = getattr(response, "headers", None)
+                headers = (
+                    {str(key).lower(): str(value) for key, value in raw_headers.items()}
+                    if hasattr(raw_headers, "items")
+                    else {}
+                )
         except urlerror.HTTPError as error:
             try:
                 if 300 <= error.code < 400:
@@ -227,6 +255,17 @@ class SidecarClient:
             raise SidecarError("invalid_request", f"sidecar 请求参数无效：{error}") from None
         except http_client.HTTPException:
             raise SidecarError("invalid_response", "sidecar 返回了无效的 HTTP 响应") from None
+        return status, headers, raw
+
+    def request_json(
+        self,
+        method: str,
+        path: str,
+        *,
+        body: Any = None,
+        query: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        status, _, raw = self._send(method, path, body=body, query=query)
         if status == 204 or not raw:
             return {}
         try:

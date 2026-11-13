@@ -1,9 +1,14 @@
 from __future__ import annotations
 
+import base64
 import contextlib
 import http.server
 import json
+import os
+import subprocess
+import sys
 import threading
+import urllib.request
 from pathlib import Path
 
 import pytest
@@ -12,23 +17,33 @@ from typer.testing import CliRunner
 import fm27lab
 import fm27lab.cli as cli
 from fm27lab.client import SidecarError
+from fm27lab.tests.test_http_drafts import scenario as draft_scenario
 
 TOKEN = "token-must-not-leak-2f8a"
 
 
 class FakeClient:
-    def __init__(self, responses=None, error=None):
+    def __init__(self, responses=None, error=None, download=None):
         self.responses = list(responses or [])
         self.error = error
+        self.download = download
         self.calls = []
 
-    def request_json(self, method, path, *, body=None, query=None):
+    def _record(self, method, path, body, query):
         self.calls.append({"method": method, "path": path, "body": body, "query": query})
         if self.error is not None:
             raise self.error
+
+    def request_json(self, method, path, *, body=None, query=None):
+        self._record(method, path, body, query)
         if not self.responses:
             raise AssertionError(f"未预期的请求：{method} {path}")
         return self.responses.pop(0)
+
+    def request_bytes(self, method, path, *, body=None, query=None):
+        self._record(method, path, body, query)
+        payload = self.download if self.download is not None else b""
+        return payload, {"etag": '"unused"'}
 
 
 @pytest.fixture(autouse=True)
@@ -38,8 +53,8 @@ def fake_data_dir(tmp_path, monkeypatch):
     return tmp_path
 
 
-def invoke(monkeypatch, args, responses=None, error=None):
-    fake = FakeClient(responses, error)
+def invoke(monkeypatch, args, responses=None, error=None, download=None):
+    fake = FakeClient(responses, error, download)
     monkeypatch.setattr(cli, "_client_for", lambda data_dir: fake)
     result = CliRunner().invoke(cli.app, args)
     return result, fake
@@ -49,10 +64,32 @@ def parse_output(result):
     return json.loads(result.stdout)
 
 
+def write_bytes(path: Path, content: bytes) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(content)
+    return path
+
+
+def encode_base64(content: bytes) -> str:
+    return base64.b64encode(content).decode("ascii")
+
+
 def test_root_help_lists_command_groups():
     result = CliRunner().invoke(cli.app, ["--help"])
     assert result.exit_code == 0, result.output
-    for name in ("version", "serve", "pools", "drafts", "jobs", "saves"):
+    for name in (
+        "version",
+        "serve",
+        "pools",
+        "drafts",
+        "jobs",
+        "saves",
+        "artifacts",
+        "settings",
+        "concurrency",
+        "experiments",
+        "catalog",
+    ):
         assert name in result.stdout, name
 
 
@@ -66,22 +103,79 @@ def test_pools_help_lists_crud_commands():
 def test_drafts_help_lists_crud_commands():
     result = CliRunner().invoke(cli.app, ["drafts", "--help"])
     assert result.exit_code == 0, result.output
-    for name in ("list", "get", "create", "update", "delete"):
+    for name in (
+        "list",
+        "get",
+        "create",
+        "update",
+        "delete",
+        "attributes",
+        "export-fmf",
+        "import-fmf",
+        "apply-roster",
+        "undo-roster",
+    ):
         assert name in result.stdout, name
 
 
 def test_jobs_help_lists_lifecycle_commands():
     result = CliRunner().invoke(cli.app, ["jobs", "--help"])
     assert result.exit_code == 0, result.output
-    for name in ("list", "get", "create", "update", "cancel", "delete", "runs", "summary"):
+    for name in (
+        "list",
+        "get",
+        "create",
+        "update",
+        "cancel",
+        "delete",
+        "runs",
+        "summary",
+        "batch-action",
+        "batch-delete",
+        "export",
+        "pool-summary",
+    ):
         assert name in result.stdout, name
 
 
 def test_saves_help_lists_lifecycle_commands():
     result = CliRunner().invoke(cli.app, ["saves", "--help"])
     assert result.exit_code == 0, result.output
-    for name in ("list", "get", "create", "update", "delete", "import"):
+    for name in ("list", "get", "create", "update", "delete", "import", "import-file", "squad"):
         assert name in result.stdout, name
+
+
+def test_artifacts_help_lists_commands():
+    result = CliRunner().invoke(cli.app, ["artifacts", "--help"])
+    assert result.exit_code == 0, result.output
+    for name in ("list", "get", "content", "create", "delete"):
+        assert name in result.stdout, name
+
+
+def test_settings_help_lists_commands():
+    result = CliRunner().invoke(cli.app, ["settings", "--help"])
+    assert result.exit_code == 0, result.output
+    for name in ("list", "get", "put", "delete"):
+        assert name in result.stdout, name
+
+
+def test_concurrency_help_lists_check_command():
+    result = CliRunner().invoke(cli.app, ["concurrency", "--help"])
+    assert result.exit_code == 0, result.output
+    assert "check" in result.stdout
+
+
+def test_experiments_help_lists_commands():
+    result = CliRunner().invoke(cli.app, ["experiments", "--help"])
+    assert result.exit_code == 0, result.output
+    for name in ("submit", "start", "cancel", "resume"):
+        assert name in result.stdout, name
+
+
+def test_catalog_help_lists_show_command():
+    result = CliRunner().invoke(cli.app, ["catalog", "--help"])
+    assert result.exit_code == 0, result.output
+    assert "show" in result.stdout
 
 
 def test_version_command_is_preserved():
@@ -689,3 +783,1178 @@ def test_invalid_id_reports_structured_error_without_traceback(tmp_path: Path):
     assert "validation_failed" in result.stderr
     assert "条目 ID 无效" in result.stderr
     assert server.requests == [{"path": "/api/pools/bad/id%3Fx%3D1", "authorization": f"Bearer {TOKEN}"}]
+
+
+def test_drafts_attributes_posts_full_body(monkeypatch):
+    payload = {"draft": {"id": "d1", "name": "草案"}, "snapshot": None, "changed_players": 2}
+    result, fake = invoke(
+        monkeypatch,
+        [
+            "drafts",
+            "attributes",
+            "d1",
+            "--side",
+            "home",
+            "--scope",
+            "starters",
+            "--operation",
+            "set",
+            "--params",
+            '{"overall":15}',
+        ],
+        [payload],
+    )
+    assert result.exit_code == 0, result.output
+    assert parse_output(result) == payload
+    assert fake.calls == [
+        {
+            "method": "POST",
+            "path": "/api/drafts/d1/attributes",
+            "body": {"side": "home", "scope": "starters", "operation": "set", "params": {"overall": 15}},
+            "query": None,
+        }
+    ]
+
+
+def test_drafts_attributes_includes_player_index(monkeypatch):
+    result, fake = invoke(
+        monkeypatch,
+        [
+            "drafts",
+            "attributes",
+            "d1",
+            "--side",
+            "away",
+            "--scope",
+            "players",
+            "--operation",
+            "set",
+            "--params",
+            "{}",
+            "--player-index",
+            "5",
+        ],
+        [{"changed_players": 1}],
+    )
+    assert result.exit_code == 0, result.output
+    assert fake.calls[0]["body"] == {
+        "side": "away",
+        "scope": "players",
+        "operation": "set",
+        "params": {},
+        "player_index": 5,
+    }
+
+
+def test_drafts_attributes_rejects_invalid_params_json(monkeypatch):
+    result, fake = invoke(
+        monkeypatch,
+        [
+            "drafts",
+            "attributes",
+            "d1",
+            "--side",
+            "home",
+            "--scope",
+            "starters",
+            "--operation",
+            "set",
+            "--params",
+            "not-json",
+        ],
+    )
+    assert result.exit_code == 2
+    assert fake.calls == []
+    assert "params" in result.stderr
+
+
+def test_drafts_import_fmf_posts_base64_content(monkeypatch, fake_data_dir: Path):
+    content = b"fmf-binary-content"
+    path = write_bytes(fake_data_dir / "tactic.fmf", content)
+    payload = {"id": "d1", "name": "草案"}
+    result, fake = invoke(
+        monkeypatch,
+        ["drafts", "import-fmf", "--name", "草案", "--file", str(path), "--source", '{"save_id":"s1"}'],
+        [payload],
+    )
+    assert result.exit_code == 0, result.output
+    assert parse_output(result) == payload
+    assert fake.calls == [
+        {
+            "method": "POST",
+            "path": "/api/drafts/import-fmf",
+            "body": {"name": "草案", "content_base64": encode_base64(content), "source": {"save_id": "s1"}},
+            "query": None,
+        }
+    ]
+
+
+def test_drafts_import_fmf_omits_optional_source(monkeypatch, fake_data_dir: Path):
+    path = write_bytes(fake_data_dir / "tactic.fmf", b"data")
+    result, fake = invoke(
+        monkeypatch,
+        ["drafts", "import-fmf", "--name", "草案", "--file", str(path)],
+        [{"id": "d1"}],
+    )
+    assert result.exit_code == 0, result.output
+    assert fake.calls[0]["body"] == {"name": "草案", "content_base64": encode_base64(b"data")}
+
+
+def test_drafts_import_fmf_rejects_unreadable_file(monkeypatch, fake_data_dir: Path):
+    missing = fake_data_dir / "missing.fmf"
+    result, fake = invoke(monkeypatch, ["drafts", "import-fmf", "--name", "草案", "--file", str(missing)])
+    assert result.exit_code == 2
+    assert fake.calls == []
+    assert "无法读取" in result.stderr
+
+
+def test_drafts_apply_roster_posts_body(monkeypatch):
+    payload = {"draft": {"id": "d1"}, "applied": {"starters": 11, "substitutes": 7}}
+    result, fake = invoke(
+        monkeypatch,
+        [
+            "drafts",
+            "apply-roster",
+            "d1",
+            "--save-id",
+            "s1",
+            "--club-uid",
+            "7",
+            "--side",
+            "home",
+            "--scope",
+            "starters",
+        ],
+        [payload],
+    )
+    assert result.exit_code == 0, result.output
+    assert parse_output(result) == payload
+    assert fake.calls == [
+        {
+            "method": "POST",
+            "path": "/api/drafts/d1/apply-roster",
+            "body": {"save_id": "s1", "club_uid": 7, "side": "home", "scope": "starters"},
+            "query": None,
+        }
+    ]
+
+
+def test_drafts_apply_roster_requires_club_uid(monkeypatch):
+    result, fake = invoke(
+        monkeypatch,
+        ["drafts", "apply-roster", "d1", "--save-id", "s1", "--side", "home", "--scope", "starters"],
+    )
+    assert result.exit_code == 2
+    assert fake.calls == []
+
+
+def test_drafts_undo_roster_posts_without_body(monkeypatch):
+    payload = {"draft": {"id": "d1"}}
+    result, fake = invoke(monkeypatch, ["drafts", "undo-roster", "d1"], [payload])
+    assert result.exit_code == 0, result.output
+    assert parse_output(result) == payload
+    assert fake.calls == [
+        {"method": "POST", "path": "/api/drafts/d1/undo-roster", "body": None, "query": None}
+    ]
+
+
+def test_drafts_undo_roster_requires_draft_id(monkeypatch):
+    result, fake = invoke(monkeypatch, ["drafts", "undo-roster"])
+    assert result.exit_code == 2
+    assert fake.calls == []
+
+
+def test_jobs_batch_actions_posts_action_and_ids(monkeypatch):
+    payload = {"succeeded": ["j1"], "failed": [{"id": "j2", "code": "not_found", "message": "任务不存在"}]}
+    result, fake = invoke(
+        monkeypatch,
+        ["jobs", "batch-action", "--action", "cancel", "--ids", "j1", "--ids", "j2"],
+        [payload],
+    )
+    assert result.exit_code == 0, result.output
+    assert parse_output(result) == payload
+    assert fake.calls == [
+        {
+            "method": "POST",
+            "path": "/api/jobs/actions",
+            "body": {"action": "cancel", "ids": ["j1", "j2"]},
+            "query": None,
+        }
+    ]
+
+
+def test_jobs_batch_actions_rejects_unknown_action(monkeypatch):
+    result, fake = invoke(monkeypatch, ["jobs", "batch-action", "--action", "stop", "--ids", "j1"])
+    assert result.exit_code == 2
+    assert fake.calls == []
+    assert "cancel" in result.stderr or "delete" in result.stderr
+
+
+def test_jobs_batch_actions_requires_ids(monkeypatch):
+    result, fake = invoke(monkeypatch, ["jobs", "batch-action", "--action", "delete"])
+    assert result.exit_code == 2
+    assert fake.calls == []
+
+
+def test_jobs_batch_delete_sends_delete_with_body(monkeypatch):
+    payload = {"deleted": ["j1"], "failed": [{"id": "j2", "error": "任务不存在"}]}
+    result, fake = invoke(monkeypatch, ["jobs", "batch-delete", "--ids", "j1", "--ids", "j2"], [payload])
+    assert result.exit_code == 0, result.output
+    assert parse_output(result) == payload
+    assert fake.calls == [
+        {"method": "DELETE", "path": "/api/jobs", "body": {"ids": ["j1", "j2"]}, "query": None}
+    ]
+
+
+def test_jobs_batch_delete_requires_ids(monkeypatch):
+    result, fake = invoke(monkeypatch, ["jobs", "batch-delete"])
+    assert result.exit_code == 2
+    assert fake.calls == []
+
+
+def test_jobs_pool_summary_requests_route(monkeypatch):
+    payload = {"enabled": True, "entry_count": 2, "draws": {"a": 1}}
+    result, fake = invoke(monkeypatch, ["jobs", "pool-summary", "j1"], [payload])
+    assert result.exit_code == 0, result.output
+    assert parse_output(result) == payload
+    assert fake.calls == [{"method": "GET", "path": "/api/jobs/j1/pool-summary", "body": None, "query": None}]
+
+
+def test_jobs_pool_summary_requires_job_id(monkeypatch):
+    result, fake = invoke(monkeypatch, ["jobs", "pool-summary"])
+    assert result.exit_code == 2
+    assert fake.calls == []
+
+
+def test_saves_import_file_posts_source_path_and_replace(monkeypatch):
+    payload = {"save_id": "s1", "status": "imported", "managed_clubs": [], "clubs": 0}
+    result, fake = invoke(
+        monkeypatch,
+        ["saves", "import-file", "--source-path", "/saves/season.fm", "--replace"],
+        [payload],
+    )
+    assert result.exit_code == 0, result.output
+    assert parse_output(result) == payload
+    assert fake.calls == [
+        {
+            "method": "POST",
+            "path": "/api/saves/import",
+            "body": {"source_path": "/saves/season.fm", "replace": True},
+            "query": None,
+        }
+    ]
+
+
+def test_saves_import_file_defaults_replace_to_false(monkeypatch):
+    result, fake = invoke(
+        monkeypatch,
+        ["saves", "import-file", "--source-path", "/saves/season.fm"],
+        [{"save_id": "s1"}],
+    )
+    assert result.exit_code == 0, result.output
+    assert fake.calls[0]["body"] == {"source_path": "/saves/season.fm", "replace": False}
+
+
+def test_saves_import_file_requires_source_path(monkeypatch):
+    result, fake = invoke(monkeypatch, ["saves", "import-file"])
+    assert result.exit_code == 2
+    assert fake.calls == []
+
+
+def test_saves_import_file_maps_conflict_to_exit_1(monkeypatch):
+    result, fake = invoke(
+        monkeypatch,
+        ["saves", "import-file", "--source-path", "/saves/season.fm"],
+        error=SidecarError("conflict", "存档内容重复", 409),
+    )
+    assert result.exit_code == 1
+    assert result.stdout == ""
+    assert "conflict" in result.stderr
+    assert "存档内容重复" in result.stderr
+    assert len(fake.calls) == 1
+
+
+def test_saves_squad_passes_club_uid_query(monkeypatch):
+    payload = {"save_id": "s1", "club_uid": 7, "club_name": "阿森纳", "players": [], "selection": None}
+    result, fake = invoke(monkeypatch, ["saves", "squad", "s1", "--club-uid", "7"], [payload])
+    assert result.exit_code == 0, result.output
+    assert parse_output(result) == payload
+    assert fake.calls == [
+        {"method": "GET", "path": "/api/saves/s1/squad", "body": None, "query": {"club_uid": 7}}
+    ]
+
+
+def test_saves_squad_requires_club_uid(monkeypatch):
+    result, fake = invoke(monkeypatch, ["saves", "squad", "s1"])
+    assert result.exit_code == 2
+    assert fake.calls == []
+
+
+def test_saves_squad_rejects_out_of_range_club_uid(monkeypatch):
+    result, fake = invoke(monkeypatch, ["saves", "squad", "s1", "--club-uid", "0"])
+    assert result.exit_code == 2
+    assert fake.calls == []
+
+
+def test_artifacts_list_passes_filters_and_pagination(monkeypatch):
+    payload = {"items": [], "total": 0, "next_offset": None}
+    result, fake = invoke(
+        monkeypatch,
+        ["artifacts", "list", "--kind", "tactic", "--job-id", "j1", "--limit", "5", "--offset", "10"],
+        [payload],
+    )
+    assert result.exit_code == 0, result.output
+    assert parse_output(result) == payload
+    assert fake.calls == [
+        {
+            "method": "GET",
+            "path": "/api/artifacts",
+            "body": None,
+            "query": {"kind": "tactic", "job_id": "j1", "limit": 5, "offset": 10},
+        }
+    ]
+
+
+def test_artifacts_list_uses_route_defaults(monkeypatch):
+    result, fake = invoke(monkeypatch, ["artifacts", "list"], [{"items": []}])
+    assert result.exit_code == 0, result.output
+    assert fake.calls[0]["query"] == {"kind": None, "job_id": None, "limit": 50, "offset": 0}
+
+
+def test_artifacts_list_rejects_out_of_range_limit(monkeypatch):
+    result, fake = invoke(monkeypatch, ["artifacts", "list", "--limit", "0"])
+    assert result.exit_code == 2
+    assert fake.calls == []
+
+
+def test_artifacts_get_requests_by_id(monkeypatch):
+    payload = {"id": "a1", "kind": "tactic", "filename": "a.bin"}
+    result, fake = invoke(monkeypatch, ["artifacts", "get", "a1"], [payload])
+    assert result.exit_code == 0, result.output
+    assert parse_output(result) == payload
+    assert fake.calls == [{"method": "GET", "path": "/api/artifacts/a1", "body": None, "query": None}]
+
+
+def test_artifacts_get_requires_id(monkeypatch):
+    result, fake = invoke(monkeypatch, ["artifacts", "get"])
+    assert result.exit_code == 2
+    assert fake.calls == []
+
+
+def test_artifacts_create_posts_base64_content(monkeypatch, fake_data_dir: Path):
+    content = b"artifact-bytes"
+    path = write_bytes(fake_data_dir / "artifact.bin", content)
+    payload = {"id": "a1", "kind": "tactic", "filename": "artifact.bin"}
+    result, fake = invoke(
+        monkeypatch,
+        [
+            "artifacts",
+            "create",
+            "--kind",
+            "tactic",
+            "--filename",
+            "artifact.bin",
+            "--file",
+            str(path),
+            "--job-id",
+            "j1",
+        ],
+        [payload],
+    )
+    assert result.exit_code == 0, result.output
+    assert parse_output(result) == payload
+    assert fake.calls == [
+        {
+            "method": "POST",
+            "path": "/api/artifacts",
+            "body": {
+                "kind": "tactic",
+                "filename": "artifact.bin",
+                "content_base64": encode_base64(content),
+                "job_id": "j1",
+            },
+            "query": None,
+        }
+    ]
+
+
+def test_artifacts_create_omits_job_id(monkeypatch, fake_data_dir: Path):
+    path = write_bytes(fake_data_dir / "artifact.bin", b"data")
+    result, fake = invoke(
+        monkeypatch,
+        ["artifacts", "create", "--kind", "tactic", "--filename", "artifact.bin", "--file", str(path)],
+        [{"id": "a1"}],
+    )
+    assert result.exit_code == 0, result.output
+    assert fake.calls[0]["body"] == {
+        "kind": "tactic",
+        "filename": "artifact.bin",
+        "content_base64": encode_base64(b"data"),
+    }
+
+
+def test_artifacts_create_rejects_unreadable_file(monkeypatch, fake_data_dir: Path):
+    result, fake = invoke(
+        monkeypatch,
+        [
+            "artifacts",
+            "create",
+            "--kind",
+            "tactic",
+            "--filename",
+            "a.bin",
+            "--file",
+            str(fake_data_dir / "nope.bin"),
+        ],
+    )
+    assert result.exit_code == 2
+    assert fake.calls == []
+    assert "无法读取" in result.stderr
+
+
+def test_artifacts_delete_reports_deleted(monkeypatch):
+    result, fake = invoke(monkeypatch, ["artifacts", "delete", "a1"], [{}])
+    assert result.exit_code == 0, result.output
+    assert parse_output(result) == {"deleted": True}
+    assert fake.calls == [{"method": "DELETE", "path": "/api/artifacts/a1", "body": None, "query": None}]
+
+
+def test_artifacts_delete_maps_not_found_to_exit_1(monkeypatch):
+    result, fake = invoke(
+        monkeypatch,
+        ["artifacts", "delete", "a1"],
+        error=SidecarError("not_found", "产物不存在", 404),
+    )
+    assert result.exit_code == 1
+    assert "not_found" in result.stderr
+    assert "产物不存在" in result.stderr
+    assert len(fake.calls) == 1
+
+
+def test_settings_list_requests_route(monkeypatch):
+    payload = {"items": [{"key": "theme", "value": "dark"}], "total": 1}
+    result, fake = invoke(monkeypatch, ["settings", "list"], [payload])
+    assert result.exit_code == 0, result.output
+    assert parse_output(result) == payload
+    assert fake.calls == [{"method": "GET", "path": "/api/settings", "body": None, "query": None}]
+
+
+def test_settings_list_maps_server_error_to_exit_1(monkeypatch):
+    result, fake = invoke(
+        monkeypatch,
+        ["settings", "list"],
+        error=SidecarError("internal_error", "internal server error", 500),
+    )
+    assert result.exit_code == 1
+    assert result.stdout == ""
+    assert "internal_error" in result.stderr
+    assert "internal server error" in result.stderr
+
+
+def test_settings_get_requests_key(monkeypatch):
+    payload = {"key": "theme", "value": "dark", "note": None, "updated_at": "2026-01-01T00:00:00+00:00"}
+    result, fake = invoke(monkeypatch, ["settings", "get", "theme"], [payload])
+    assert result.exit_code == 0, result.output
+    assert parse_output(result) == payload
+    assert fake.calls == [{"method": "GET", "path": "/api/settings/theme", "body": None, "query": None}]
+
+
+def test_settings_get_requires_key(monkeypatch):
+    result, fake = invoke(monkeypatch, ["settings", "get"])
+    assert result.exit_code == 2
+    assert fake.calls == []
+
+
+def test_settings_put_sends_value_and_note(monkeypatch):
+    result, fake = invoke(
+        monkeypatch,
+        ["settings", "put", "theme", "--value", '{"mode":"dark"}', "--note", "主题设置"],
+        [{"key": "theme"}],
+    )
+    assert result.exit_code == 0, result.output
+    assert fake.calls == [
+        {
+            "method": "PUT",
+            "path": "/api/settings/theme",
+            "body": {"value": {"mode": "dark"}, "note": "主题设置"},
+            "query": None,
+        }
+    ]
+
+
+def test_settings_put_accepts_scalar_json_value(monkeypatch):
+    result, fake = invoke(
+        monkeypatch,
+        ["settings", "put", "theme", "--value", '"dark"'],
+        [{"key": "theme"}],
+    )
+    assert result.exit_code == 0, result.output
+    assert fake.calls[0]["body"] == {"value": "dark"}
+
+
+def test_settings_put_omits_note(monkeypatch):
+    result, fake = invoke(
+        monkeypatch,
+        ["settings", "put", "theme", "--value", "1"],
+        [{"key": "theme"}],
+    )
+    assert result.exit_code == 0, result.output
+    assert fake.calls[0]["body"] == {"value": 1}
+
+
+def test_settings_put_rejects_invalid_json_value(monkeypatch):
+    result, fake = invoke(monkeypatch, ["settings", "put", "theme", "--value", "not-json"])
+    assert result.exit_code == 2
+    assert fake.calls == []
+    assert "value" in result.stderr
+
+
+def test_settings_delete_reports_deleted(monkeypatch):
+    result, fake = invoke(monkeypatch, ["settings", "delete", "theme"], [{}])
+    assert result.exit_code == 0, result.output
+    assert parse_output(result) == {"deleted": True}
+    assert fake.calls == [{"method": "DELETE", "path": "/api/settings/theme", "body": None, "query": None}]
+
+
+def test_settings_delete_maps_not_found_to_exit_1(monkeypatch):
+    result, fake = invoke(
+        monkeypatch,
+        ["settings", "delete", "theme"],
+        error=SidecarError("not_found", "设置不存在", 404),
+    )
+    assert result.exit_code == 1
+    assert "not_found" in result.stderr
+    assert "设置不存在" in result.stderr
+
+
+def test_concurrency_check_passes_query(monkeypatch):
+    payload = {
+        "allowed": True,
+        "code": None,
+        "recommended_workers": 8,
+        "warnings": [],
+        "memory_required_bytes": 0,
+        "disk_required_bytes": 0,
+    }
+    result, fake = invoke(
+        monkeypatch,
+        [
+            "concurrency",
+            "check",
+            "--workers",
+            "8",
+            "--cpu-count",
+            "16",
+            "--available-memory-bytes",
+            "1024",
+            "--free-disk-bytes",
+            "2048",
+            "--allow-oversubscription",
+        ],
+        [payload],
+    )
+    assert result.exit_code == 0, result.output
+    assert parse_output(result) == payload
+    assert fake.calls == [
+        {
+            "method": "GET",
+            "path": "/api/concurrency/check",
+            "body": None,
+            "query": {
+                "workers": 8,
+                "cpu_count": 16,
+                "available_memory_bytes": 1024,
+                "free_disk_bytes": 2048,
+                "allow_oversubscription": True,
+            },
+        }
+    ]
+
+
+def test_concurrency_check_defaults_oversubscription_to_false(monkeypatch):
+    result, fake = invoke(
+        monkeypatch,
+        [
+            "concurrency",
+            "check",
+            "--workers",
+            "1",
+            "--cpu-count",
+            "1",
+            "--available-memory-bytes",
+            "0",
+            "--free-disk-bytes",
+            "0",
+        ],
+        [{"allowed": True}],
+    )
+    assert result.exit_code == 0, result.output
+    assert fake.calls[0]["query"]["allow_oversubscription"] is False
+
+
+def test_concurrency_check_rejects_out_of_range_workers(monkeypatch):
+    result, fake = invoke(
+        monkeypatch,
+        [
+            "concurrency",
+            "check",
+            "--workers",
+            "0",
+            "--cpu-count",
+            "1",
+            "--available-memory-bytes",
+            "0",
+            "--free-disk-bytes",
+            "0",
+        ],
+    )
+    assert result.exit_code == 2
+    assert fake.calls == []
+
+
+def test_experiments_submit_posts_full_body(monkeypatch):
+    payload = {"id": "j1", "kind": "experiment", "status": "queued"}
+    result, fake = invoke(
+        monkeypatch,
+        [
+            "experiments",
+            "submit",
+            "--name",
+            "批次",
+            "--seeds",
+            "[1, 2]",
+            "--variants",
+            '["a", "b"]',
+            "--workers",
+            "4",
+            "--cpu-count",
+            "8",
+            "--available-memory-bytes",
+            "1024",
+            "--free-disk-bytes",
+            "2048",
+            "--allow-oversubscription",
+        ],
+        [payload],
+    )
+    assert result.exit_code == 0, result.output
+    assert parse_output(result) == payload
+    assert fake.calls == [
+        {
+            "method": "POST",
+            "path": "/api/experiments",
+            "body": {
+                "name": "批次",
+                "seeds": [1, 2],
+                "variants": ["a", "b"],
+                "workers": 4,
+                "cpu_count": 8,
+                "available_memory_bytes": 1024,
+                "free_disk_bytes": 2048,
+                "allow_oversubscription": True,
+            },
+            "query": None,
+        }
+    ]
+
+
+def test_experiments_submit_omits_optional_name(monkeypatch):
+    result, fake = invoke(
+        monkeypatch,
+        [
+            "experiments",
+            "submit",
+            "--seeds",
+            "[1]",
+            "--variants",
+            '["a"]',
+            "--workers",
+            "1",
+            "--cpu-count",
+            "1",
+            "--available-memory-bytes",
+            "0",
+            "--free-disk-bytes",
+            "0",
+        ],
+        [{"id": "j1"}],
+    )
+    assert result.exit_code == 0, result.output
+    assert fake.calls[0]["body"] == {
+        "seeds": [1],
+        "variants": ["a"],
+        "workers": 1,
+        "cpu_count": 1,
+        "available_memory_bytes": 0,
+        "free_disk_bytes": 0,
+        "allow_oversubscription": False,
+    }
+
+
+def test_experiments_submit_rejects_non_array_seeds(monkeypatch):
+    result, fake = invoke(
+        monkeypatch,
+        [
+            "experiments",
+            "submit",
+            "--seeds",
+            '{"a":1}',
+            "--variants",
+            '["a"]',
+            "--workers",
+            "1",
+            "--cpu-count",
+            "1",
+            "--available-memory-bytes",
+            "0",
+            "--free-disk-bytes",
+            "0",
+        ],
+    )
+    assert result.exit_code == 2
+    assert fake.calls == []
+    assert "seeds" in result.stderr
+
+
+def test_experiments_start_posts_route(monkeypatch):
+    payload = {"job": {"id": "j1", "status": "running"}}
+    result, fake = invoke(monkeypatch, ["experiments", "start"], [payload])
+    assert result.exit_code == 0, result.output
+    assert parse_output(result) == payload
+    assert fake.calls == [{"method": "POST", "path": "/api/experiments/start", "body": None, "query": None}]
+
+
+def test_experiments_start_outputs_empty_object_for_empty_queue(monkeypatch):
+    result, fake = invoke(monkeypatch, ["experiments", "start"], [{}])
+    assert result.exit_code == 0, result.output
+    assert parse_output(result) == {}
+
+
+def test_experiments_start_maps_engine_unavailable_to_exit_1(monkeypatch):
+    result, fake = invoke(
+        monkeypatch,
+        ["experiments", "start"],
+        error=SidecarError("engine_unavailable", "引擎执行失败", 503),
+    )
+    assert result.exit_code == 1
+    assert "engine_unavailable" in result.stderr
+    assert "引擎执行失败" in result.stderr
+
+
+def test_experiments_cancel_posts_route(monkeypatch):
+    payload = {"id": "j1", "status": "cancelled"}
+    result, fake = invoke(monkeypatch, ["experiments", "cancel", "j1"], [payload])
+    assert result.exit_code == 0, result.output
+    assert parse_output(result) == payload
+    assert fake.calls == [
+        {"method": "POST", "path": "/api/experiments/j1/cancel", "body": None, "query": None}
+    ]
+
+
+def test_experiments_cancel_maps_invalid_transition_to_exit_1(monkeypatch):
+    result, fake = invoke(
+        monkeypatch,
+        ["experiments", "cancel", "j1"],
+        error=SidecarError("invalid_transition", "任务状态不允许该流转", 409),
+    )
+    assert result.exit_code == 1
+    assert "invalid_transition" in result.stderr
+
+
+def test_artifacts_content_downloads_to_output_file(monkeypatch, fake_data_dir: Path):
+    payload = b"artifact-content"
+    output = fake_data_dir / "artifact.bin"
+    result, fake = invoke(
+        monkeypatch,
+        ["artifacts", "content", "a1", "--output", str(output)],
+        download=payload,
+    )
+    assert result.exit_code == 0, result.output
+    assert output.read_bytes() == payload
+    assert parse_output(result) == {"path": str(output), "bytes": len(payload)}
+    assert fake.calls == [{"method": "GET", "path": "/api/artifacts/a1/content", "body": None, "query": None}]
+
+
+def test_artifacts_content_requires_output_option(monkeypatch):
+    result, fake = invoke(monkeypatch, ["artifacts", "content", "a1"])
+    assert result.exit_code == 2
+    assert fake.calls == []
+
+
+def test_artifacts_content_maps_not_found_without_writing(monkeypatch, fake_data_dir: Path):
+    output = fake_data_dir / "artifact.bin"
+    result, fake = invoke(
+        monkeypatch,
+        ["artifacts", "content", "a1", "--output", str(output)],
+        error=SidecarError("not_found", "产物文件不存在", 404),
+    )
+    assert result.exit_code == 1
+    assert result.stdout == ""
+    assert "not_found" in result.stderr
+    assert not output.exists()
+    assert len(fake.calls) == 1
+
+
+def test_artifacts_content_reports_write_failure(monkeypatch, fake_data_dir: Path):
+    output = fake_data_dir / "missing-dir" / "artifact.bin"
+    result, fake = invoke(
+        monkeypatch,
+        ["artifacts", "content", "a1", "--output", str(output)],
+        download=b"artifact-content",
+    )
+    assert result.exit_code == 1
+    assert result.stdout == ""
+    assert "无法写入" in result.stderr
+    assert len(fake.calls) == 1
+
+
+def test_drafts_export_fmf_downloads_to_output_file(monkeypatch, fake_data_dir: Path):
+    payload = b"fmf-bytes"
+    output = fake_data_dir / "tactic.fmf"
+    result, fake = invoke(
+        monkeypatch,
+        ["drafts", "export-fmf", "d1", "--output", str(output)],
+        download=payload,
+    )
+    assert result.exit_code == 0, result.output
+    assert output.read_bytes() == payload
+    assert parse_output(result) == {"path": str(output), "bytes": len(payload)}
+    assert fake.calls == [{"method": "GET", "path": "/api/drafts/d1/export.fmf", "body": None, "query": None}]
+
+
+def test_drafts_export_fmf_requires_output_option(monkeypatch):
+    result, fake = invoke(monkeypatch, ["drafts", "export-fmf", "d1"])
+    assert result.exit_code == 2
+    assert fake.calls == []
+
+
+def test_drafts_export_fmf_maps_not_found_to_exit_1(monkeypatch, fake_data_dir: Path):
+    output = fake_data_dir / "tactic.fmf"
+    result, fake = invoke(
+        monkeypatch,
+        ["drafts", "export-fmf", "d1", "--output", str(output)],
+        error=SidecarError("not_found", "草案不存在", 404),
+    )
+    assert result.exit_code == 1
+    assert "not_found" in result.stderr
+    assert not output.exists()
+
+
+def test_jobs_export_downloads_csv(monkeypatch, fake_data_dir: Path):
+    payload = b"seed,score\n1,2\n"
+    output = fake_data_dir / "job-j1.csv"
+    result, fake = invoke(
+        monkeypatch,
+        ["jobs", "export", "j1", "--output", str(output)],
+        download=payload,
+    )
+    assert result.exit_code == 0, result.output
+    assert output.read_bytes() == payload
+    assert parse_output(result) == {"path": str(output), "bytes": len(payload)}
+    assert fake.calls == [{"method": "GET", "path": "/api/jobs/j1/export.csv", "body": None, "query": None}]
+
+
+def test_jobs_export_requires_output_option(monkeypatch):
+    result, fake = invoke(monkeypatch, ["jobs", "export", "j1"])
+    assert result.exit_code == 2
+    assert fake.calls == []
+
+
+def test_jobs_export_maps_not_found_to_exit_1(monkeypatch, fake_data_dir: Path):
+    output = fake_data_dir / "job-j1.csv"
+    result, fake = invoke(
+        monkeypatch,
+        ["jobs", "export", "j1", "--output", str(output)],
+        error=SidecarError("not_found", "任务不存在", 404),
+    )
+    assert result.exit_code == 1
+    assert "not_found" in result.stderr
+    assert not output.exists()
+
+
+def test_experiments_resume_posts_route(monkeypatch):
+    payload = {"id": "j1", "status": "queued"}
+    result, fake = invoke(monkeypatch, ["experiments", "resume", "j1"], [payload])
+    assert result.exit_code == 0, result.output
+    assert parse_output(result) == payload
+    assert fake.calls == [
+        {"method": "POST", "path": "/api/experiments/j1/resume", "body": None, "query": None}
+    ]
+
+
+def test_experiments_resume_requires_job_id(monkeypatch):
+    result, fake = invoke(monkeypatch, ["experiments", "resume"])
+    assert result.exit_code == 2
+    assert fake.calls == []
+
+
+def test_catalog_show_requests_snapshot(monkeypatch):
+    payload = {"available": True, "catalog": {"tactics": []}}
+    result, fake = invoke(monkeypatch, ["catalog", "show"], [payload])
+    assert result.exit_code == 0, result.output
+    assert parse_output(result) == payload
+    assert fake.calls == [{"method": "GET", "path": "/api/catalog", "body": None, "query": None}]
+
+
+def test_catalog_show_maps_server_error_to_exit_1(monkeypatch):
+    result, fake = invoke(
+        monkeypatch,
+        ["catalog", "show"],
+        error=SidecarError("internal_error", "internal server error", 500),
+    )
+    assert result.exit_code == 1
+    assert "internal_error" in result.stderr
+
+
+ROOT = Path(__file__).resolve().parents[2]
+LIVE_TOKEN = "e" * 64
+
+
+def _stop_live_sidecar(process: subprocess.Popen, port: int) -> None:
+    if process.poll() is None:
+        request_value = urllib.request.Request(
+            f"http://127.0.0.1:{port}/api/shutdown",
+            data=b"",
+            method="POST",
+            headers={"Authorization": f"Bearer {LIVE_TOKEN}"},
+        )
+        try:
+            urllib.request.urlopen(request_value, timeout=5).close()
+        except OSError:
+            process.kill()
+        try:
+            process.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=5)
+
+
+@contextlib.contextmanager
+def live_sidecar(data_dir: Path):
+    process = subprocess.Popen(
+        [
+            sys.executable,
+            "-m",
+            "fm27lab",
+            "serve",
+            "--data-dir",
+            str(data_dir),
+            "--token",
+            LIVE_TOKEN,
+            "--port",
+            "0",
+        ],
+        cwd=ROOT,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env={**os.environ, "PYTHONPATH": str(ROOT)},
+    )
+    port = 0
+    try:
+        ready = json.loads(process.stdout.readline().strip())
+        assert ready["event"] == "ready"
+        port = ready["port"]
+        yield data_dir
+    finally:
+        _stop_live_sidecar(process, port)
+
+
+@pytest.fixture
+def live_data_dir(tmp_path: Path):
+    with live_sidecar(tmp_path.resolve()) as data_dir:
+        yield data_dir
+
+
+def invoke_live(data_dir: Path, args):
+    return CliRunner().invoke(cli.app, ["--data-dir", str(data_dir), *args])
+
+
+def test_live_sidecar_round_trip_covers_new_commands(live_data_dir: Path):
+    data_dir = live_data_dir
+
+    put = invoke_live(
+        data_dir,
+        ["settings", "put", "theme", "--value", '{"mode":"dark"}', "--note", "主题"],
+    )
+    assert put.exit_code == 0, put.output
+    assert json.loads(put.stdout)["value"] == {"mode": "dark"}
+    got = invoke_live(data_dir, ["settings", "get", "theme"])
+    assert got.exit_code == 0, got.output
+    assert json.loads(got.stdout)["note"] == "主题"
+    listing = invoke_live(data_dir, ["settings", "list"])
+    assert listing.exit_code == 0, listing.output
+    assert json.loads(listing.stdout)["total"] == 1
+    removed = invoke_live(data_dir, ["settings", "delete", "theme"])
+    assert removed.exit_code == 0, removed.output
+    assert json.loads(removed.stdout) == {"deleted": True}
+
+    check = invoke_live(
+        data_dir,
+        [
+            "concurrency",
+            "check",
+            "--workers",
+            "2",
+            "--cpu-count",
+            "8",
+            "--available-memory-bytes",
+            str(16 * 1024**3),
+            "--free-disk-bytes",
+            str(16 * 1024**3),
+            "--allow-oversubscription",
+        ],
+    )
+    assert check.exit_code == 0, check.output
+    assert json.loads(check.stdout)["allowed"] is True
+
+    catalog = invoke_live(data_dir, ["catalog", "show"])
+    assert catalog.exit_code == 0, catalog.output
+    assert "available" in json.loads(catalog.stdout)
+
+    scenario_path = data_dir / "scenario.json"
+    scenario_path.write_text(json.dumps(draft_scenario(), ensure_ascii=False), encoding="utf-8")
+    created = invoke_live(
+        data_dir,
+        ["drafts", "create", "--name", "草案", "--scenario", f"@{scenario_path}"],
+    )
+    assert created.exit_code == 0, created.output
+    draft = json.loads(created.stdout)
+    attributed = invoke_live(
+        data_dir,
+        [
+            "drafts",
+            "attributes",
+            draft["id"],
+            "--side",
+            "home",
+            "--scope",
+            "starters",
+            "--operation",
+            "bulk",
+            "--params",
+            '{"value": 12}',
+        ],
+    )
+    assert attributed.exit_code == 0, attributed.output
+    assert json.loads(attributed.stdout)["changed_players"] == 11
+
+    fmf_path = data_dir / "tactic.fmf"
+    exported = invoke_live(data_dir, ["drafts", "export-fmf", draft["id"], "--output", str(fmf_path)])
+    assert exported.exit_code == 0, exported.output
+    assert json.loads(exported.stdout) == {"path": str(fmf_path), "bytes": fmf_path.stat().st_size}
+    imported = invoke_live(data_dir, ["drafts", "import-fmf", "--name", "导入", "--file", str(fmf_path)])
+    assert imported.exit_code == 0, imported.output
+    drafts_list = invoke_live(data_dir, ["drafts", "list"])
+    assert json.loads(drafts_list.stdout)["total"] == 2
+
+    apply_roster = invoke_live(
+        data_dir,
+        [
+            "drafts",
+            "apply-roster",
+            "missing",
+            "--save-id",
+            "missing",
+            "--club-uid",
+            "7",
+            "--side",
+            "home",
+            "--scope",
+            "starters",
+        ],
+    )
+    assert apply_roster.exit_code == 1
+    assert "not_found" in apply_roster.stderr
+    undo_roster = invoke_live(data_dir, ["drafts", "undo-roster", "missing"])
+    assert undo_roster.exit_code == 1
+    assert "not_found" in undo_roster.stderr
+
+    created_job = invoke_live(data_dir, ["jobs", "create", "--kind", "report"])
+    assert created_job.exit_code == 0, created_job.output
+    job_id = json.loads(created_job.stdout)["id"]
+    csv_path = data_dir / "job.csv"
+    exported_csv = invoke_live(data_dir, ["jobs", "export", job_id, "--output", str(csv_path)])
+    assert exported_csv.exit_code == 0, exported_csv.output
+    assert csv_path.read_text(encoding="utf-8").startswith("job_id,")
+    pool = invoke_live(data_dir, ["jobs", "pool-summary", job_id])
+    assert pool.exit_code == 0, pool.output
+    assert json.loads(pool.stdout)["enabled"] is False
+    batch = invoke_live(data_dir, ["jobs", "batch-action", "--action", "cancel", "--ids", job_id])
+    assert batch.exit_code == 0, batch.output
+    assert json.loads(batch.stdout)["succeeded"] == [job_id]
+    deleted = invoke_live(data_dir, ["jobs", "batch-delete", "--ids", job_id])
+    assert deleted.exit_code == 0, deleted.output
+    assert json.loads(deleted.stdout)["deleted"] == [job_id]
+
+    artifact_source = data_dir / "artifact.bin"
+    artifact_source.write_bytes(b"live-artifact-bytes")
+    created_artifact = invoke_live(
+        data_dir,
+        [
+            "artifacts",
+            "create",
+            "--kind",
+            "tactic",
+            "--filename",
+            "artifact.bin",
+            "--file",
+            str(artifact_source),
+        ],
+    )
+    assert created_artifact.exit_code == 0, created_artifact.output
+    artifact = json.loads(created_artifact.stdout)
+    downloaded = data_dir / "artifact.out"
+    content = invoke_live(data_dir, ["artifacts", "content", artifact["id"], "--output", str(downloaded)])
+    assert content.exit_code == 0, content.output
+    assert downloaded.read_bytes() == b"live-artifact-bytes"
+    assert json.loads(content.stdout) == {"path": str(downloaded), "bytes": len(b"live-artifact-bytes")}
+    fetched = invoke_live(data_dir, ["artifacts", "get", artifact["id"]])
+    assert fetched.exit_code == 0, fetched.output
+    artifacts_list = invoke_live(data_dir, ["artifacts", "list", "--kind", "tactic"])
+    assert artifacts_list.exit_code == 0, artifacts_list.output
+    assert json.loads(artifacts_list.stdout)["total"] == 1
+    artifact_delete = invoke_live(data_dir, ["artifacts", "delete", artifact["id"]])
+    assert artifact_delete.exit_code == 0, artifact_delete.output
+    assert json.loads(artifact_delete.stdout) == {"deleted": True}
+
+    missing_import = invoke_live(
+        data_dir,
+        ["saves", "import-file", "--source-path", str(data_dir / "missing.fm")],
+    )
+    assert missing_import.exit_code == 1
+    assert "validation_failed" in missing_import.stderr
+    squad = invoke_live(data_dir, ["saves", "squad", "missing", "--club-uid", "7"])
+    assert squad.exit_code == 1
+    assert "not_found" in squad.stderr
+
+    submitted = invoke_live(
+        data_dir,
+        [
+            "experiments",
+            "submit",
+            "--seeds",
+            "[1]",
+            "--variants",
+            '["A"]',
+            "--workers",
+            "1",
+            "--cpu-count",
+            "8",
+            "--available-memory-bytes",
+            str(16 * 1024**3),
+            "--free-disk-bytes",
+            str(16 * 1024**3),
+        ],
+    )
+    assert submitted.exit_code == 0, submitted.output
+    experiment = json.loads(submitted.stdout)
+    resume = invoke_live(data_dir, ["experiments", "resume", experiment["id"]])
+    assert resume.exit_code == 1
+    assert "invalid_transition" in resume.stderr
+    cancelled = invoke_live(data_dir, ["experiments", "cancel", experiment["id"]])
+    assert cancelled.exit_code == 0, cancelled.output
+    assert json.loads(cancelled.stdout)["status"] == "cancelled"
+    started = invoke_live(data_dir, ["experiments", "start"])
+    assert started.exit_code == 0, started.output
+    assert json.loads(started.stdout) == {}

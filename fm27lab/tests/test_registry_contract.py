@@ -78,6 +78,35 @@ EXPECTED_NAMES = frozenset(
     }
 )
 
+EXTENDED_SURFACES: dict[str, tuple[tuple[str, ...], str]] = {
+    "drafts_attributes": (("drafts", "attributes"), "drafts_attributes"),
+    "drafts_export_fmf": (("drafts", "export-fmf"), "drafts_export_fmf"),
+    "drafts_import_fmf": (("drafts", "import-fmf"), "drafts_import_fmf"),
+    "drafts_apply_roster": (("drafts", "apply-roster"), "drafts_apply_roster"),
+    "drafts_undo_roster": (("drafts", "undo-roster"), "drafts_undo_roster"),
+    "jobs_batch_actions": (("jobs", "batch-action"), "jobs_batch_actions"),
+    "jobs_batch_delete": (("jobs", "batch-delete"), "jobs_batch_delete"),
+    "jobs_export": (("jobs", "export"), "jobs_export"),
+    "jobs_pool_summary": (("jobs", "pool-summary"), "jobs_pool_summary"),
+    "saves_import": (("saves", "import-file"), "saves_import_file"),
+    "saves_squad": (("saves", "squad"), "saves_squad"),
+    "artifacts_list": (("artifacts", "list"), "artifacts_list"),
+    "artifacts_get": (("artifacts", "get"), "artifacts_get"),
+    "artifacts_content": (("artifacts", "content"), "artifacts_content"),
+    "artifacts_create": (("artifacts", "create"), "artifacts_create"),
+    "artifacts_delete": (("artifacts", "delete"), "artifacts_delete"),
+    "settings_list": (("settings", "list"), "settings_list"),
+    "settings_get": (("settings", "get"), "settings_get"),
+    "settings_put": (("settings", "put"), "settings_put"),
+    "settings_delete": (("settings", "delete"), "settings_delete"),
+    "concurrency_check": (("concurrency", "check"), "concurrency_check"),
+    "experiments_submit": (("experiments", "submit"), "experiments_submit"),
+    "experiments_start": (("experiments", "start"), "experiments_start"),
+    "experiments_cancel": (("experiments", "cancel"), "experiments_cancel"),
+    "experiments_resume": (("experiments", "resume"), "experiments_resume"),
+    "catalog_snapshot": (("catalog", "show"), "catalog_snapshot"),
+}
+
 
 class _FakeClient:
     def request_json(self, *_args, **_kwargs):
@@ -227,45 +256,24 @@ def test_detect_drift_reports_missing_capability_and_wrong_path(tmp_path: Path):
     assert detect_drift(wrong_method)
 
 
-def test_fmf_capabilities_register_http_only_surfaces():
-    export = capability("drafts_export_fmf")
-    assert export.http == ("GET", "/api/drafts/{draft_id}/export.fmf")
-    assert export.cli is None
-    assert export.mcp is None
-    import_capability = capability("drafts_import_fmf")
-    assert import_capability.http == ("POST", "/api/drafts/import-fmf")
-    assert import_capability.cli is None
-    assert import_capability.mcp is None
+def test_extended_capabilities_declare_mapped_cli_and_mcp_surfaces():
+    assert set(EXTENDED_SURFACES) <= set(capability_names())
+    for name, (cli_command, tool) in EXTENDED_SURFACES.items():
+        item = capability(name)
+        assert item.cli == cli_command, name
+        assert item.mcp == tool, name
 
 
-def test_draft_attributes_capability_registers_http_only_surface():
-    item = capability("drafts_attributes")
-    assert item.http == ("POST", "/api/drafts/{draft_id}/attributes")
-    assert item.cli is None
-    assert item.mcp is None
+def test_every_capability_declares_cli_surface():
+    assert [item.name for item in CAPABILITIES if item.cli is None] == []
 
 
-def test_save_import_capabilities_register_http_only_surfaces():
-    file_import = capability("saves_import")
-    assert file_import.http == ("POST", "/api/saves/import")
-    assert file_import.cli is None
-    assert file_import.mcp is None
-    squad = capability("saves_squad")
-    assert squad.http == ("GET", "/api/saves/{save_id}/squad")
-    assert squad.cli is None
-    assert squad.mcp is None
+def test_saves_payload_import_keeps_existing_surfaces():
     payload_import = capability("saves_import_payload")
     assert payload_import.http == ("POST", "/api/saves/{save_id}/import")
     assert payload_import.cli == ("saves", "import")
     assert payload_import.mcp == "saves_import"
-
-
-def test_draft_roster_capabilities_register_http_only_surfaces():
-    apply_roster = capability("drafts_apply_roster")
-    assert apply_roster.http == ("POST", "/api/drafts/{draft_id}/apply-roster")
-    assert apply_roster.cli is None
-    assert apply_roster.mcp is None
-    undo_roster = capability("drafts_undo_roster")
-    assert undo_roster.http == ("POST", "/api/drafts/{draft_id}/undo-roster")
-    assert undo_roster.cli is None
-    assert undo_roster.mcp is None
+    file_import = capability("saves_import")
+    assert file_import.http == ("POST", "/api/saves/import")
+    assert file_import.cli == ("saves", "import-file")
+    assert file_import.mcp == "saves_import_file"
