@@ -66,7 +66,7 @@
 - [x] SQLite 连接、迁移与仓储：settings、pool_entries、drafts、jobs/job_runs、saves/save_leagues/save_clubs、artifacts、idempotency 与 `/api/pools`、`/api/drafts`、`/api/jobs`、`/api/saves`、`/api/results`、`/api/artifacts`、`/api/settings` 均已实现并通过独立审核。
 - [ ] 空库启动与只读旧目录探测。
 - [~] 原生宿主适配器与 counted-session 能力协商：能力解析、运行时计划与文件协议适配器已实现并通过审核；真实 Windows 宿主联调待后续。
-- [~] 1–256 路调度、取消、续跑、磁盘/内存预检：并发预检与串行实验调度已实现并 PASS，原生引擎接线待后续。
+- [~] 1–256 路调度、取消、续跑、磁盘/内存预检：并发预检、串行调度与引擎分道（1/4/8 路身份一致）已实现并 PASS，1/8/256 真机验收待后续。
 - [~] 旧宿主回退到 64 场或执行力隔离模式，并记录 provenance：运行时计划与 provenance 进行中。
 - [ ] 并发验收矩阵：1、8、256 路提交、取消、续跑、结果身份一致。
 - [ ] 真实引擎 Windows 验证脚本。
@@ -76,7 +76,7 @@
 
 - [~] FastAPI 路由、错误封套、分页、幂等：路由模块化、`/api/jobs`、`/api/saves`、结果/产物/设置接口与 Idempotency-Key 已实现；注册表统一生成待后续。
 - [~] SSE 进度与轮询降级：事件发布器与 SSE 流已实现，任务事件接线待后续。
-- [ ] 命令注册表，HTTP/CLI/MCP 全部由同一份定义生成。
+- [~] 命令注册表，HTTP/CLI/MCP 全部由同一份定义生成：registry.py 已声明 41 项能力并有双向契约测试，三入口生成待后续。
 - [~] CLI 全功能命令与退出码：pools/drafts/jobs/saves 命令与退出码已实现并 PASS，注册表统一生成待后续。
 - [x] MCP tools/resources/prompts 全功能同步：stdio 协议层、22 工具、4 个 resources、2 个 prompts 与 `fm27lab mcp` 命令已实现并通过审核。
 - [ ] OpenAPI 生成 TypeScript 类型与请求客户端。
@@ -100,7 +100,7 @@
 
 - [ ] React 应用骨架、路由、查询层、错误边界。
 - [ ] 设计 token、字体、组件库与 FM 配色。
-- [ ] 战术板双阶段与拖拽/键盘。
+- [~] 战术板双阶段：只读板、阶段切换与 catalog 中文标签已实现，拖拽/键盘编辑待后续。
 - [~] 球员属性与隐藏属性分组：只读分组页已实现，批量编辑 UI 待后续。
 - [ ] 存档战术库与真实 AI 生成。
 - [ ] 结果页、对比、历史与批量管理。
