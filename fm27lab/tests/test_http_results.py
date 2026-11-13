@@ -332,3 +332,224 @@ def test_results_http_cors_405_and_existing_routes(tmp_path: Path):
     assert client.get("/api/pools", headers=headers).json()["items"] == []
     assert client.get("/api/drafts", headers=headers).json()["items"] == []
     assert client.get("/api/saves", headers=headers).json()["items"] == []
+
+
+def pool_config(entry_count: int = 2) -> dict:
+    return {
+        "enabled": True,
+        "entries": [
+            {"name": f"客队战术 {index + 1}", "weight": index + 1, "tactic": {}}
+            for index in range(entry_count)
+        ],
+        "uniform": {"enabled": True, "attribute_value": 15},
+        "rotation": {"enabled": False, "rounds": 1},
+        "real": {"enabled": False},
+    }
+
+
+def create_pool_job(client: TestClient, headers: dict, pool: dict, total: int = 4) -> dict:
+    response = client.post(
+        "/api/jobs",
+        json={"kind": "experiment", "name": "Pool", "config": {"away_tactic_pool": pool}, "total": total},
+        headers=headers,
+    )
+    assert response.status_code == 201, response.text
+    job = response.json()
+    started = client.patch(f"/api/jobs/{job['id']}", json={"status": "running"}, headers=headers)
+    assert started.status_code == 200, started.text
+    return started.json()
+
+
+def test_results_http_pool_summary_reports_entries_and_draws(tmp_path: Path):
+    app, settings, _, _ = make_app(tmp_path)
+    client = TestClient(app)
+    headers = auth(settings)
+    job = create_pool_job(client, headers, pool_config(2))
+    app.state.jobs.append_run(
+        job["id"],
+        {"variant": "A", "seed": 21, "score_home": 2, "score_away": 0, "stats": {"tactic_pool_entry": 1}},
+    )
+    app.state.jobs.append_run(
+        job["id"],
+        {
+            "variant": "B",
+            "seed": 21,
+            "score_home": 1,
+            "score_away": 0,
+            "stats": {"tactic_pool_entry": {"index": 1}},
+        },
+    )
+    assert not hasattr(app.state, "results")
+
+    response = client.get(f"/api/jobs/{job['id']}/pool-summary", headers=headers)
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert set(body) == {
+        "enabled",
+        "entry_count",
+        "mode",
+        "rounds",
+        "players",
+        "uniform",
+        "entries",
+        "draws",
+    }
+    assert body["mode"] == "random"
+    assert body["rounds"] == 1
+    assert body["players"] == "uniform"
+    assert [row["index"] for row in body["entries"]] == [0, 1]
+    assert [row["name"] for row in body["entries"]] == ["客队战术 1", "客队战术 2"]
+    assert body["entries"][0]["probability"] == pytest.approx(1 / 3)
+    assert body["draws"] == {"0": 0, "1": 1}
+    assert isinstance(app.state.results, ResultsService)
+
+
+def test_results_http_pool_summary_is_disabled_without_pool_config(tmp_path: Path):
+    app, settings, _, _ = make_app(tmp_path)
+    client = TestClient(app)
+    headers = auth(settings)
+    job = create_job(client, headers)
+
+    response = client.get(f"/api/jobs/{job['id']}/pool-summary", headers=headers)
+
+    assert response.status_code == 200, response.text
+    assert response.json() == {
+        "enabled": False,
+        "entry_count": 0,
+        "mode": None,
+        "players": None,
+        "draws": {},
+    }
+
+
+def test_results_http_pool_summary_disabled_pool_keeps_entry_count(tmp_path: Path):
+    app, settings, _, _ = make_app(tmp_path)
+    client = TestClient(app)
+    headers = auth(settings)
+    job = create_pool_job(client, headers, {**pool_config(2), "enabled": False})
+
+    response = client.get(f"/api/jobs/{job['id']}/pool-summary", headers=headers)
+
+    assert response.status_code == 200, response.text
+    assert response.json() == {
+        "enabled": False,
+        "entry_count": 2,
+        "mode": None,
+        "players": None,
+        "draws": {},
+    }
+
+
+def test_results_http_pool_summary_missing_job_and_invalid_config(tmp_path: Path):
+    app, settings, _, _ = make_app(tmp_path)
+    client = TestClient(app)
+    headers = auth(settings)
+    invalid = client.post(
+        "/api/jobs",
+        json={"kind": "experiment", "config": {"away_tactic_pool": {}}},
+        headers=headers,
+    )
+    assert invalid.status_code == 201, invalid.text
+    invalid_id = invalid.json()["id"]
+
+    error = assert_error(
+        client.get(f"/api/jobs/{invalid_id}/pool-summary", headers=headers), 400, "validation_failed"
+    )
+    assert any("\u4e00" <= character <= "\u9fff" for character in error["message"])
+    assert_error(client.get("/api/jobs/missing/pool-summary", headers=headers), 404, "not_found")
+    for identifier in ("存档", "a b", "x" * 65):
+        quoted = urllib.parse.quote(identifier, safe="")
+        assert_error(
+            client.get(f"/api/jobs/{quoted}/pool-summary", headers=headers),
+            400,
+            "validation_failed",
+        )
+
+
+def test_results_http_pool_summary_rejects_non_boolean_enabled(tmp_path: Path):
+    app, settings, _, _ = make_app(tmp_path)
+    client = TestClient(app)
+    headers = auth(settings)
+    job = client.post(
+        "/api/jobs",
+        json={
+            "kind": "experiment",
+            "config": {"away_tactic_pool": {"enabled": "yes", "entries": [{"name": "客队"}]}},
+        },
+        headers=headers,
+    )
+    assert job.status_code == 201, job.text
+
+    response = client.get(f"/api/jobs/{job.json()['id']}/pool-summary", headers=headers)
+
+    error = assert_error(response, 400, "validation_failed")
+    assert error["message"] == "客队战术池开关无效"
+
+
+def test_results_http_pool_summary_rejects_non_get_methods(tmp_path: Path):
+    app, settings, _, _ = make_app(tmp_path)
+    client = TestClient(app)
+    headers = auth(settings)
+    job = create_job(client, headers)
+
+    response = client.post(f"/api/jobs/{job['id']}/pool-summary", headers=headers)
+
+    assert response.status_code == 405
+    allowed = {item.strip() for item in response.headers["allow"].split(",")}
+    assert "GET" in allowed
+
+
+def test_results_http_pool_summary_requires_bearer_token(tmp_path: Path):
+    app, settings, _, _ = make_app(tmp_path)
+    client = TestClient(app)
+    headers = auth(settings)
+    job = create_job(client, headers)
+
+    denied = client.get(f"/api/jobs/{job['id']}/pool-summary")
+    assert denied.status_code == 401
+    error = denied.json()["error"]
+    assert set(error) == ERROR_FIELDS
+    assert error["code"] == "unauthorized"
+    assert denied.headers["www-authenticate"] == "Bearer"
+
+    wrong = client.get(
+        f"/api/jobs/{job['id']}/pool-summary",
+        headers={"Authorization": "Bearer wrong"},
+    )
+    assert wrong.status_code == 401
+    assert wrong.json()["error"]["code"] == "unauthorized"
+
+
+def test_results_http_pool_summary_openapi_contract(tmp_path: Path):
+    app, _, _, _ = make_app(tmp_path)
+    document = TestClient(app).get("/api/openapi.json").json()
+    operation = document["paths"]["/api/jobs/{job_id}/pool-summary"]["get"]
+
+    assert operation["security"] == [{"HTTPBearer": []}]
+    assert "422" not in operation["responses"]
+    for status in ("400", "401", "404"):
+        schema = operation["responses"][status]["content"]["application/json"]["schema"]
+        assert schema["$ref"].endswith("ErrorEnvelope"), status
+    success = operation["responses"]["200"]["content"]["application/json"]["schema"]
+    assert success["$ref"].endswith("PoolSummaryOutput")
+
+    components = document["components"]["schemas"]
+    assert set(components["PoolSummaryOutput"]["properties"]) == {
+        "enabled",
+        "entry_count",
+        "mode",
+        "rounds",
+        "players",
+        "uniform",
+        "entries",
+        "draws",
+    }
+    assert set(components["PoolSummaryEntryOutput"]["properties"]) == {
+        "index",
+        "name",
+        "weight",
+        "probability",
+        "roster",
+    }
+    assert set(components["PoolSummaryUniformOutput"]["properties"]) == {"enabled", "attribute_value"}

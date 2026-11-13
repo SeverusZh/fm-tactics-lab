@@ -9,6 +9,8 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from fm27lab.adapters.storage_sqlite.repositories import JobRepository
+from fm27lab.domain.pool import completed_draw_counts
+from fm27lab.domain.pool import summary as summarize_pool
 from fm27lab.domain.results import paired_goal_difference, summarize_runs
 
 RUN_PAGE_SIZE = 200
@@ -50,6 +52,26 @@ def _complete_runs(runs: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
     return [_domain_run(run) for run in runs if run.get("score") is not None]
 
 
+def _disabled_pool_summary(entry_count: int = 0) -> dict[str, Any]:
+    return {"enabled": False, "entry_count": entry_count, "mode": None, "players": None, "draws": {}}
+
+
+def _job_pool_config(job: Mapping[str, Any]) -> Mapping[str, Any] | None:
+    config = job.get("config")
+    if config is None:
+        return None
+    if not isinstance(config, Mapping):
+        raise ValueError("任务配置必须是对象")
+    for key in ("away_tactic_pool", "tactic_pool"):
+        value = config.get(key)
+        if value is None:
+            continue
+        if not isinstance(value, Mapping):
+            raise ValueError("客队战术池配置必须是对象")
+        return value
+    return None
+
+
 class ResultsService:
     def __init__(self, repository: JobRepository):
         self.repository = repository
@@ -74,6 +96,59 @@ class ResultsService:
             "metrics": summarize_runs(runs, side),
             "paired": paired_goal_difference(runs, side),
         }
+
+    def pool_summary(self, job_id: str) -> dict[str, Any] | None:
+        job = self.repository.get(job_id)
+        if job is None:
+            return None
+        pool = _job_pool_config(job)
+        if pool is None:
+            return _disabled_pool_summary()
+        enabled = pool.get("enabled", True)
+        if type(enabled) is not bool:
+            raise ValueError("客队战术池开关无效")
+        entries = pool.get("entries")
+        if not isinstance(entries, list):
+            raise ValueError("客队战术池条目必须是列表")
+        if not enabled:
+            return _disabled_pool_summary(len(entries))
+        if not entries:
+            return _disabled_pool_summary()
+        uniform = pool.get("uniform")
+        if uniform is not None and not isinstance(uniform, Mapping):
+            raise ValueError("统一属性设置必须是对象")
+        summary = summarize_pool(
+            entries,
+            rotation=pool["rotation"] if "rotation" in pool else False,
+            rounds=pool.get("rounds", 1),
+            uniform=uniform,
+            real=pool.get("real") or pool.get("squad_source") or False,
+            enabled=True,
+        )
+        return {
+            "enabled": True,
+            "entry_count": len(entries),
+            "mode": summary["mode"],
+            "rounds": summary["rounds"],
+            "players": summary["players"],
+            "uniform": summary["uniform"],
+            "entries": summary["entries"],
+            "draws": self._completed_draws(job_id, len(entries)),
+        }
+
+    def _completed_draws(self, job_id: str, entry_count: int) -> dict[str, int]:
+        runs: list[dict[str, Any]] = []
+        for run in self.all_runs(job_id):
+            stats = run.get("stats")
+            if not isinstance(stats, Mapping):
+                continue
+            entry = stats.get("tactic_pool_entry")
+            if entry is None:
+                continue
+            if type(entry) is int:
+                entry = {"index": entry}
+            runs.append({"seed": run.get("seed"), "tactic_pool_entry": entry})
+        return completed_draw_counts(runs, entry_count)
 
     def matches(self, job_id: str, limit: int = 50, offset: int = 0) -> dict[str, Any] | None:
         if type(limit) is not int or not 1 <= limit <= MATCH_PAGE_SIZE:

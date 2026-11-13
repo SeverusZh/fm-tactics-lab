@@ -32,9 +32,16 @@ def database(tmp_path: Path) -> Database:
     return value
 
 
-def seeded(tmp_path: Path) -> tuple[ResultsService, JobRepository]:
+def seeded(tmp_path: Path, config: dict | None = None) -> tuple[ResultsService, JobRepository]:
     repository = JobRepository(database(tmp_path))
-    repository.add({"id": "job1", "kind": "experiment", "status": "queued", "config": {}})
+    repository.add(
+        {
+            "id": "job1",
+            "kind": "experiment",
+            "status": "queued",
+            "config": {} if config is None else config,
+        }
+    )
     return ResultsService(repository), repository
 
 
@@ -437,3 +444,231 @@ def test_export_csv_returns_none_for_missing_job(tmp_path: Path):
     results, _ = seeded(tmp_path)
 
     assert results.export_csv("missing") is None
+
+
+def pool_config(entry_count: int = 2, **overrides) -> dict:
+    value = {
+        "enabled": True,
+        "entries": [
+            {"name": f"客队战术 {index + 1}", "weight": index + 1, "tactic": {}}
+            for index in range(entry_count)
+        ],
+        "uniform": {"enabled": True, "attribute_value": 15},
+        "rotation": {"enabled": False, "rounds": 1},
+        "real": {"enabled": False},
+    }
+    value.update(overrides)
+    return value
+
+
+DISABLED_POOL = {
+    "enabled": False,
+    "entry_count": 0,
+    "mode": None,
+    "players": None,
+    "draws": {},
+}
+
+
+def test_pool_summary_without_pool_config_is_disabled(tmp_path: Path):
+    results, _ = seeded(tmp_path)
+
+    assert results.pool_summary("job1") == DISABLED_POOL
+
+
+@pytest.mark.parametrize("key", ["away_tactic_pool", "tactic_pool"])
+def test_pool_summary_with_empty_entries_is_disabled(tmp_path: Path, key: str):
+    results, _ = seeded(tmp_path, config={key: {"enabled": True, "entries": []}})
+
+    assert results.pool_summary("job1") == DISABLED_POOL
+
+
+def test_pool_summary_reports_random_mode_probabilities_and_uniform(tmp_path: Path):
+    results, repository = seeded(tmp_path, config={"away_tactic_pool": pool_config()})
+    append_run(repository, "A", 1, 1, 0, stats={})
+
+    summary = results.pool_summary("job1")
+
+    assert set(summary) == {
+        "enabled",
+        "entry_count",
+        "mode",
+        "rounds",
+        "players",
+        "uniform",
+        "entries",
+        "draws",
+    }
+    assert summary["enabled"] is True
+    assert summary["entry_count"] == 2
+    assert summary["mode"] == "random"
+    assert summary["rounds"] == 1
+    assert summary["players"] == "uniform"
+    assert summary["uniform"] == {"enabled": True, "attribute_value": 15}
+    assert [row["index"] for row in summary["entries"]] == [0, 1]
+    assert [row["name"] for row in summary["entries"]] == ["客队战术 1", "客队战术 2"]
+    assert [row["weight"] for row in summary["entries"]] == [1, 2]
+    assert summary["entries"][0]["probability"] == pytest.approx(1 / 3)
+    assert summary["entries"][1]["probability"] == pytest.approx(2 / 3)
+    assert all(row["roster"] is False for row in summary["entries"])
+    assert summary["draws"] == {"0": 0, "1": 0}
+
+
+def test_pool_summary_reports_rotation_mode_and_rounds(tmp_path: Path):
+    results, _ = seeded(
+        tmp_path,
+        config={"away_tactic_pool": pool_config(3, rotation={"enabled": True, "rounds": 2})},
+    )
+
+    summary = results.pool_summary("job1")
+
+    assert summary["mode"] == "rotation"
+    assert summary["rounds"] == 2
+    assert summary["entry_count"] == 3
+    assert all(row["probability"] is None for row in summary["entries"])
+    assert summary["draws"] == {"0": 0, "1": 0, "2": 0}
+
+
+def test_pool_summary_reports_top_level_rounds_for_random_mode(tmp_path: Path):
+    results, _ = seeded(tmp_path, config={"tactic_pool": pool_config(rotation=False, rounds=3)})
+
+    summary = results.pool_summary("job1")
+
+    assert summary["mode"] == "random"
+    assert summary["rounds"] == 3
+
+
+def test_pool_summary_projects_real_roster_uniform_and_entry_flags(tmp_path: Path):
+    config = pool_config(2, real={"enabled": True}, uniform={"enabled": True, "attribute_value": 18})
+    config["entries"][1]["roster"] = {"players": []}
+    results, _ = seeded(tmp_path, config={"away_tactic_pool": config})
+
+    summary = results.pool_summary("job1")
+
+    assert summary["players"] == "real"
+    assert summary["uniform"] == {"enabled": True, "attribute_value": 18}
+    assert [row["roster"] for row in summary["entries"]] == [False, True]
+
+
+def test_pool_summary_accepts_squad_source_alias_for_real_roster(tmp_path: Path):
+    config = pool_config(2)
+    config.pop("real")
+    config["squad_source"] = {"enabled": True}
+    results, _ = seeded(tmp_path, config={"away_tactic_pool": config})
+
+    assert results.pool_summary("job1")["players"] == "real"
+
+
+def test_pool_summary_counts_completed_draws_from_run_stats(tmp_path: Path):
+    results, repository = seeded(tmp_path, config={"away_tactic_pool": pool_config(2)})
+    append_run(repository, "A", 11, 2, 0, stats={"tactic_pool_entry": 0})
+    append_run(repository, "B", 11, 1, 0, stats={"tactic_pool_entry": 0})
+    append_run(repository, "A", 12, 0, 1, stats={"tactic_pool_entry": {"index": 1}})
+    append_run(repository, "B", 12, 2, 2, stats={"tactic_pool_entry": {"index": 1}})
+    append_run(repository, "A", 13, 1, 1, stats={})
+
+    assert results.pool_summary("job1")["draws"] == {"0": 1, "1": 1}
+
+
+def test_pool_summary_ignores_runs_without_pool_entry(tmp_path: Path):
+    results, repository = seeded(tmp_path, config={"away_tactic_pool": pool_config(2)})
+    append_run(repository, "A", 1, 1, 0, stats={})
+    append_run(repository, "B", 1, 0, 0, stats={"teams": []})
+
+    assert results.pool_summary("job1")["draws"] == {"0": 0, "1": 0}
+
+
+def test_pool_summary_defaults_enabled_to_true(tmp_path: Path):
+    config = pool_config(2)
+    config.pop("enabled")
+    results, _ = seeded(tmp_path, config={"away_tactic_pool": config})
+
+    summary = results.pool_summary("job1")
+
+    assert summary["enabled"] is True
+    assert summary["mode"] == "random"
+
+
+def test_pool_summary_disabled_pool_keeps_entry_count(tmp_path: Path):
+    results, _ = seeded(tmp_path, config={"away_tactic_pool": pool_config(2, enabled=False)})
+
+    assert results.pool_summary("job1") == {
+        "enabled": False,
+        "entry_count": 2,
+        "mode": None,
+        "players": None,
+        "draws": {},
+    }
+
+
+def test_pool_summary_prefers_away_tactic_pool_config(tmp_path: Path):
+    config = {
+        "away_tactic_pool": {"entries": [{"name": "优先池", "weight": 1}]},
+        "tactic_pool": {"entries": [{"name": "旧池一", "weight": 1}, {"name": "旧池二", "weight": 1}]},
+    }
+    results, _ = seeded(tmp_path, config=config)
+
+    summary = results.pool_summary("job1")
+
+    assert summary["entry_count"] == 1
+    assert [row["name"] for row in summary["entries"]] == ["优先池"]
+
+
+def test_pool_summary_counts_rotation_draws_across_rounds(tmp_path: Path):
+    results, repository = seeded(
+        tmp_path,
+        config={"away_tactic_pool": pool_config(3, rotation={"enabled": True, "rounds": 2})},
+    )
+    for seed in range(6):
+        entry = seed % 3
+        append_run(repository, "A", seed, 1, 0, stats={"tactic_pool_entry": entry})
+        append_run(repository, "B", seed, 1, 0, stats={"tactic_pool_entry": {"index": entry}})
+
+    assert results.pool_summary("job1")["draws"] == {"0": 2, "1": 2, "2": 2}
+
+
+def test_pool_summary_returns_none_for_missing_job(tmp_path: Path):
+    results, _ = seeded(tmp_path)
+
+    assert results.pool_summary("missing") is None
+
+
+@pytest.mark.parametrize(
+    ("config", "message"),
+    [
+        ({"away_tactic_pool": "bad"}, "客队战术池"),
+        ({"tactic_pool": 1}, "客队战术池"),
+        ({"away_tactic_pool": {}}, "条目"),
+        ({"away_tactic_pool": {"entries": "bad"}}, "条目"),
+        ({"away_tactic_pool": {"entries": [{"weight": 1}]}}, "名称"),
+        ({"away_tactic_pool": {"entries": [{"name": "客队", "weight": 0}]}}, "权重"),
+        ({"away_tactic_pool": {"entries": [{"name": "客队"}], "uniform": "bad"}}, "统一属性"),
+        ({"away_tactic_pool": {"entries": [{"name": "客队"}], "rotation": {"enabled": "yes"}}}, "布尔值"),
+        (
+            {"away_tactic_pool": {"entries": [{"name": "客队"}], "rotation": {"enabled": True, "rounds": 0}}},
+            "轮数",
+        ),
+    ],
+)
+def test_pool_summary_rejects_invalid_pool_config(tmp_path: Path, config: dict, message: str):
+    results, _ = seeded(tmp_path, config=config)
+
+    with pytest.raises(ValueError, match=message):
+        results.pool_summary("job1")
+
+
+@pytest.mark.parametrize("enabled", ["yes", 1, None])
+def test_pool_summary_rejects_non_boolean_enabled(tmp_path: Path, enabled):
+    config = pool_config(1)
+    config["enabled"] = enabled
+    results, _ = seeded(tmp_path, config={"away_tactic_pool": config})
+
+    with pytest.raises(ValueError, match="开关"):
+        results.pool_summary("job1")
+
+
+def test_pool_summary_rejects_non_mapping_job_config():
+    results = ResultsService(StoredRunRepository({"id": "job1", "config": "bad"}, []))
+
+    with pytest.raises(ValueError, match="任务配置"):
+        results.pool_summary("job1")

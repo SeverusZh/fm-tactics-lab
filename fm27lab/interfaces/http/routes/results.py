@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Annotated, Any
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Response
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from fm27lab.adapters.storage_sqlite.repositories import JobRepository
 from fm27lab.application.results import ResultsService
@@ -37,6 +37,30 @@ class ResultsSummaryOutput(BaseModel):
     job: JobOutput
     metrics: JobMetricsOutput | None
     paired: PairedOutput
+
+
+class PoolSummaryEntryOutput(BaseModel):
+    index: int
+    name: str
+    weight: int
+    probability: float | None
+    roster: bool
+
+
+class PoolSummaryUniformOutput(BaseModel):
+    enabled: bool
+    attribute_value: int
+
+
+class PoolSummaryOutput(BaseModel):
+    enabled: bool
+    entry_count: int
+    mode: str | None = None
+    rounds: int | None = None
+    players: str | None = None
+    uniform: PoolSummaryUniformOutput | None = None
+    entries: list[PoolSummaryEntryOutput] | None = None
+    draws: dict[str, int] = Field(default_factory=dict)
 
 
 def _validation_error(error: ValueError) -> HTTPException:
@@ -92,6 +116,25 @@ def register(app: FastAPI) -> None:
             raise _validation_error(error) from error
         try:
             summary = results().summary(job_id, side=side_value)
+        except ValueError as error:
+            raise _validation_error(error) from error
+        if summary is None:
+            raise _not_found()
+        return summary
+
+    @app.get(
+        "/api/jobs/{job_id}/pool-summary",
+        response_model=PoolSummaryOutput,
+        response_model_exclude_unset=True,
+        responses={
+            400: {"model": ErrorEnvelope},
+            401: {"model": ErrorEnvelope},
+            404: {"model": ErrorEnvelope},
+        },
+    )
+    def job_pool_summary(job_id: str, _: None = Depends(require_token)):
+        try:
+            summary = results().pool_summary(job_id)
         except ValueError as error:
             raise _validation_error(error) from error
         if summary is None:
