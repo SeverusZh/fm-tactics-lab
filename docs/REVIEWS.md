@@ -68,6 +68,14 @@
 | 2026-11-13 | HTTP 路由模块化与存档接口 | app.py、common.py、routes/、test_http_saves.py | PASS | 旧新 OpenAPI 与响应快照对比行为不变；saves CRUD 与 import 分页、409/404/400 分界与回滚正确；2 项 MINOR 为超大 club_uid 500 与消息文案耦合。 |
 | 2026-11-13 | 引擎能力协商与运行时计划 | ports/engine.py、engine_native/capabilities.py、tests | PASS | 能力缺省回退、四运行时矩阵、provenance 五键与 Protocol 结构均闭环；62 项测试。 |
 | 2026-11-13 | 前端任务管理页 | web/src jobs 客户端与 JobsPage | PASS | 22 项 Vitest、类型检查与构建通过；列表/筛选/分页/取消/删除/创建与错误态齐全；MINOR 为手写类型与末页空页。 |
+| 2026-11-13 | CLI HTTP 客户端与命令面 | client.py、cli.py、tests | FAIL | urllib 重定向把 Bearer 转发到任意主机；URL 错误回显 secret、userinfo 未拒、路径未编码。 |
+| 2026-11-13 | CLI 修复轮 | 同上 | PASS | 拒绝全部重定向且不产生第二跳、URL 脱敏、userinfo 拒绝、路径 quote 与本地异常转 SidecarError、serve data-dir 优先级、jobs summary 切结果路由；100 项测试。 |
+| 2026-11-13 | MCP stdio 协议层 | interfaces/mcp/protocol.py、tests | PASS | initialize/tools/list/tools/call、错误码、stdout 纯净与 handler 异常隔离闭合；修复轮补 RecursionError、严格 UTF-8 与 allow_nan。 |
+| 2026-11-13 | MCP 工具面 | interfaces/mcp/tools.py、tests | PASS | 22 工具 schema 与路由契约一致、本地校验、路径编码、错误透传；77 项测试。 |
+| 2026-11-13 | 结果与产物 HTTP | routes/results.py、artifacts.py、tests | FAIL | 下载端点无容器校验，DB 篡改或符号链接可读根外任意文件。 |
+| 2026-11-13 | 结果与产物 HTTP 修复 | 同上 | PASS | 下载前容器 resolve、符号链接与相对路径拒绝；ETag 带引号、CSV 字节断言；负向测试四类。 |
+| 2026-11-13 | 实验调度与并发预检 | domain/concurrency.py、application/experiments.py、tests | PASS | 1–256 校验、推荐值与资源预检、串行队列、逐场回写、取消/续跑与缺失场次过滤；124 项测试。 |
+| 2026-11-13 | 前端结果页与存档库 | ResultsPage、LibraryPage、api.ts、tests | PASS | 指标/逐场/CSV 与存档 CRUD/导入/删除、状态齐全；56 项 Vitest、typecheck 与 build 通过。 |
 
 ## 审核规则
 
