@@ -474,6 +474,154 @@
   gap: var(--space-2);
 }
 
+.saves-file-import .field input {
+  width: 100%;
+  min-width: 320px;
+}
+
+.saves-import-result {
+  display: grid;
+  gap: var(--space-3);
+  margin-bottom: var(--space-5);
+  padding: var(--space-4);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-control);
+  background: var(--surface-raised);
+}
+
+.saves-import-result .jobs-notice {
+  margin: 0;
+}
+
+.saves-import-result-facts {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-5);
+  flex-wrap: wrap;
+  margin: 0;
+}
+
+.saves-import-result-facts dt {
+  color: var(--text-subtle);
+  font-size: var(--type-caption);
+}
+
+.saves-import-result-facts dd {
+  margin: 0;
+  color: var(--text);
+}
+
+.saves-import-clubs {
+  display: grid;
+  gap: var(--space-1);
+  margin: 0;
+  padding-left: var(--space-5);
+  color: var(--text-muted);
+  font-size: var(--type-body-sm);
+}
+
+.saves-squad {
+  display: grid;
+  gap: var(--space-3);
+  margin-top: var(--space-5);
+  padding-top: var(--space-5);
+  border-top: 1px solid var(--border);
+}
+
+.saves-squad-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.saves-squad-head h3 {
+  margin: 0;
+  font-size: var(--type-h3);
+  font-weight: 600;
+}
+
+.saves-squad-head .button {
+  margin-left: auto;
+}
+
+.saves-squad-target {
+  margin: 0;
+  color: var(--text-subtle);
+  font-size: var(--type-body-sm);
+}
+
+.saves-clubs {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.saves-clubs .button[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: var(--selected);
+  color: var(--text);
+}
+
+.saves-squad-title {
+  margin: 0;
+  color: var(--text);
+  font-size: var(--type-body-lg);
+  font-weight: 600;
+}
+
+.saves-selection {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--type-body-sm);
+}
+
+.saves-squad-table {
+  min-width: 420px;
+}
+
+.saves-roster {
+  display: grid;
+  gap: var(--space-3);
+  margin-top: var(--space-3);
+  padding: var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--surface-raised);
+}
+
+.saves-roster h3 {
+  margin: 0;
+  font-size: var(--type-h3);
+  font-weight: 600;
+}
+
+.saves-roster-form {
+  display: flex;
+  align-items: end;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.saves-roster-form .field select {
+  min-width: 160px;
+}
+
+.saves-roster-actions {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.saves-roster .inline-alert,
+.saves-roster .jobs-notice {
+  margin: 0;
+}
+
+@media (max-width: 640px) {
+  .saves-file-import .field input {
+    min-width: 0;
+  }
+}
+
 .span-12 {
   grid-column: span 12;
 }

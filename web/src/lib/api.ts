@@ -592,3 +592,115 @@ export function checkConcurrency(
   });
   return apiJson<ConcurrencyCheck>(connection, `/api/concurrency/check${search}`);
 }
+
+export type SaveFileImportInput = {
+  source_path: string;
+  replace?: boolean;
+};
+
+export type ImportedClub = {
+  club_uid: number;
+  club_name: string | null;
+  players: number;
+};
+
+export type SaveFileImportResult = {
+  save_id: string;
+  status: string;
+  managed_clubs: ImportedClub[];
+  clubs: number;
+};
+
+export type SquadPlayer = {
+  source_uid: number | string;
+  name: string;
+  position: string;
+  ability: number | null;
+};
+
+export type SquadSelection = {
+  club_uid?: number;
+  team_id?: number | null;
+  team_slot?: number | null;
+  lineup: (number | string)[];
+  substitutes: (number | string)[];
+};
+
+export type SaveSquad = {
+  save_id: string;
+  club_uid: number;
+  club_name: string | null;
+  players: SquadPlayer[];
+  selection: SquadSelection | null;
+};
+
+export type RosterSide = "home" | "away";
+
+export type RosterScope = "starters" | "bench" | "both";
+
+export type RosterApplyInput = {
+  save_id: string;
+  club_uid: number;
+  side: RosterSide;
+  scope: RosterScope;
+};
+
+export type RosterApplied = {
+  starters: number;
+  substitutes: number;
+};
+
+export type RosterApplyResult = {
+  draft: DraftSummary;
+  applied: RosterApplied;
+};
+
+export type RosterUndoResult = {
+  draft: DraftSummary;
+};
+
+export function importSaveFile(
+  connection: Connection,
+  input: SaveFileImportInput,
+): Promise<SaveFileImportResult> {
+  return apiJson<SaveFileImportResult>(connection, "/api/saves/import", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export function getSaveSquad(
+  connection: Connection,
+  saveId: string,
+  clubUid: number,
+): Promise<SaveSquad> {
+  const search = queryString({ club_uid: clubUid });
+  return apiJson<SaveSquad>(
+    connection,
+    `/api/saves/${encodeURIComponent(saveId)}/squad${search}`,
+  );
+}
+
+export function applyRoster(
+  connection: Connection,
+  draftId: string,
+  input: RosterApplyInput,
+): Promise<RosterApplyResult> {
+  return apiJson<RosterApplyResult>(
+    connection,
+    `/api/drafts/${encodeURIComponent(draftId)}/apply-roster`,
+    { method: "POST", body: JSON.stringify(input) },
+  );
+}
+
+export function undoRoster(
+  connection: Connection,
+  draftId: string,
+): Promise<RosterUndoResult> {
+  return apiJson<RosterUndoResult>(
+    connection,
+    `/api/drafts/${encodeURIComponent(draftId)}/undo-roster`,
+    { method: "POST" },
+  );
+}
+

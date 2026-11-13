@@ -6,10 +6,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "../App";
 import { AppContext } from "../app-context";
 import {
+  ApiError,
+  applyRoster,
   createSave,
   deleteSave,
+  getSaveSquad,
   importSave,
+  importSaveFile,
   listSaves,
+  undoRoster,
   updateSave,
   type Health,
   type Save,
@@ -495,5 +500,503 @@ describe("存档战术库路由", () => {
 
     expect(await screen.findByRole("link", { name: "存档战术库" })).toBeInTheDocument();
     expect(await screen.findByText("尚未导入存档")).toBeInTheDocument();
+  });
+});
+
+const FILE_IMPORT_RESULT = {
+  save_id: "save-new",
+  status: "ready",
+  managed_clubs: [{ club_uid: 7, club_name: "阿森纳", players: 23 }],
+  clubs: 1,
+};
+
+const SQUAD = {
+  save_id: "save-1",
+  club_uid: 7,
+  club_name: "阿森纳",
+  players: [
+    { source_uid: 101, name: "萨卡", position: "AMR", ability: 168 },
+    { source_uid: 102, name: "赖斯", position: "MC", ability: 172 },
+  ],
+  selection: { club_uid: 7, team_id: 22, team_slot: 0, lineup: [101, 102], substitutes: [103, 104, 105] },
+};
+
+function managedSave(): Save {
+  return makeSave({ metadata: { managed_club_uids: [7] } });
+}
+
+function draftSummary(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "draft-1",
+    name: "测试草稿",
+    source: {},
+    created_at: "2026-11-13T10:00:00+00:00",
+    updated_at: "2026-11-13T10:00:00+00:00",
+    ...overrides,
+  };
+}
+
+async function openSquad(): Promise<HTMLElement> {
+  fireEvent.click(
+    within(rowFor("/saves/season-1.fm")).getByRole("button", { name: "查看名单" }),
+  );
+  const section = screen.getByRole("region", { name: "存档球队名单" });
+  const clubs = within(section).getByRole("group", { name: "经理俱乐部" });
+  fireEvent.click(within(clubs).getByRole("button", { name: "俱乐部 7" }));
+  return section;
+}
+
+async function waitForRoster(scope: HTMLElement) {
+  const roster = within(scope).getByRole("region", { name: "阵容同步" });
+  const form = within(roster).getByRole("form", { name: "阵容同步表单" });
+  await waitFor(() =>
+    expect(within(form).getByLabelText("选择同步草稿")).toHaveValue("draft-1"),
+  );
+  return { roster, form };
+}
+
+describe("存档文件导入", () => {
+  beforeEach(() => {
+    fetchMock.mockReset();
+    vi.stubGlobal("fetch", fetchMock);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it("校验存档路径后提交 source_path，成功后展示存档标识、状态与经理俱乐部", async () => {
+    let posted: unknown = null;
+    stubFetch((_url, init) => {
+      if (init.method === "POST") {
+        posted = JSON.parse(String(init.body));
+        return jsonResponse(FILE_IMPORT_RESULT, 201);
+      }
+      return jsonResponse(makeList([]));
+    });
+    renderLibraryPage();
+    await screen.findByText("尚未导入存档");
+
+    fireEvent.click(screen.getByRole("button", { name: "导入存档文件" }));
+    const form = screen.getByRole("form", { name: "导入存档文件" });
+    fireEvent.click(within(form).getByRole("button", { name: "导入文件" }));
+    expect(within(form).getByText("存档文件路径不能为空")).toBeInTheDocument();
+    expect(posted).toBeNull();
+
+    fireEvent.change(within(form).getByLabelText("存档文件路径"), {
+      target: { value: "/saves/season-2.fm" },
+    });
+    fireEvent.click(within(form).getByRole("button", { name: "导入文件" }));
+
+    await waitFor(() =>
+      expect(posted).toEqual({ source_path: "/saves/season-2.fm", replace: false }),
+    );
+    expect(callsTo("/api/saves/import")[0].url).toBe(
+      "http://127.0.0.1:43210/api/saves/import",
+    );
+    const result = await screen.findByRole("region", { name: "存档文件导入结果" });
+    expect(within(result).getByText("save-new")).toBeInTheDocument();
+    expect(within(result).getByText("已就绪")).toBeInTheDocument();
+    expect(within(result).getByText("阿森纳（23 人）")).toBeInTheDocument();
+    await waitFor(() => expect(callsTo("/api/saves?limit=20&offset=0")).toHaveLength(2));
+  });
+
+  it("重复导入返回 409 时展示后端消息，并可用覆盖导入重试", async () => {
+    const posts: unknown[] = [];
+    stubFetch((_url, init) => {
+      if (init.method === "POST") {
+        const body = JSON.parse(String(init.body)) as { replace?: boolean };
+        posts.push(body);
+        if (body.replace === true) return jsonResponse(FILE_IMPORT_RESULT, 201);
+        return jsonResponse({ error: { code: "conflict", message: "存档内容重复" } }, 409);
+      }
+      return jsonResponse(makeList([]));
+    });
+    renderLibraryPage();
+    await screen.findByText("尚未导入存档");
+
+    fireEvent.click(screen.getByRole("button", { name: "导入存档文件" }));
+    const form = screen.getByRole("form", { name: "导入存档文件" });
+    fireEvent.change(within(form).getByLabelText("存档文件路径"), {
+      target: { value: "/saves/season-1.fm" },
+    });
+    fireEvent.click(within(form).getByRole("button", { name: "导入文件" }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("存档内容重复");
+    fireEvent.click(within(alert).getByRole("button", { name: "覆盖导入" }));
+
+    await waitFor(() => expect(posts).toHaveLength(2));
+    expect(posts[1]).toEqual({ source_path: "/saves/season-1.fm", replace: true });
+    expect(
+      await screen.findByRole("region", { name: "存档文件导入结果" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("存档内容重复")).not.toBeInTheDocument();
+  });
+
+  it("勾选覆盖复选项后提交 replace 为 true", async () => {
+    let posted: unknown = null;
+    stubFetch((_url, init) => {
+      if (init.method === "POST") {
+        posted = JSON.parse(String(init.body));
+        return jsonResponse(FILE_IMPORT_RESULT, 201);
+      }
+      return jsonResponse(makeList([]));
+    });
+    renderLibraryPage();
+    await screen.findByText("尚未导入存档");
+
+    fireEvent.click(screen.getByRole("button", { name: "导入存档文件" }));
+    const form = screen.getByRole("form", { name: "导入存档文件" });
+    fireEvent.change(within(form).getByLabelText("存档文件路径"), {
+      target: { value: "/saves/season-3.fm" },
+    });
+    fireEvent.click(within(form).getByLabelText("覆盖已存在的存档"));
+    fireEvent.click(within(form).getByRole("button", { name: "导入文件" }));
+
+    await waitFor(() =>
+      expect(posted).toEqual({ source_path: "/saves/season-3.fm", replace: true }),
+    );
+  });
+});
+
+describe("存档球队名单", () => {
+  beforeEach(() => {
+    fetchMock.mockReset();
+    vi.stubGlobal("fetch", fetchMock);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it("选择存档与经理俱乐部后加载球员与阵容人数", async () => {
+    const squadResponse = deferred<Response>();
+    stubFetch((url) => {
+      if (url.includes("/squad")) return squadResponse.promise;
+      if (url.includes("/api/drafts")) {
+        return jsonResponse({ items: [], total: 0, next_offset: null });
+      }
+      return jsonResponse(makeList([managedSave()]));
+    });
+    renderLibraryPage();
+    await screen.findByText("/saves/season-1.fm");
+
+    const section = await openSquad();
+    expect(within(section).getByRole("group", { name: "经理俱乐部" })).toBeInTheDocument();
+    expect(within(section).getByRole("status")).toHaveTextContent("正在加载名单");
+
+    squadResponse.resolve(jsonResponse(SQUAD));
+
+    expect(await within(section).findByText("萨卡")).toBeInTheDocument();
+    expect(within(section).getByText("AMR")).toBeInTheDocument();
+    expect(within(section).getByText("168")).toBeInTheDocument();
+    expect(within(section).getByText("阿森纳")).toBeInTheDocument();
+    expect(within(section).getByText("首发 2 人 · 替补 3 人")).toBeInTheDocument();
+    expect(callsTo("/api/saves/save-1/squad?club_uid=7")).toHaveLength(1);
+  });
+
+  it("名单为空时显示空态", async () => {
+    stubFetch((url) => {
+      if (url.includes("/squad")) {
+        return jsonResponse({ ...SQUAD, players: [], selection: null });
+      }
+      if (url.includes("/api/drafts")) {
+        return jsonResponse({ items: [], total: 0, next_offset: null });
+      }
+      return jsonResponse(makeList([managedSave()]));
+    });
+    renderLibraryPage();
+    await screen.findByText("/saves/season-1.fm");
+
+    const section = await openSquad();
+
+    expect(
+      await within(section).findByText("该俱乐部没有可读取的球员"),
+    ).toBeInTheDocument();
+    expect(within(section).queryByText("首发 2 人 · 替补 3 人")).not.toBeInTheDocument();
+  });
+
+  it("名单加载失败时展示后端错误并可重试", async () => {
+    let attempts = 0;
+    stubFetch((url) => {
+      if (url.includes("/squad")) {
+        attempts += 1;
+        if (attempts === 1) {
+          return jsonResponse(
+            { error: { code: "not_found", message: "存档球队不存在" } },
+            404,
+          );
+        }
+        return jsonResponse(SQUAD);
+      }
+      if (url.includes("/api/drafts")) {
+        return jsonResponse({ items: [], total: 0, next_offset: null });
+      }
+      return jsonResponse(makeList([managedSave()]));
+    });
+    renderLibraryPage();
+    await screen.findByText("/saves/season-1.fm");
+
+    const section = await openSquad();
+    const alert = await within(section).findByRole("alert");
+    expect(alert).toHaveTextContent("存档球队不存在");
+
+    fireEvent.click(within(alert).getByRole("button", { name: "重试" }));
+    expect(await within(section).findByText("萨卡")).toBeInTheDocument();
+    expect(attempts).toBe(2);
+  });
+});
+
+describe("阵容同步到草稿", () => {
+  beforeEach(() => {
+    fetchMock.mockReset();
+    vi.stubGlobal("fetch", fetchMock);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  function stubRoster(handlers: {
+    onApply?: (body: unknown) => Response;
+    onUndo?: () => Response;
+  }) {
+    stubFetch((url, init) => {
+      if (init.method === "POST" && url.includes("/apply-roster")) {
+        const body: unknown = JSON.parse(String(init.body));
+        return (
+          handlers.onApply?.(body) ??
+          jsonResponse({
+            draft: draftSummary(),
+            applied: { starters: 11, substitutes: 0 },
+          })
+        );
+      }
+      if (init.method === "POST" && url.includes("/undo-roster")) {
+        return handlers.onUndo?.() ?? jsonResponse({ draft: draftSummary() });
+      }
+      if (url.includes("/squad")) return jsonResponse(SQUAD);
+      if (url.includes("/api/drafts")) {
+        return jsonResponse({ items: [draftSummary()], total: 1, next_offset: null });
+      }
+      return jsonResponse(makeList([managedSave()]));
+    });
+  }
+
+  it("提交草稿、主客与范围并展示变更人数", async () => {
+    const posts: unknown[] = [];
+    stubRoster({
+      onApply: (body) => {
+        posts.push(body);
+        return jsonResponse({
+          draft: draftSummary(),
+          applied: { starters: 11, substitutes: 0 },
+        });
+      },
+    });
+    renderLibraryPage();
+    await screen.findByText("/saves/season-1.fm");
+    const section = await openSquad();
+    await within(section).findByText("萨卡");
+    const { roster, form } = await waitForRoster(section);
+
+    fireEvent.change(within(form).getByLabelText("同步范围"), {
+      target: { value: "starters" },
+    });
+    fireEvent.click(within(form).getByRole("button", { name: "同步阵容" }));
+
+    await waitFor(() =>
+      expect(posts[0]).toEqual({
+        save_id: "save-1",
+        club_uid: 7,
+        side: "home",
+        scope: "starters",
+      }),
+    );
+    expect(
+      await within(roster).findByText("已同步：首发 11 人、替补 0 人"),
+    ).toBeInTheDocument();
+
+    fireEvent.click(within(form).getByRole("button", { name: "客队" }));
+    fireEvent.change(within(form).getByLabelText("同步范围"), {
+      target: { value: "bench" },
+    });
+    fireEvent.click(within(form).getByRole("button", { name: "同步阵容" }));
+
+    await waitFor(() =>
+      expect(posts[1]).toEqual({
+        save_id: "save-1",
+        club_uid: 7,
+        side: "away",
+        scope: "bench",
+      }),
+    );
+  });
+
+  it("撤销阵容同步成功后提示", async () => {
+    stubRoster({});
+    renderLibraryPage();
+    await screen.findByText("/saves/season-1.fm");
+    const section = await openSquad();
+    await within(section).findByText("萨卡");
+    const { roster, form } = await waitForRoster(section);
+
+    fireEvent.click(within(form).getByRole("button", { name: "撤销同步" }));
+
+    expect(await within(roster).findByText("已撤销阵容同步")).toBeInTheDocument();
+    const undoCall = callsTo("/api/drafts/draft-1/undo-roster");
+    expect(undoCall).toHaveLength(1);
+    expect(undoCall[0].init.method).toBe("POST");
+  });
+
+  it("同步与撤销失败时展示后端错误消息", async () => {
+    stubRoster({
+      onApply: () =>
+        jsonResponse(
+          { error: { code: "validation_failed", message: "草稿球队名单必须为 23 人" } },
+          400,
+        ),
+      onUndo: () =>
+        jsonResponse(
+          { error: { code: "validation_failed", message: "没有可撤销的阵容同步" } },
+          400,
+        ),
+    });
+    renderLibraryPage();
+    await screen.findByText("/saves/season-1.fm");
+    const section = await openSquad();
+    await within(section).findByText("萨卡");
+    const { roster, form } = await waitForRoster(section);
+
+    fireEvent.click(within(form).getByRole("button", { name: "同步阵容" }));
+    expect(await within(roster).findByRole("alert")).toHaveTextContent(
+      "草稿球队名单必须为 23 人",
+    );
+
+    fireEvent.click(within(form).getByRole("button", { name: "撤销同步" }));
+    expect(await within(roster).findByRole("alert")).toHaveTextContent(
+      "没有可撤销的阵容同步",
+    );
+  });
+
+  it("草稿列表加载失败时提示且禁用同步按钮", async () => {
+    stubFetch((url) => {
+      if (url.includes("/squad")) return jsonResponse(SQUAD);
+      if (url.includes("/api/drafts")) {
+        return jsonResponse(
+          { error: { code: "validation_failed", message: "草稿列表查询失败" } },
+          400,
+        );
+      }
+      return jsonResponse(makeList([managedSave()]));
+    });
+    renderLibraryPage();
+    await screen.findByText("/saves/season-1.fm");
+    const section = await openSquad();
+    await within(section).findByText("萨卡");
+
+    const roster = screen.getByRole("region", { name: "阵容同步" });
+    const alert = await within(roster).findByRole("alert");
+    expect(alert).toHaveTextContent("草稿列表加载失败：草稿列表查询失败");
+    const form = within(roster).getByRole("form", { name: "阵容同步表单" });
+    expect(within(form).getByRole("button", { name: "同步阵容" })).toBeDisabled();
+    expect(within(form).getByLabelText("选择同步草稿")).toBeDisabled();
+  });
+});
+
+describe("存档文件导入与阵容 API 客户端", () => {
+  beforeEach(() => {
+    fetchMock.mockReset();
+    vi.stubGlobal("fetch", fetchMock);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it("importSaveFile 使用 POST 提交 source_path 与 replace", async () => {
+    stubFetch(() => jsonResponse(FILE_IMPORT_RESULT, 201));
+
+    const result = await importSaveFile(connection, {
+      source_path: "/saves/a.fm",
+      replace: true,
+    });
+
+    expect(result.save_id).toBe("save-new");
+    expect(result.managed_clubs[0].club_name).toBe("阿森纳");
+    const [call] = fetchCalls();
+    expect(call.url).toBe("http://127.0.0.1:43210/api/saves/import");
+    expect(call.init.method).toBe("POST");
+    expect(JSON.parse(String(call.init.body))).toEqual({
+      source_path: "/saves/a.fm",
+      replace: true,
+    });
+    expect(new Headers(call.init.headers).get("Authorization")).toBe("Bearer test-token");
+  });
+
+  it("getSaveSquad 携带 club_uid 查询参数", async () => {
+    stubFetch(() => jsonResponse(SQUAD));
+
+    const squad = await getSaveSquad(connection, "save-1", 7);
+
+    expect(squad.players).toHaveLength(2);
+    expect(squad.selection?.lineup).toEqual([101, 102]);
+    expect(fetchCalls()[0].url).toBe(
+      "http://127.0.0.1:43210/api/saves/save-1/squad?club_uid=7",
+    );
+  });
+
+  it("applyRoster 提交存档、主客与范围", async () => {
+    stubFetch(() =>
+      jsonResponse({ draft: draftSummary(), applied: { starters: 11, substitutes: 12 } }),
+    );
+
+    const result = await applyRoster(connection, "draft-1", {
+      save_id: "save-1",
+      club_uid: 7,
+      side: "away",
+      scope: "both",
+    });
+
+    expect(result.applied).toEqual({ starters: 11, substitutes: 12 });
+    const [call] = fetchCalls();
+    expect(call.url).toBe("http://127.0.0.1:43210/api/drafts/draft-1/apply-roster");
+    expect(call.init.method).toBe("POST");
+    expect(JSON.parse(String(call.init.body))).toEqual({
+      save_id: "save-1",
+      club_uid: 7,
+      side: "away",
+      scope: "both",
+    });
+  });
+
+  it("undoRoster 使用 POST 且不携带请求体", async () => {
+    stubFetch(() => jsonResponse({ draft: draftSummary() }));
+
+    const result = await undoRoster(connection, "draft-1");
+
+    expect(result.draft.id).toBe("draft-1");
+    const [call] = fetchCalls();
+    expect(call.url).toBe("http://127.0.0.1:43210/api/drafts/draft-1/undo-roster");
+    expect(call.init.method).toBe("POST");
+    expect(call.init.body).toBeUndefined();
+  });
+
+  it("导入冲突转换为 ApiError 并携带后端消息", async () => {
+    stubFetch(() =>
+      jsonResponse({ error: { code: "conflict", message: "存档内容重复" } }, 409),
+    );
+
+    await expect(
+      importSaveFile(connection, { source_path: "/saves/a.fm", replace: false }),
+    ).rejects.toBeInstanceOf(ApiError);
+    await expect(
+      importSaveFile(connection, { source_path: "/saves/a.fm", replace: false }),
+    ).rejects.toMatchObject({ status: 409, code: "conflict", message: "存档内容重复" });
   });
 });
