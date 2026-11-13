@@ -154,7 +154,7 @@ export type JobSummary = {
   paired: JobPaired;
 };
 
-function queryString(params: Record<string, string | number | undefined | null>): string {
+function queryString(params: Record<string, string | number | boolean | undefined | null>): string {
   const search = new URLSearchParams();
   for (const [key, value] of Object.entries(params)) {
     if (value === undefined || value === null || value === "") continue;
@@ -311,4 +311,79 @@ export function importSave(
     method: "POST",
     body: JSON.stringify(payload),
   });
+}
+
+export type Setting = {
+  key: string;
+  value: unknown;
+  note: string | null;
+  updated_at: string;
+};
+
+export type SettingList = {
+  items: Setting[];
+  total: number;
+};
+
+export type SettingInput = {
+  value: unknown;
+  note?: string | null;
+};
+
+export type ConcurrencyCheckQuery = {
+  workers: number;
+  cpu_count: number;
+  available_memory_bytes: number;
+  free_disk_bytes: number;
+  allow_oversubscription: boolean;
+};
+
+export type ConcurrencyCheck = {
+  allowed: boolean;
+  code: string | null;
+  recommended_workers: number;
+  warnings: string[];
+  memory_required_bytes: number;
+  disk_required_bytes: number;
+};
+
+function settingPath(key: string): string {
+  return `/api/settings/${encodeURIComponent(key)}`;
+}
+
+export function listSettings(connection: Connection): Promise<SettingList> {
+  return apiJson<SettingList>(connection, "/api/settings");
+}
+
+export function getSetting(connection: Connection, key: string): Promise<Setting> {
+  return apiJson<Setting>(connection, settingPath(key));
+}
+
+export function putSetting(
+  connection: Connection,
+  key: string,
+  input: SettingInput,
+): Promise<Setting> {
+  return apiJson<Setting>(connection, settingPath(key), {
+    method: "PUT",
+    body: JSON.stringify(input),
+  });
+}
+
+export async function deleteSetting(connection: Connection, key: string): Promise<void> {
+  await apiFetch(connection, settingPath(key), { method: "DELETE" });
+}
+
+export function checkConcurrency(
+  connection: Connection,
+  query: ConcurrencyCheckQuery,
+): Promise<ConcurrencyCheck> {
+  const search = queryString({
+    workers: query.workers,
+    cpu_count: query.cpu_count,
+    available_memory_bytes: query.available_memory_bytes,
+    free_disk_bytes: query.free_disk_bytes,
+    allow_oversubscription: query.allow_oversubscription,
+  });
+  return apiJson<ConcurrencyCheck>(connection, `/api/concurrency/check${search}`);
 }
