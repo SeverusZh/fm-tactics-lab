@@ -427,6 +427,62 @@ export async function deleteDraft(connection: Connection, draftId: string): Prom
   await apiFetch(connection, `/api/drafts/${encodeURIComponent(draftId)}`, { method: "DELETE" });
 }
 
+export type CatalogOption = {
+  id: number | string;
+  label: string;
+};
+
+export type CatalogPosition = {
+  id: string;
+  x?: number;
+  y?: number;
+};
+
+export type CatalogRole = {
+  id: string;
+  label?: string | null;
+  name?: string | null;
+};
+
+export type CatalogTeamInstruction = {
+  id: number | string;
+  name?: string | null;
+  label?: string | null;
+  possession_phase?: number | null;
+  phase?: number | null;
+  options?: CatalogOption[] | null;
+};
+
+export type CatalogMentality = {
+  id: number | string;
+  label?: string | null;
+  name?: string | null;
+};
+
+export type Catalog = {
+  positions: CatalogPosition[];
+  roles: CatalogRole[];
+  team_instructions: CatalogTeamInstruction[];
+  mentalities: CatalogMentality[];
+};
+
+export type CatalogResponse = {
+  available: boolean;
+  catalog: Catalog | null;
+};
+
+export async function getCatalog(connection: Connection): Promise<Catalog | null> {
+  try {
+    const body = await apiJson<CatalogResponse>(connection, "/api/catalog");
+    if (body.available !== true || body.catalog === null || body.catalog === undefined) {
+      return null;
+    }
+    return body.catalog;
+  } catch {
+    return null;
+  }
+}
+
 export type Setting = {
   key: string;
   value: unknown;
