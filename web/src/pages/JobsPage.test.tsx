@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "../App";
 import { AppContext } from "../app-context";
 import {
+  deleteJobsBatch,
   getJob,
   listJobRuns,
   updateJob,
@@ -384,5 +385,366 @@ describe("任务管理路由", () => {
 
     expect(await screen.findByRole("link", { name: "任务管理" })).toBeInTheDocument();
     expect(await screen.findByText("尚无任务")).toBeInTheDocument();
+  });
+});
+function jobCheckbox(label: string, jobId: string): HTMLElement {
+  return screen.getByRole("checkbox", { name: "选择任务 " + label + "（" + jobId + "）" });
+}
+
+function selectAllCheckbox(): HTMLInputElement {
+  return screen.getByRole("checkbox", { name: "全选当前页任务" }) as HTMLInputElement;
+}
+
+function selectAllButton(): HTMLElement {
+  return screen.getByRole("button", { name: "删除所选" });
+}
+
+function batchDeleteCalls(): { url: string; init: RequestInit }[] {
+  return fetchCalls().filter((call) => call.init.method === "DELETE");
+}
+
+function batchResult(): HTMLElement {
+  return screen.getByRole("status", { name: "批量删除结果" });
+}
+
+function deletableJob(overrides: Partial<Job> = {}): Job {
+  return makeJob({ status: "completed", ...overrides });
+}
+
+function listPage(items: Job[], total = items.length, nextOffset: number | null = null) {
+  return jsonResponse({ items, total, next_offset: nextOffset });
+}
+
+describe("JobsPage 批量删除", () => {
+  beforeEach(() => {
+    fetchMock.mockReset();
+    vi.stubGlobal("fetch", fetchMock);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("勾选与全选会更新计数、半选状态和按钮可用性", async () => {
+    stubFetch(() =>
+      listPage([
+        deletableJob(),
+        deletableJob({ id: "job-2", name: "任务二" }),
+        deletableJob({ id: "job-3", name: "任务三" }),
+      ]),
+    );
+    renderJobsPage();
+    await screen.findByText("任务一");
+
+    const count = screen.getByText("已选 0 个任务");
+    expect(count).toHaveAttribute("aria-live", "polite");
+    expect(selectAllButton()).toBeDisabled();
+    const all = selectAllCheckbox();
+    expect(all).toHaveAttribute("aria-checked", "false");
+
+    fireEvent.click(jobCheckbox("任务一", "job-1"));
+    expect(jobCheckbox("任务一", "job-1")).toBeChecked();
+    expect(screen.getByText("已选 1 个任务")).toBeInTheDocument();
+    expect(selectAllButton()).toBeEnabled();
+    expect(all).toHaveAttribute("aria-checked", "mixed");
+    expect(all.indeterminate).toBe(true);
+
+    fireEvent.click(all);
+    expect(screen.getByText("已选 3 个任务")).toBeInTheDocument();
+    expect(all).toHaveAttribute("aria-checked", "true");
+    expect(all.indeterminate).toBe(false);
+    const rows = [
+      ["任务一", "job-1"],
+      ["任务二", "job-2"],
+      ["任务三", "job-3"],
+    ] as const;
+    for (const [label, jobId] of rows) {
+      expect(jobCheckbox(label, jobId)).toBeChecked();
+    }
+
+    fireEvent.click(all);
+    expect(screen.getByText("已选 0 个任务")).toBeInTheDocument();
+    expect(selectAllButton()).toBeDisabled();
+    expect(all).toHaveAttribute("aria-checked", "false");
+    for (const [label, jobId] of rows) {
+      expect(jobCheckbox(label, jobId)).not.toBeChecked();
+    }
+  });
+
+  it("运行中与排队中的任务不可选择且全选只覆盖可删除任务", async () => {
+    stubFetch(() =>
+      listPage([
+        deletableJob(),
+        makeJob({ id: "job-2", name: "任务二", status: "running" }),
+        makeJob({ id: "job-3", name: "任务三", status: "queued" }),
+      ]),
+    );
+    renderJobsPage();
+    await screen.findByText("任务一");
+
+    expect(jobCheckbox("任务一", "job-1")).toBeEnabled();
+    const running = jobCheckbox("任务二", "job-2");
+    const queued = jobCheckbox("任务三", "job-3");
+    expect(running).toBeDisabled();
+    expect(queued).toBeDisabled();
+    expect(running).toHaveAttribute("title", "运行中或排队中的任务不可删除");
+
+    fireEvent.click(selectAllCheckbox());
+    expect(screen.getByText("已选 1 个任务")).toBeInTheDocument();
+    expect(jobCheckbox("任务一", "job-1")).toBeChecked();
+    expect(running).not.toBeChecked();
+    expect(queued).not.toBeChecked();
+    expect(selectAllCheckbox().indeterminate).toBe(false);
+
+    fireEvent.click(selectAllButton());
+    const dialog = screen.getByRole("alertdialog");
+    expect(dialog).toHaveTextContent("将删除 1 个任务");
+    expect(dialog).not.toHaveTextContent("任务二");
+  });
+
+  it("当前页没有任务时不渲染批量操作栏", async () => {
+    stubFetch(() => listPage([]));
+    renderJobsPage();
+    await screen.findByText("尚无任务");
+
+    expect(screen.queryByRole("button", { name: "删除所选" })).not.toBeInTheDocument();
+    expect(screen.queryByText(/已选/)).not.toBeInTheDocument();
+  });
+
+  it("无选择时删除所选按钮禁用且不出现确认区", async () => {
+    stubFetch(() => listPage([deletableJob()]));
+    renderJobsPage();
+    await screen.findByText("任务一");
+
+    const button = selectAllButton();
+    expect(button).toBeDisabled();
+    fireEvent.click(button);
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    expect(batchDeleteCalls()).toHaveLength(0);
+  });
+
+  it("删除所选需要二次确认，确认后提交 ids 并展示删除明细且刷新列表", async () => {
+    let removed = false;
+    stubFetch((_url, init) => {
+      if (init.method === "DELETE") {
+        removed = true;
+        return jsonResponse({ deleted: ["job-1"], failed: [] });
+      }
+      if (removed) {
+        return listPage([deletableJob({ id: "job-2", name: "任务二" })]);
+      }
+      return listPage([deletableJob(), deletableJob({ id: "job-2", name: "任务二" })]);
+    });
+    renderJobsPage();
+    await screen.findByText("任务一");
+    fireEvent.click(jobCheckbox("任务一", "job-1"));
+    fireEvent.click(jobCheckbox("任务二", "job-2"));
+
+    fireEvent.click(selectAllButton());
+    const dialog = screen.getByRole("alertdialog");
+    expect(dialog).not.toHaveAttribute("aria-modal");
+    expect(dialog).toHaveTextContent("将删除 2 个任务");
+    expect(dialog).toHaveTextContent("任务一（job-1）");
+    expect(dialog).toHaveTextContent("任务二（job-2）");
+    expect(dialog).toHaveTextContent("总场数 100");
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "放弃" }));
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    expect(batchDeleteCalls()).toHaveLength(0);
+
+    fireEvent.click(jobCheckbox("任务二", "job-2"));
+    expect(screen.getByText("已选 1 个任务")).toBeInTheDocument();
+    fireEvent.click(selectAllButton());
+    fireEvent.click(
+      within(screen.getByRole("alertdialog")).getByRole("button", { name: "确认删除" }),
+    );
+
+    await waitFor(() => expect(batchDeleteCalls()).toHaveLength(1));
+    const [call] = batchDeleteCalls();
+    expect(call.url).toBe("http://127.0.0.1:43210/api/jobs");
+    expect(new Headers(call.init.headers).get("Authorization")).toBe("Bearer test-token");
+    expect(JSON.parse(String(call.init.body))).toEqual({ ids: ["job-1"] });
+
+    expect(await screen.findByText("已删除 1 个任务")).toBeInTheDocument();
+    const result = batchResult();
+    expect(within(result).getByText("job-1")).toBeInTheDocument();
+    expect(result).toHaveFocus();
+    expect(screen.getByText("已选 0 个任务")).toBeInTheDocument();
+    expect(selectAllButton()).toBeDisabled();
+    expect(await screen.findByText("任务二")).toBeInTheDocument();
+    expect(jobCheckbox("任务二", "job-2")).not.toBeChecked();
+    await waitFor(() => expect(callsTo("/api/jobs?").length).toBeGreaterThanOrEqual(2));
+
+    fireEvent.click(screen.getByRole("button", { name: "刷新" }));
+    await waitFor(() => expect(screen.queryByText("已删除 1 个任务")).not.toBeInTheDocument());
+  });
+
+  it("部分失败时展示已删除数量、ID 明细与失败原因", async () => {
+    stubFetch((_url, init) => {
+      if (init.method === "DELETE") {
+        return jsonResponse({
+          deleted: ["job-1"],
+          failed: [{ id: "job-2", error: "任务正在运行或排队" }],
+        });
+      }
+      return listPage([deletableJob(), deletableJob({ id: "job-2", name: "任务二" })]);
+    });
+    renderJobsPage();
+    await screen.findByText("任务一");
+    fireEvent.click(jobCheckbox("任务一", "job-1"));
+    fireEvent.click(jobCheckbox("任务二", "job-2"));
+    fireEvent.click(selectAllButton());
+    fireEvent.click(
+      within(screen.getByRole("alertdialog")).getByRole("button", { name: "确认删除" }),
+    );
+
+    expect(await screen.findByText("已删除 1 个任务")).toBeInTheDocument();
+    const result = batchResult();
+    expect(within(result).getByText("job-1")).toBeInTheDocument();
+    const alert = within(result).getByRole("alert");
+    expect(alert).toHaveTextContent("1 个任务删除失败");
+    expect(alert).toHaveTextContent("job-2");
+    expect(alert).toHaveTextContent("任务正在运行或排队");
+    expect(screen.getByText("已选 0 个任务")).toBeInTheDocument();
+  });
+
+  it("批量删除请求失败时展示错误并保留选择", async () => {
+    stubFetch((_url, init) => {
+      if (init.method === "DELETE") {
+        return jsonResponse(
+          { error: { code: "internal_error", message: "批量删除失败" } },
+          500,
+        );
+      }
+      return listPage([deletableJob(), deletableJob({ id: "job-2", name: "任务二" })]);
+    });
+    renderJobsPage();
+    await screen.findByText("任务一");
+    fireEvent.click(jobCheckbox("任务一", "job-1"));
+    fireEvent.click(jobCheckbox("任务二", "job-2"));
+    fireEvent.click(selectAllButton());
+    fireEvent.click(
+      within(screen.getByRole("alertdialog")).getByRole("button", { name: "确认删除" }),
+    );
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("批量删除失败");
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    expect(screen.getByText("已选 2 个任务")).toBeInTheDocument();
+    expect(selectAllButton()).toBeEnabled();
+    expect(screen.queryByText(/已删除/)).not.toBeInTheDocument();
+  });
+
+  it("非模态内联确认框打开时聚焦放弃按钮，Escape 关闭并还原焦点", async () => {
+    stubFetch(() => listPage([deletableJob()]));
+    renderJobsPage();
+    await screen.findByText("任务一");
+    fireEvent.click(jobCheckbox("任务一", "job-1"));
+    fireEvent.click(selectAllButton());
+
+    const dialog = screen.getByRole("alertdialog");
+    expect(screen.getByRole("button", { name: "放弃" })).toHaveFocus();
+    expect(dialog).not.toHaveAttribute("aria-modal");
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    expect(selectAllButton()).toHaveFocus();
+  });
+
+  it("点击放弃关闭确认框并还原焦点", async () => {
+    stubFetch(() => listPage([deletableJob()]));
+    renderJobsPage();
+    await screen.findByText("任务一");
+    fireEvent.click(jobCheckbox("任务一", "job-1"));
+    fireEvent.click(selectAllButton());
+
+    fireEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "放弃" }));
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    expect(selectAllButton()).toHaveFocus();
+  });
+
+  it("翻页与刷新会关闭确认区并清空选择", async () => {
+    stubFetch((url) => {
+      if (url.includes("offset=20")) {
+        return listPage([deletableJob({ id: "job-4", name: "任务四" })], 21);
+      }
+      return listPage([deletableJob()], 21, 20);
+    });
+    renderJobsPage();
+    await screen.findByText("任务一");
+    fireEvent.click(jobCheckbox("任务一", "job-1"));
+    fireEvent.click(selectAllButton());
+    expect(screen.getByRole("alertdialog")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "下一页" }));
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    expect(await screen.findByText("任务四")).toBeInTheDocument();
+    expect(screen.getByText("已选 0 个任务")).toBeInTheDocument();
+
+    fireEvent.click(jobCheckbox("任务四", "job-4"));
+    fireEvent.click(selectAllButton());
+    expect(screen.getByRole("alertdialog")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "刷新" }));
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    expect(screen.getByText("已选 0 个任务")).toBeInTheDocument();
+    expect(selectAllButton()).toBeDisabled();
+  });
+
+  it("切换状态筛选会清空已选任务", async () => {
+    stubFetch(() => listPage([deletableJob()]));
+    renderJobsPage();
+    await screen.findByText("任务一");
+    fireEvent.click(jobCheckbox("任务一", "job-1"));
+    expect(screen.getByText("已选 1 个任务")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("状态筛选"), { target: { value: "completed" } });
+
+    await waitFor(() => expect(screen.getByText("已选 0 个任务")).toBeInTheDocument());
+    expect(selectAllButton()).toBeDisabled();
+  });
+
+  it("数据刷新后勾选态受可删除约束并清理不可删任务", async () => {
+    let refetched = false;
+    stubFetch((_url, init) => {
+      if (init.method === "DELETE") {
+        refetched = true;
+        return noContentResponse();
+      }
+      if (refetched) {
+        return listPage([makeJob({ id: "job-1", name: "任务一", status: "queued" })]);
+      }
+      return listPage([
+        makeJob({ id: "job-1", name: "任务一", status: "interrupted" }),
+        deletableJob({ id: "job-2", name: "任务二" }),
+      ]);
+    });
+    renderJobsPage();
+    await screen.findByText("任务一");
+    fireEvent.click(jobCheckbox("任务一", "job-1"));
+    expect(screen.getByText("已选 1 个任务")).toBeInTheDocument();
+
+    fireEvent.click(within(rowFor("任务二")).getByRole("button", { name: "删除" }));
+    fireEvent.click(within(rowFor("任务二")).getByRole("button", { name: "确认删除" }));
+
+    await waitFor(() => expect(jobCheckbox("任务一", "job-1")).toBeDisabled());
+    expect(jobCheckbox("任务一", "job-1")).not.toBeChecked();
+    expect(screen.getByText("已选 0 个任务")).toBeInTheDocument();
+    expect(selectAllButton()).toBeDisabled();
+  });
+
+  it("deleteJobsBatch 使用 DELETE 提交 ids 并携带鉴权", async () => {
+    stubFetch(() =>
+      jsonResponse({ deleted: ["job-1"], failed: [{ id: "job-2", error: "任务不存在" }] }),
+    );
+
+    const result = await deleteJobsBatch(connection, ["job-1", "job-2"]);
+
+    expect(result.deleted).toEqual(["job-1"]);
+    expect(result.failed).toEqual([{ id: "job-2", error: "任务不存在" }]);
+    const [call] = fetchCalls();
+    expect(call.url).toBe("http://127.0.0.1:43210/api/jobs");
+    expect(call.init.method).toBe("DELETE");
+    expect(new Headers(call.init.headers).get("Authorization")).toBe("Bearer test-token");
+    expect(new Headers(call.init.headers).get("Content-Type")).toBe("application/json");
+    expect(JSON.parse(String(call.init.body))).toEqual({ ids: ["job-1", "job-2"] });
   });
 });

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Any
 
@@ -111,3 +111,22 @@ class JobService:
 
     def delete(self, job_id: str) -> bool:
         return self.repository.delete(job_id)
+
+    def batch_delete(self, ids: Sequence[str]) -> dict[str, Any]:
+        deleted: list[str] = []
+        failed: list[dict[str, str]] = []
+        for job_id in ids:
+            # 状态判定与删除共用 BEGIN IMMEDIATE 事务，避免判定后任务被恢复为 queued/running 仍被删除。
+            with self.repository.database.transaction() as connection:
+                current = self.repository.get(job_id, connection=connection)
+                if current is None:
+                    failed.append({"id": job_id, "error": "任务不存在"})
+                    continue
+                if current["status"] in {"queued", "running"}:
+                    failed.append({"id": job_id, "error": "任务正在运行或排队"})
+                    continue
+                if not self.repository.delete(job_id, connection=connection):
+                    failed.append({"id": job_id, "error": "任务不存在"})
+                    continue
+            deleted.append(job_id)
+        return {"deleted": deleted, "failed": failed}

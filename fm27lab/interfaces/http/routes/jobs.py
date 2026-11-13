@@ -89,6 +89,27 @@ class JobBatchActionOutput(BaseModel):
     failed: list[JobBatchFailureOutput]
 
 
+class JobBatchDeleteInput(BaseModel):
+    model_config = ConfigDict(strict=True, extra="forbid")
+    ids: list[Annotated[str, StringConstraints(pattern=ID_PATTERN)]] = Field(min_length=1, max_length=256)
+
+    @model_validator(mode="after")
+    def _unique_ids(self) -> Self:
+        if len(set(self.ids)) != len(self.ids):
+            raise ValueError("ids 不得重复")
+        return self
+
+
+class JobBatchDeleteFailureOutput(BaseModel):
+    id: str
+    error: str
+
+
+class JobBatchDeleteOutput(BaseModel):
+    deleted: list[str]
+    failed: list[JobBatchDeleteFailureOutput]
+
+
 def register(app: FastAPI) -> None:
     def load_job(job_id: str) -> dict[str, Any]:
         try:
@@ -191,6 +212,14 @@ def register(app: FastAPI) -> None:
             else:
                 failed.append(failure)
         return JobBatchActionOutput(succeeded=succeeded, failed=failed)
+
+    @app.delete(
+        "/api/jobs",
+        response_model=JobBatchDeleteOutput,
+        responses={400: {"model": ErrorEnvelope}, 401: {"model": ErrorEnvelope}},
+    )
+    def batch_delete_jobs(body: JobBatchDeleteInput, _: None = Depends(require_token)):
+        return app.state.jobs.batch_delete(body.ids)
 
     @app.get(
         "/api/jobs/{job_id}",

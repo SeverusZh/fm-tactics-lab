@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 from datetime import datetime
 from pathlib import Path
 
@@ -716,3 +717,358 @@ def test_job_http_batch_actions_openapi_contract(tmp_path: Path):
     failure = components["JobBatchFailureOutput"]
     assert set(failure["properties"]) == {"id", "code", "message"}
     assert set(failure["required"]) == {"id", "code", "message"}
+
+
+def batch_delete_body(ids):
+    return {"ids": ids}
+
+
+def delete_batch(client, headers, payload):
+    return client.request("DELETE", "/api/jobs", json=payload, headers=headers)
+
+
+def test_job_http_batch_delete_removes_non_active_jobs(tmp_path: Path):
+    app, settings, _, _ = make_app(tmp_path)
+    client = TestClient(app)
+    headers = auth(settings)
+    completed = create_job(client, headers, name="Completed")
+    finish_job(client, headers, completed["id"])
+    errored = create_job(client, headers, name="Errored")
+    assert (
+        client.patch(f"/api/jobs/{errored['id']}", json={"status": "error"}, headers=headers).status_code
+        == 200
+    )
+    cancelled = create_job(client, headers, name="Cancelled")
+    assert client.post(f"/api/jobs/{cancelled['id']}/cancel", headers=headers).status_code == 200
+    interrupted = create_job(client, headers, name="Interrupted")
+    assert (
+        client.patch(
+            f"/api/jobs/{interrupted['id']}", json={"status": "running"}, headers=headers
+        ).status_code
+        == 200
+    )
+    assert (
+        client.patch(
+            f"/api/jobs/{interrupted['id']}", json={"status": "interrupted"}, headers=headers
+        ).status_code
+        == 200
+    )
+    identifiers = [job["id"] for job in (completed, errored, cancelled, interrupted)]
+
+    response = delete_batch(client, headers, batch_delete_body(identifiers))
+    assert response.status_code == 200
+    assert response.json() == {"deleted": identifiers, "failed": []}
+    for job_id in identifiers:
+        assert client.get(f"/api/jobs/{job_id}", headers=headers).status_code == 404
+    assert client.get("/api/jobs", headers=headers).json() == {
+        "items": [],
+        "total": 0,
+        "next_offset": None,
+    }
+
+
+def test_job_http_jobs_delete_reports_missing_jobs(tmp_path: Path):
+    app, settings, _, _ = make_app(tmp_path)
+    client = TestClient(app)
+    headers = auth(settings)
+    first = create_job(client, headers, name="First")
+    finish_job(client, headers, first["id"])
+    second = create_job(client, headers, name="Second")
+    finish_job(client, headers, second["id"])
+    order = [first["id"], "absent-job", second["id"]]
+
+    response = delete_batch(client, headers, batch_delete_body(order))
+    assert response.status_code == 200
+    assert response.json() == {
+        "deleted": [first["id"], second["id"]],
+        "failed": [{"id": "absent-job", "error": "任务不存在"}],
+    }
+    assert client.get("/api/jobs", headers=headers).json()["total"] == 0
+
+
+def test_job_http_batch_delete_skips_queued_and_running_jobs(tmp_path: Path):
+    app, settings, _, _ = make_app(tmp_path)
+    client = TestClient(app)
+    headers = auth(settings)
+    queued = create_job(client, headers, name="Queued")
+    running = create_job(client, headers, name="Running")
+    assert (
+        client.patch(f"/api/jobs/{running['id']}", json={"status": "running"}, headers=headers).status_code
+        == 200
+    )
+    finished = create_job(client, headers, name="Finished")
+    finish_job(client, headers, finished["id"])
+    order = [queued["id"], running["id"], finished["id"]]
+
+    response = delete_batch(client, headers, batch_delete_body(order))
+    assert response.status_code == 200
+    assert response.json() == {
+        "deleted": [finished["id"]],
+        "failed": [
+            {"id": queued["id"], "error": "任务正在运行或排队"},
+            {"id": running["id"], "error": "任务正在运行或排队"},
+        ],
+    }
+    assert client.get(f"/api/jobs/{queued['id']}", headers=headers).json()["status"] == "queued"
+    running_state = client.get(f"/api/jobs/{running['id']}", headers=headers).json()
+    assert running_state["status"] == "running"
+    assert running_state["started_at"] is not None
+    assert client.get(f"/api/jobs/{finished['id']}", headers=headers).status_code == 404
+
+
+def test_job_http_batch_delete_mixed_results_keep_request_order(tmp_path: Path):
+    app, settings, _, _ = make_app(tmp_path)
+    client = TestClient(app)
+    headers = auth(settings)
+    first = create_job(client, headers, name="First")
+    finish_job(client, headers, first["id"])
+    running = create_job(client, headers, name="Running")
+    assert (
+        client.patch(f"/api/jobs/{running['id']}", json={"status": "running"}, headers=headers).status_code
+        == 200
+    )
+    second = create_job(client, headers, name="Second")
+    finish_job(client, headers, second["id"])
+    order = [first["id"], "absent-job", running["id"], second["id"]]
+
+    response = delete_batch(client, headers, batch_delete_body(order))
+    assert response.status_code == 200
+    assert response.json() == {
+        "deleted": [first["id"], second["id"]],
+        "failed": [
+            {"id": "absent-job", "error": "任务不存在"},
+            {"id": running["id"], "error": "任务正在运行或排队"},
+        ],
+    }
+    assert [item["id"] for item in client.get("/api/jobs", headers=headers).json()["items"]] == [
+        running["id"]
+    ]
+
+
+def test_job_http_batch_delete_rejects_invalid_requests(tmp_path: Path):
+    app, settings, _, _ = make_app(tmp_path)
+    client = TestClient(app)
+    headers = auth(settings)
+    finished = create_job(client, headers)
+    finish_job(client, headers, finished["id"])
+    job_id = finished["id"]
+    envelope = {"code", "message", "details", "retriable", "retry_after_seconds"}
+    invalid_bodies = (
+        {},
+        {"ids": None},
+        {"ids": []},
+        {"ids": "abc"},
+        {"ids": [123]},
+        {"ids": [None]},
+        {"ids": [""]},
+        {"ids": ["bad id"]},
+        {"ids": ["bad.id"]},
+        {"ids": ["x" * 65]},
+        {"ids": [job_id, job_id]},
+        {"ids": [job_id], "extra": True},
+        {"ids": [job_id], "action": "delete"},
+        {"ids": [f"job-{index}" for index in range(257)]},
+        [],
+    )
+    for payload in invalid_bodies:
+        response = delete_batch(client, headers, payload)
+        assert response.status_code == 400, payload
+        error = response.json()["error"]
+        assert set(error) == envelope, payload
+        assert error["code"] == "validation_failed", payload
+        assert error["retriable"] is False, payload
+    assert client.get(f"/api/jobs/{job_id}", headers=headers).status_code == 200
+
+    malformed = client.request(
+        "DELETE",
+        "/api/jobs",
+        content=b'{"ids": [',
+        headers={**headers, "Content-Type": "application/json"},
+    )
+    assert malformed.status_code == 400
+    assert malformed.json()["error"]["code"] == "validation_failed"
+    assert client.get(f"/api/jobs/{job_id}", headers=headers).status_code == 200
+
+    boundary = delete_batch(client, headers, batch_delete_body([f"job-{index}" for index in range(256)]))
+    assert boundary.status_code == 200
+    assert boundary.json()["deleted"] == []
+    assert len(boundary.json()["failed"]) == 256
+
+
+def test_job_http_batch_delete_requires_token(tmp_path: Path):
+    app, settings, _, _ = make_app(tmp_path)
+    client = TestClient(app)
+    for response in (
+        client.request("DELETE", "/api/jobs", json=batch_delete_body(["job-1"])),
+        client.request("DELETE", "/api/jobs"),
+        client.request(
+            "DELETE",
+            "/api/jobs",
+            json=batch_delete_body(["job-1"]),
+            headers={"Authorization": "Bearer wrong"},
+        ),
+    ):
+        assert response.status_code == 401
+        error = response.json()["error"]
+        assert set(error) == {"code", "message", "details", "retriable", "retry_after_seconds"}
+        assert error["code"] == "unauthorized"
+        assert response.headers["www-authenticate"] == "Bearer"
+
+
+def test_job_http_batch_delete_openapi_contract(tmp_path: Path):
+    app, _, _, _ = make_app(tmp_path)
+    document = TestClient(app).get("/api/openapi.json").json()
+    operation = document["paths"]["/api/jobs"]["delete"]
+    assert operation["security"] == [{"HTTPBearer": []}]
+    assert "422" not in operation["responses"]
+    for status in ("400", "401"):
+        schema = operation["responses"][status]["content"]["application/json"]["schema"]
+        assert schema["$ref"].endswith("ErrorEnvelope")
+    success = operation["responses"]["200"]["content"]["application/json"]["schema"]
+    assert success["$ref"].endswith("JobBatchDeleteOutput")
+
+    components = document["components"]["schemas"]
+    delete_input = components["JobBatchDeleteInput"]
+    assert set(delete_input["properties"]) == {"ids"}
+    assert delete_input["additionalProperties"] is False
+    identifiers = delete_input["properties"]["ids"]
+    assert identifiers["minItems"] == 1
+    assert identifiers["maxItems"] == 256
+    assert identifiers["items"]["pattern"] == "^[A-Za-z0-9_-]{1,64}$"
+    output = components["JobBatchDeleteOutput"]
+    assert set(output["properties"]) == {"deleted", "failed"}
+    assert set(output["required"]) == {"deleted", "failed"}
+    failure = components["JobBatchDeleteFailureOutput"]
+    assert set(failure["properties"]) == {"id", "error"}
+    assert set(failure["required"]) == {"id", "error"}
+
+
+def test_job_http_batch_delete_rechecks_status_after_interrupted_resume(tmp_path: Path):
+    app, settings, _, _ = make_app(tmp_path)
+    client = TestClient(app)
+    headers = auth(settings)
+    job_id = create_job(client, headers, name="Interrupted")["id"]
+    assert client.patch(f"/api/jobs/{job_id}", json={"status": "running"}, headers=headers).status_code == 200
+    assert (
+        client.patch(f"/api/jobs/{job_id}", json={"status": "interrupted"}, headers=headers).status_code
+        == 200
+    )
+    resumed = client.patch(f"/api/jobs/{job_id}", json={"status": "queued"}, headers=headers)
+    assert resumed.status_code == 200
+    assert resumed.json()["status"] == "queued"
+
+    response = delete_batch(client, headers, batch_delete_body([job_id]))
+    assert response.status_code == 200
+    assert response.json() == {
+        "deleted": [],
+        "failed": [{"id": job_id, "error": "任务正在运行或排队"}],
+    }
+    assert client.get(f"/api/jobs/{job_id}", headers=headers).json()["status"] == "queued"
+
+
+def test_job_http_batch_delete_uses_injected_job_service(tmp_path: Path):
+    _, settings, _, database = make_app(tmp_path)
+
+    class StubJobs:
+        def batch_delete(self, ids):
+            return {"deleted": list(ids), "failed": []}
+
+    from fm27lab.interfaces.http.app import create_app
+
+    client = TestClient(create_app(settings, database, job_service=StubJobs()))
+    response = delete_batch(client, auth(settings), batch_delete_body(["job-1", "job-2"]))
+    assert response.status_code == 200
+    assert response.json() == {"deleted": ["job-1", "job-2"], "failed": []}
+
+
+def test_job_http_batch_delete_blocks_concurrent_resume_until_commit(tmp_path: Path, monkeypatch):
+    app, settings, _, _ = make_app(tmp_path)
+    client = TestClient(app)
+    headers = auth(settings)
+    job_id = create_job(client, headers, name="Interrupted")["id"]
+    assert client.patch(f"/api/jobs/{job_id}", json={"status": "running"}, headers=headers).status_code == 200
+    assert (
+        client.patch(f"/api/jobs/{job_id}", json={"status": "interrupted"}, headers=headers).status_code
+        == 200
+    )
+    service = app.state.jobs
+    repository = service.repository
+    original_get = repository.get
+    transaction_open = threading.Event()
+    resume_attempted = threading.Event()
+
+    def blocking_get(identifier, connection=None):
+        current = original_get(identifier, connection=connection)
+        transaction_open.set()
+        assert resume_attempted.wait(5)
+        return current
+
+    monkeypatch.setattr(repository, "get", blocking_get)
+    deleted: list[dict] = []
+    resumed: list[object] = []
+    errors: list[BaseException] = []
+    timeline: list[str] = []
+
+    def delete_worker():
+        try:
+            deleted.append(service.batch_delete([job_id]))
+            timeline.append("delete_committed")
+        except BaseException as error:
+            errors.append(error)
+
+    def resume_worker():
+        try:
+            assert transaction_open.wait(5)
+            timeline.append("resume_started")
+            resume_attempted.set()
+            resumed.append(service.update(job_id, {"status": "queued"}))
+            timeline.append("resume_finished")
+        except BaseException as error:
+            errors.append(error)
+
+    deleting = threading.Thread(target=delete_worker)
+    resuming = threading.Thread(target=resume_worker)
+    deleting.start()
+    resuming.start()
+    deleting.join(10)
+    resuming.join(10)
+    monkeypatch.setattr(repository, "get", original_get)
+
+    assert not deleting.is_alive()
+    assert not resuming.is_alive()
+    assert errors == []
+    assert deleted == [{"deleted": [job_id], "failed": []}]
+    assert resumed == [None]
+    assert timeline.index("resume_started") < timeline.index("delete_committed")
+    assert "resume_finished" in timeline
+    assert client.get(f"/api/jobs/{job_id}", headers=headers).status_code == 404
+
+
+def test_job_http_legacy_single_delete_and_batch_actions_are_preserved(tmp_path: Path):
+    """旧单条 DELETE 与 POST /api/jobs/actions 保留以兼容既有 CLI、MCP 与前端调用方：
+    单条 DELETE 保持不校验状态，/actions 保持 succeeded/failed(code,message) 契约；
+    按状态保护的批量删除只在新 DELETE /api/jobs 上生效，避免契约分叉失去记录。"""
+    app, settings, _, _ = make_app(tmp_path)
+    client = TestClient(app)
+    headers = auth(settings)
+    queued = create_job(client, headers, name="Queued")
+    removed = client.delete(f"/api/jobs/{queued['id']}", headers=headers)
+    assert removed.status_code == 204
+    assert client.get(f"/api/jobs/{queued['id']}", headers=headers).status_code == 404
+
+    running = create_job(client, headers, name="Running")
+    assert (
+        client.patch(f"/api/jobs/{running['id']}", json={"status": "running"}, headers=headers).status_code
+        == 200
+    )
+    assert client.delete(f"/api/jobs/{running['id']}", headers=headers).status_code == 204
+
+    queued_again = create_job(client, headers, name="Queued again")
+    response = client.post(
+        "/api/jobs/actions",
+        json=batch_action("delete", [queued_again["id"]]),
+        headers=headers,
+    )
+    assert response.status_code == 200
+    assert response.json() == {"succeeded": [queued_again["id"]], "failed": []}
+    assert client.get(f"/api/jobs/{queued_again['id']}", headers=headers).status_code == 404

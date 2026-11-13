@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowClockwise, ListChecks, Plus } from "@phosphor-icons/react";
-import { useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 
 import { useAppContext } from "../app-context";
 import { EmptyState } from "../components/EmptyState";
@@ -9,8 +9,10 @@ import {
   cancelJob,
   createJob,
   deleteJob,
+  deleteJobsBatch,
   listJobs,
   type Job,
+  type JobBatchDeleteResult,
   type JobCreate,
   type JobStatus,
 } from "../lib/api";
@@ -54,6 +56,18 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+function isDeletable(job: Job): boolean {
+  return job.status !== "queued" && job.status !== "running";
+}
+
+function jobLabel(job: Job): string {
+  return job.name === null ? job.id : `${job.name}（${job.id}）`;
+}
+
+function checkboxLabel(job: Job): string {
+  return job.name === null ? `选择任务 ${job.id}` : `选择任务 ${job.name}（${job.id}）`;
+}
+
 function JobStatusFilter({
   value,
   onChange,
@@ -89,11 +103,17 @@ export function JobsPage() {
   );
   const [actionError, setActionError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [selected, setSelected] = useState<ReadonlySet<string>>(new Set<string>());
+  const [batchConfirmOpen, setBatchConfirmOpen] = useState(false);
+  const [batchResult, setBatchResult] = useState<JobBatchDeleteResult | null>(null);
   const [formOpen, setFormOpen] = useState(false);
   const [kind, setKind] = useState("experiment");
   const [name, setName] = useState("");
   const [workers, setWorkers] = useState("4");
   const [total, setTotal] = useState("100");
+  const batchTriggerRef = useRef<HTMLButtonElement>(null);
+  const batchCancelRef = useRef<HTMLButtonElement>(null);
+  const batchResultRef = useRef<HTMLDivElement>(null);
 
   const jobs = useQuery({
     queryKey: ["jobs", connection?.url, status, offset],
@@ -110,11 +130,60 @@ export function JobsPage() {
     void queryClient.invalidateQueries({ queryKey: ["jobs"] });
   };
 
+  const data = jobs.data;
+  const pageJobs = data?.items ?? [];
+  const deletableJobs = pageJobs.filter(isDeletable);
+  const deletableIds = deletableJobs.map((job) => job.id);
+  const selectedJobs = deletableJobs.filter((job) => selected.has(job.id));
+  const selectedIds = selectedJobs.map((job) => job.id);
+  const selectedCount = selectedIds.length;
+  const allSelected = deletableIds.length > 0 && selectedCount === deletableIds.length;
+  const someSelected = selectedCount > 0 && !allSelected;
+  const hasPageJobs = pageJobs.length > 0;
+
+  const clearSelection = () => {
+    setSelected(new Set<string>());
+    setBatchConfirmOpen(false);
+  };
+
+  const closeBatchConfirm = () => {
+    setBatchConfirmOpen(false);
+    batchTriggerRef.current?.focus();
+  };
+
+  useEffect(() => {
+    if (!batchConfirmOpen) return;
+    batchCancelRef.current?.focus();
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      setBatchConfirmOpen(false);
+      batchTriggerRef.current?.focus();
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [batchConfirmOpen]);
+
+  useEffect(() => {
+    if (batchResult === null) return;
+    batchResultRef.current?.focus();
+  }, [batchResult]);
+
+  useEffect(() => {
+    setSelected((previous) => {
+      if (previous.size === 0) return previous;
+      const deletable = new Set(deletableIds);
+      const next = new Set([...previous].filter((id) => deletable.has(id)));
+      return next.size === previous.size ? previous : next;
+    });
+  }, [data]);
+
   const cancel = useMutation({
     mutationFn: (job: Job) => cancelJob(connection!, job.id),
     onSuccess: (job) => {
       setConfirmation(null);
       setActionError(null);
+      setBatchResult(null);
       setNotice(`已取消任务「${job.name ?? job.id}」`);
       invalidateJobs();
     },
@@ -130,12 +199,37 @@ export function JobsPage() {
     onSuccess: (_result, job) => {
       setConfirmation(null);
       setActionError(null);
+      setBatchResult(null);
+      setSelected((previous) => {
+        const next = new Set(previous);
+        next.delete(job.id);
+        return next;
+      });
       setNotice(`已删除任务「${job.name ?? job.id}」`);
       invalidateJobs();
     },
     onError: (error) => {
       setConfirmation(null);
       setNotice(null);
+      setActionError(errorMessage(error));
+    },
+  });
+
+  const batchRemove = useMutation({
+    mutationFn: (ids: string[]) => deleteJobsBatch(connection!, ids),
+    onSuccess: (result) => {
+      setBatchConfirmOpen(false);
+      setActionError(null);
+      setNotice(null);
+      setBatchResult(result);
+      setSelected(new Set<string>());
+      invalidateJobs();
+    },
+    onError: (error) => {
+      batchTriggerRef.current?.focus();
+      setBatchConfirmOpen(false);
+      setNotice(null);
+      setBatchResult(null);
       setActionError(errorMessage(error));
     },
   });
@@ -159,6 +253,7 @@ export function JobsPage() {
     mutationFn: (input: JobCreate) => createJob(connection!, input),
     onSuccess: () => {
       setActionError(null);
+      setBatchResult(null);
       setNotice("任务已创建");
       setFormOpen(false);
       setKind("experiment");
@@ -167,6 +262,7 @@ export function JobsPage() {
       setTotal("100");
       setStatus("");
       setOffset(0);
+      clearSelection();
       invalidateJobs();
     },
     onError: (error) => {
@@ -181,12 +277,57 @@ export function JobsPage() {
     setConfirmation(null);
     setActionError(null);
     setNotice(null);
+    setBatchResult(null);
+    clearSelection();
+  };
+
+  const changePage = (next: number) => {
+    setOffset(next);
+    setBatchResult(null);
+    clearSelection();
   };
 
   const refresh = () => {
     setActionError(null);
     setNotice(null);
+    setBatchResult(null);
+    clearSelection();
     void jobs.refetch();
+  };
+
+  const toggleRow = (jobId: string, checked: boolean) => {
+    setSelected((previous) => {
+      const next = new Set(previous);
+      if (checked) next.add(jobId);
+      else next.delete(jobId);
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    setSelected((previous) => {
+      const next = new Set(previous);
+      if (deletableIds.every((id) => previous.has(id))) {
+        for (const id of deletableIds) next.delete(id);
+      } else {
+        for (const id of deletableIds) next.add(id);
+      }
+      return next;
+    });
+  };
+
+  const openBatchConfirm = () => {
+    if (selectedCount === 0 || connection === null || batchRemove.isPending) return;
+    setConfirmation(null);
+    setActionError(null);
+    setNotice(null);
+    setBatchResult(null);
+    setBatchConfirmOpen(true);
+  };
+
+  const confirmBatchDelete = () => {
+    if (connection === null || selectedIds.length === 0 || batchRemove.isPending) return;
+    batchRemove.mutate(selectedIds);
   };
 
   const submitCreate = (event: FormEvent<HTMLFormElement>) => {
@@ -200,7 +341,6 @@ export function JobsPage() {
     });
   };
 
-  const data = jobs.data;
   const pager =
     data === undefined ? null : (
       <div className="jobs-pager">
@@ -208,7 +348,7 @@ export function JobsPage() {
         <button
           className="button small"
           type="button"
-          onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}
+          onClick={() => changePage(Math.max(0, offset - PAGE_SIZE))}
           disabled={offset === 0 || jobs.isFetching}
         >
           上一页
@@ -216,7 +356,7 @@ export function JobsPage() {
         <button
           className="button small"
           type="button"
-          onClick={() => setOffset(data.next_offset ?? offset)}
+          onClick={() => changePage(data.next_offset ?? offset)}
           disabled={data.next_offset === null || jobs.isFetching}
         >
           下一页
@@ -271,6 +411,19 @@ export function JobsPage() {
             <caption className="sr-only">任务列表</caption>
             <thead>
               <tr>
+                <th scope="col" className="jobs-select-cell">
+                  <input
+                    type="checkbox"
+                    aria-label="全选当前页任务"
+                    aria-checked={allSelected ? "true" : someSelected ? "mixed" : "false"}
+                    checked={allSelected}
+                    disabled={deletableIds.length === 0}
+                    ref={(element) => {
+                      if (element !== null) element.indeterminate = someSelected;
+                    }}
+                    onChange={toggleSelectAll}
+                  />
+                </th>
                 <th scope="col">任务</th>
                 <th scope="col">类型</th>
                 <th scope="col">状态</th>
@@ -289,6 +442,16 @@ export function JobsPage() {
                 const confirming = confirmation?.id === job.id;
                 return (
                   <tr key={job.id}>
+                    <td className="jobs-select-cell">
+                      <input
+                        type="checkbox"
+                        aria-label={checkboxLabel(job)}
+                        title={isDeletable(job) ? undefined : "运行中或排队中的任务不可删除"}
+                        checked={isDeletable(job) && selected.has(job.id)}
+                        disabled={!isDeletable(job)}
+                        onChange={(event) => toggleRow(job.id, event.target.checked)}
+                      />
+                    </td>
                     <td>
                       <span className="jobs-name">{job.name ?? "未命名"}</span>
                       <span className="jobs-id">{job.id}</span>
@@ -329,7 +492,10 @@ export function JobsPage() {
                             <button
                               className="button small"
                               type="button"
-                              onClick={() => setConfirmation({ id: job.id, action: "cancel" })}
+                              onClick={() => {
+                                setBatchConfirmOpen(false);
+                                setConfirmation({ id: job.id, action: "cancel" });
+                              }}
                             >
                               取消
                             </button>
@@ -357,7 +523,10 @@ export function JobsPage() {
                           <button
                             className="button small danger"
                             type="button"
-                            onClick={() => setConfirmation({ id: job.id, action: "delete" })}
+                            onClick={() => {
+                              setBatchConfirmOpen(false);
+                              setConfirmation({ id: job.id, action: "delete" });
+                            }}
                           >
                             删除
                           </button>
@@ -466,6 +635,89 @@ export function JobsPage() {
         <p className="jobs-notice" role="status">
           {notice}
         </p>
+      )}
+      {connection === null || !hasPageJobs ? null : (
+        <div className="jobs-bulk">
+          <span className="jobs-bulk-count" aria-live="polite">
+            已选 {selectedCount} 个任务
+          </span>
+          <button
+            ref={batchTriggerRef}
+            className="button small danger"
+            type="button"
+            disabled={selectedCount === 0 || batchRemove.isPending}
+            onClick={openBatchConfirm}
+          >
+            删除所选
+          </button>
+        </div>
+      )}
+      {batchConfirmOpen ? (
+        <div
+          className="jobs-batch-confirm"
+          role="alertdialog"
+          aria-label="确认批量删除"
+          aria-describedby="jobs-batch-confirm-summary"
+        >
+          <p id="jobs-batch-confirm-summary">将删除 {selectedJobs.length} 个任务：</p>
+          <ul className="jobs-batch-confirm-list">
+            {selectedJobs.map((job) => (
+              <li key={job.id}>
+                {jobLabel(job)}（总场数 {job.total}）
+              </li>
+            ))}
+          </ul>
+          <div className="jobs-batch-confirm-actions">
+            <button
+              className="button small danger"
+              type="button"
+              disabled={batchRemove.isPending || selectedJobs.length === 0}
+              onClick={confirmBatchDelete}
+            >
+              确认删除
+            </button>
+            <button
+              ref={batchCancelRef}
+              className="button small"
+              type="button"
+              onClick={closeBatchConfirm}
+            >
+              放弃
+            </button>
+          </div>
+        </div>
+      ) : null}
+      {batchResult === null ? null : (
+        <div
+          ref={batchResultRef}
+          className="jobs-batch-result"
+          role="status"
+          aria-label="批量删除结果"
+          tabIndex={-1}
+        >
+          <p className="jobs-notice">已删除 {batchResult.deleted.length} 个任务</p>
+          {batchResult.deleted.length === 0 ? null : (
+            <ul className="jobs-batch-deleted" aria-label="已删除任务 ID">
+              {batchResult.deleted.map((jobId) => (
+                <li key={jobId}>{jobId}</li>
+              ))}
+            </ul>
+          )}
+          {batchResult.failed.length === 0 ? null : (
+            <div className="inline-alert" role="alert">
+              <div>
+                <p>{batchResult.failed.length} 个任务删除失败</p>
+                <ul className="jobs-batch-failures">
+                  {batchResult.failed.map((failure) => (
+                    <li key={failure.id}>
+                      {failure.id}：{failure.error}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+          )}
+        </div>
       )}
       {body}
     </Panel>

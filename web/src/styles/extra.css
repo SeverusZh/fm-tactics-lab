@@ -85,7 +85,7 @@
 
 .jobs-table {
   width: 100%;
-  min-width: 720px;
+  min-width: 760px;
   border-collapse: collapse;
   font-size: var(--type-body-sm);
 }
@@ -141,6 +141,87 @@
   display: flex;
   gap: var(--space-2);
   flex-wrap: wrap;
+}
+
+.jobs-select-cell {
+  width: 40px;
+  text-align: center;
+}
+
+.jobs-select-cell input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.jobs-bulk {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+}
+
+.jobs-bulk-count {
+  color: var(--text-subtle);
+  font-size: var(--type-caption);
+  font-variant-numeric: tabular-nums;
+}
+
+.jobs-batch-confirm {
+  display: grid;
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-control);
+  background: var(--surface-raised);
+  color: var(--text);
+  font-size: var(--type-body-sm);
+}
+
+.jobs-batch-confirm p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.jobs-batch-confirm-list,
+.jobs-batch-deleted,
+.jobs-batch-failures {
+  margin: 0;
+  padding-left: var(--space-5);
+  overflow-wrap: anywhere;
+}
+
+.jobs-batch-confirm-list li {
+  color: var(--text-muted);
+}
+
+.jobs-batch-deleted {
+  color: var(--text-subtle);
+  font-family: var(--font-mono);
+  font-size: var(--type-caption);
+}
+
+.jobs-batch-confirm-actions {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.jobs-batch-result {
+  display: grid;
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
+}
+
+.jobs-batch-result .jobs-notice {
+  margin: 0;
+}
+
+.jobs-batch-failures {
+  color: var(--danger);
+  font-family: var(--font-mono);
+  font-size: var(--type-caption);
 }
 
 .jobs-pager {

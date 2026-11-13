@@ -201,6 +201,26 @@ export async function deleteJob(connection: Connection, jobId: string): Promise<
   await apiFetch(connection, `/api/jobs/${encodeURIComponent(jobId)}`, { method: "DELETE" });
 }
 
+export type JobBatchDeleteFailure = {
+  id: string;
+  error: string;
+};
+
+export type JobBatchDeleteResult = {
+  deleted: string[];
+  failed: JobBatchDeleteFailure[];
+};
+
+export function deleteJobsBatch(
+  connection: Connection,
+  ids: string[],
+): Promise<JobBatchDeleteResult> {
+  return apiJson<JobBatchDeleteResult>(connection, "/api/jobs", {
+    method: "DELETE",
+    body: JSON.stringify({ ids }),
+  });
+}
+
 export function listJobRuns(
   connection: Connection,
   jobId: string,

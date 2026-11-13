@@ -381,3 +381,109 @@ def test_two_threads_overflow_keeps_completed_atomic(tmp_path: Path):
     assert sorted(record["sequence"] for record in records) == [1, 2, 3]
     assert jobs.get("job1")["completed"] == 3
     assert jobs.runs("job1", limit=200)["total"] == 3
+
+
+def make_completed(jobs: JobService, job_id: str) -> None:
+    jobs.create("experiment", job_id=job_id, total=2)
+    jobs.update(job_id, {"status": "running"})
+    jobs.update(job_id, {"status": "completed"})
+
+
+def test_batch_delete_removes_terminal_jobs_in_request_order(tmp_path: Path):
+    jobs = service(tmp_path)
+    make_completed(jobs, "completed1")
+    jobs.create("experiment", job_id="errored")
+    jobs.update("errored", {"status": "running"})
+    jobs.update("errored", {"status": "error"})
+    jobs.create("experiment", job_id="cancelled")
+    jobs.cancel("cancelled")
+    jobs.create("experiment", job_id="interrupted")
+    jobs.update("interrupted", {"status": "running"})
+    jobs.update("interrupted", {"status": "interrupted"})
+    order = ["interrupted", "completed1", "cancelled", "errored"]
+
+    result = jobs.batch_delete(order)
+
+    assert result == {"deleted": order, "failed": []}
+    for job_id in order:
+        assert jobs.get(job_id) is None
+
+
+def test_batch_delete_reports_active_missing_and_resumed_jobs_in_order(tmp_path: Path):
+    jobs = service(tmp_path)
+    jobs.create("experiment", job_id="queued")
+    jobs.create("experiment", job_id="running")
+    jobs.update("running", {"status": "running"})
+    jobs.create("experiment", job_id="resumed")
+    jobs.update("resumed", {"status": "running"})
+    jobs.update("resumed", {"status": "interrupted"})
+    jobs.update("resumed", {"status": "queued"})
+    make_completed(jobs, "done")
+    order = ["queued", "absent", "running", "resumed", "done"]
+
+    result = jobs.batch_delete(order)
+
+    assert result == {
+        "deleted": ["done"],
+        "failed": [
+            {"id": "queued", "error": "任务正在运行或排队"},
+            {"id": "absent", "error": "任务不存在"},
+            {"id": "running", "error": "任务正在运行或排队"},
+            {"id": "resumed", "error": "任务正在运行或排队"},
+        ],
+    }
+    assert jobs.get("queued")["status"] == "queued"
+    assert jobs.get("running")["status"] == "running"
+    assert jobs.get("resumed")["status"] == "queued"
+    assert jobs.get("done") is None
+
+
+def test_batch_delete_partial_failure_keeps_going_and_is_order_stable(tmp_path: Path):
+    jobs = service(tmp_path)
+    make_completed(jobs, "first")
+    jobs.create("experiment", job_id="active")
+    jobs.update("active", {"status": "running"})
+    make_completed(jobs, "second")
+    order = ["first", "absent", "active", "second"]
+
+    result = jobs.batch_delete(order)
+
+    assert result == {
+        "deleted": ["first", "second"],
+        "failed": [
+            {"id": "absent", "error": "任务不存在"},
+            {"id": "active", "error": "任务正在运行或排队"},
+        ],
+    }
+    assert jobs.get("first") is None
+    assert jobs.get("second") is None
+    assert jobs.get("active")["status"] == "running"
+
+
+def test_batch_delete_reads_and_deletes_with_same_transaction_connection(tmp_path: Path, monkeypatch):
+    jobs = service(tmp_path)
+    make_completed(jobs, "job1")
+    repository = jobs.repository
+    original_get = repository.get
+    original_delete = repository.delete
+    observed: list[tuple[str, object, bool]] = []
+
+    def tracking_get(job_id, connection=None):
+        observed.append(("get", connection, False if connection is None else connection.in_transaction))
+        return original_get(job_id, connection=connection)
+
+    def tracking_delete(job_id, connection=None):
+        observed.append(("delete", connection, False if connection is None else connection.in_transaction))
+        return original_delete(job_id, connection=connection)
+
+    monkeypatch.setattr(repository, "get", tracking_get)
+    monkeypatch.setattr(repository, "delete", tracking_delete)
+
+    assert jobs.batch_delete(["job1"]) == {"deleted": ["job1"], "failed": []}
+    assert [name for name, _, _ in observed] == ["get", "delete"]
+    get_connection = observed[0][1]
+    delete_connection = observed[1][1]
+    assert get_connection is not None
+    assert get_connection is delete_connection
+    assert observed[0][2] is True
+    assert observed[1][2] is True
