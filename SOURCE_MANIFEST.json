@@ -111,7 +111,7 @@
   "fm27lab/tests/test_http_pools.py": "dad9cf0bb65431dff604afb869f5e82660f494c21637a5514d09bcf729e0da62",
   "fm27lab/tests/test_http_results.py": "2479f8199fe57741fa24369b0deea4714eb688b9c35cfea5f9c1464a7bc29cab",
   "fm27lab/tests/test_http_saves.py": "36dfe2bf6e76c1a0a4362d174788378d18ef6c5388cf64d91303c9a6c0b088d8",
-  "fm27lab/tests/test_http_settings.py": "276483940ed6a531bf9fbd50c0086b522b7fb756b036d03c92b7c5e654c74de3",
+  "fm27lab/tests/test_http_settings.py": "09a638d82d1a6d15095c479eacaf5508dedcb17c3db6e19fa788551d17550aeb",
   "fm27lab/tests/test_idempotency_service.py": "92a42105677447392a0ff7a580e353539b6ab0c931ac5ffee78725a0a3efdd52",
   "fm27lab/tests/test_jobs.py": "8814ae8eaa01dc5f04f2d6804f4084a743613afb67e47c6e5f5bcf13a5daf81c",
   "fm27lab/tests/test_jobs_service.py": "1676b7046d702fce642b4f4869a4dadeff2cf5e6e1212a72d78b3a3d00ab4ef5",
