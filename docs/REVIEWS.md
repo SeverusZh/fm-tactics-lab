@@ -76,6 +76,11 @@
 | 2026-11-13 | 结果与产物 HTTP 修复 | 同上 | PASS | 下载前容器 resolve、符号链接与相对路径拒绝；ETag 带引号、CSV 字节断言；负向测试四类。 |
 | 2026-11-13 | 实验调度与并发预检 | domain/concurrency.py、application/experiments.py、tests | PASS | 1–256 校验、推荐值与资源预检、串行队列、逐场回写、取消/续跑与缺失场次过滤；124 项测试。 |
 | 2026-11-13 | 前端结果页与存档库 | ResultsPage、LibraryPage、api.ts、tests | PASS | 指标/逐场/CSV 与存档 CRUD/导入/删除、状态齐全；56 项 Vitest、typecheck 与 build 通过。 |
+| 2026-11-13 | SSE 事件流 | application/events.py、routes/system.py、tests | PASS | 发布器 id/历史/重放、SSE ready 与实时去重、keepalive、断连清理与鉴权闭合；断连测试恒真与重叠去重已修；9 项 MINOR 记录。 |
+| 2026-11-13 | 设置与并发预检 HTTP | application/settings.py、routes/settings.py、tests | FAIL | 新增 PUT 路由未被 CORS allow_methods 覆盖，浏览器预检 400；另有 8 项 MINOR。 |
+| 2026-11-13 | 设置修复轮 | 同上 | PASS | allow_methods 加 PUT 并补预检测试；字节上限度量口径统一；surrogate 与旧值保留补测；PUT 三 Origin 预检矩阵通过。 |
+| 2026-11-13 | 幂等键中间件 | application/idempotency.py、interfaces/http/idempotency.py、tests | FAIL | 截断流式响应被缓存污染键；并发同键双执行副作用。 |
+| 2026-11-13 | 幂等修复轮 | 同上 | PASS | Content-Length/204 完整判定、在途 asyncio 锁、鉴权前置、重复头保真与线程池执行；38 项测试；8 项 MINOR 记录。 |
 
 ## 审核规则
 
@@ -84,6 +89,6 @@
 - 先列 findings，再列已验证项，最后给结论。
 - Critical 或 Important 未闭环时不得标记 PASS。
 - 审核通过不等于整体发布就绪；发布仍需最终验收与 Windows 真机验证。
-- 旧 `tests/` 当前 281 项通过，覆盖 legacy UI/HTTP/CLI/MCP、存档战术库、池与名单；新 `fm27lab/tests` 当前 358 项通过，覆盖包版本、CLI 环境继承、配置/路径边界、SQLite 迁移/事务与池/草案/任务/存档/产物/幂等仓储、HTTP 健康/池/草案/任务 CRUD、鉴权、错误封套、Origin、ACL 失败清理、sidecar serve、23 人名单、真实名单应用、scenario 归一化、catalog/双阶段战术、客队战术池选择、结果指标、任务状态机、存档状态机与应用服务；Vitest 当前 9 项。
+- 旧 `tests/` 当前 281 项通过，覆盖 legacy UI/HTTP/CLI/MCP、存档战术库、池与名单；新 `fm27lab/tests` 当前 931 项通过，覆盖包版本、CLI 环境继承、配置/路径边界、SQLite 迁移/事务与池/草案/任务/存档/产物/幂等仓储、HTTP 健康/池/草案/任务 CRUD、鉴权、错误封套、Origin、ACL 失败清理、sidecar serve、23 人名单、真实名单应用、scenario 归一化、catalog/双阶段战术、客队战术池选择、结果指标、任务状态机、存档状态机与应用服务；Vitest 当前 56 项。
 - Tauri sidecar supervisor 的静态实现已存在，但 Linux 无 WebKitGTK，Windows CI 的 `cargo build`/`cargo test`/安装包构建是唯一编译证据。PyInstaller onedir sidecar 已在 Linux 构建并通过 ready/health/shutdown 冒烟测试。
 - Rust 核心 crate 当前 4 项 cargo test 通过；React 壳当前 9 项 Vitest 通过、类型检查与生产构建通过。Windows CI 已通过 cargo build/test、NSIS 安装包与 sidecar 资源断言；Linux 本机仍无 WebKitGTK。合并、设计、sidecar、壳层、名单五个审核门均已 PASS。

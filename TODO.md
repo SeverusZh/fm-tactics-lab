@@ -63,7 +63,7 @@
 
 ## Phase 2 存储与引擎
 
-- [~] SQLite 连接、迁移与仓储：settings、pool_entries、drafts、jobs/job_runs、saves/save_leagues/save_clubs、artifacts、idempotency 与 `/api/pools`、`/api/drafts`、`/api/jobs` 已实现；`/api/saves`、结果与产物接口接入进行中。
+- [x] SQLite 连接、迁移与仓储：settings、pool_entries、drafts、jobs/job_runs、saves/save_leagues/save_clubs、artifacts、idempotency 与 `/api/pools`、`/api/drafts`、`/api/jobs`、`/api/saves`、`/api/results`、`/api/artifacts`、`/api/settings` 均已实现并通过独立审核。
 - [ ] 空库启动与只读旧目录探测。
 - [~] 原生宿主适配器与 counted-session 能力协商：能力解析与运行时计划已实现，原生适配器接线待后续。
 - [~] 1–256 路调度、取消、续跑、磁盘/内存预检：并发预检与串行实验调度已实现并 PASS，原生引擎接线待后续。
@@ -74,7 +74,7 @@
 
 ## Phase 3 接口
 
-- [~] FastAPI 路由、错误封套、分页、幂等：路由模块化与 `/api/jobs`、`/api/saves` 已完成，幂等接入进行中。
+- [~] FastAPI 路由、错误封套、分页、幂等：路由模块化、`/api/jobs`、`/api/saves`、结果/产物/设置接口与 Idempotency-Key 已实现；注册表统一生成待后续。
 - [~] SSE 进度与轮询降级：事件发布器与 SSE 流已实现，任务事件接线待后续。
 - [ ] 命令注册表，HTTP/CLI/MCP 全部由同一份定义生成。
 - [~] CLI 全功能命令与退出码：pools/drafts/jobs/saves 命令与退出码已实现并 PASS，注册表统一生成待后续。
