@@ -517,3 +517,202 @@ def test_job_http_cors_methods_and_existing_routes(tmp_path: Path):
     created = fake_client.post("/api/jobs", json={"kind": "experiment"}, headers=headers)
     assert created.status_code == 201
     assert created.json()["id"] == "fake"
+
+
+def batch_action(action, ids):
+    return {"action": action, "ids": ids}
+
+
+def finish_job(client, headers, job_id):
+    started = client.patch(f"/api/jobs/{job_id}", json={"status": "running"}, headers=headers)
+    assert started.status_code == 200
+    finished = client.patch(f"/api/jobs/{job_id}", json={"status": "completed"}, headers=headers)
+    assert finished.status_code == 200
+
+
+def test_job_http_batch_cancel_succeeds_in_request_order(tmp_path: Path):
+    app, settings, _, _ = make_app(tmp_path)
+    client = TestClient(app)
+    headers = auth(settings)
+    jobs = [create_job(client, headers, name=f"Job {index}") for index in range(3)]
+    identifiers = [job["id"] for job in jobs]
+    response = client.post("/api/jobs/actions", json=batch_action("cancel", identifiers), headers=headers)
+    assert response.status_code == 200
+    assert response.json() == {"succeeded": identifiers, "failed": []}
+    for job_id in identifiers:
+        value = client.get(f"/api/jobs/{job_id}", headers=headers).json()
+        assert value["status"] == "cancelled"
+        assert value["finished_at"] is not None
+
+
+def test_job_http_batch_delete_succeeds_and_keeps_unlisted_jobs(tmp_path: Path):
+    app, settings, _, _ = make_app(tmp_path)
+    client = TestClient(app)
+    headers = auth(settings)
+    jobs = [create_job(client, headers, name=f"Job {index}") for index in range(3)]
+    removed = [jobs[0]["id"], jobs[1]["id"]]
+    response = client.post("/api/jobs/actions", json=batch_action("delete", removed), headers=headers)
+    assert response.status_code == 200
+    assert response.json() == {"succeeded": removed, "failed": []}
+    for job_id in removed:
+        assert client.get(f"/api/jobs/{job_id}", headers=headers).status_code == 404
+    assert client.get(f"/api/jobs/{jobs[2]['id']}", headers=headers).status_code == 200
+    assert client.get("/api/jobs", headers=headers).json()["total"] == 1
+
+
+def test_job_http_batch_cancel_reports_partial_failures_and_keeps_going(tmp_path: Path):
+    app, settings, _, _ = make_app(tmp_path)
+    client = TestClient(app)
+    headers = auth(settings)
+    first = create_job(client, headers)
+    terminal = create_job(client, headers)
+    finish_job(client, headers, terminal["id"])
+    last = create_job(client, headers)
+    missing = "missing-job"
+    order = [first["id"], missing, terminal["id"], last["id"]]
+    response = client.post("/api/jobs/actions", json=batch_action("cancel", order), headers=headers)
+    assert response.status_code == 200
+    body = response.json()
+    assert body["succeeded"] == [first["id"], last["id"]]
+    assert [item["id"] for item in body["failed"]] == [missing, terminal["id"]]
+    not_found, invalid = body["failed"]
+    assert set(not_found) == {"id", "code", "message"}
+    assert not_found["code"] == "not_found"
+    assert invalid["code"] == "invalid_transition"
+    for item in body["failed"]:
+        assert isinstance(item["message"], str) and item["message"].strip()
+    for job_id in (first["id"], last["id"]):
+        assert client.get(f"/api/jobs/{job_id}", headers=headers).json()["status"] == "cancelled"
+    finished = client.get(f"/api/jobs/{terminal['id']}", headers=headers).json()
+    assert finished["status"] == "completed"
+
+
+def test_job_http_batch_delete_reports_missing_jobs(tmp_path: Path):
+    app, settings, _, _ = make_app(tmp_path)
+    client = TestClient(app)
+    headers = auth(settings)
+    first = create_job(client, headers)
+    second = create_job(client, headers)
+    order = [first["id"], "absent-job", second["id"]]
+    response = client.post("/api/jobs/actions", json=batch_action("delete", order), headers=headers)
+    assert response.status_code == 200
+    body = response.json()
+    assert body["succeeded"] == [first["id"], second["id"]]
+    assert [item["id"] for item in body["failed"]] == ["absent-job"]
+    assert body["failed"][0]["code"] == "not_found"
+    assert client.get("/api/jobs", headers=headers).json()["total"] == 0
+
+
+def test_job_http_batch_all_failures_still_return_200(tmp_path: Path):
+    app, settings, _, _ = make_app(tmp_path)
+    client = TestClient(app)
+    headers = auth(settings)
+    for action in ("cancel", "delete"):
+        response = client.post(
+            "/api/jobs/actions",
+            json=batch_action(action, ["absent-one", "absent-two"]),
+            headers=headers,
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert body["succeeded"] == []
+        assert [item["id"] for item in body["failed"]] == ["absent-one", "absent-two"]
+        assert {item["code"] for item in body["failed"]} == {"not_found"}
+
+
+def test_job_http_batch_actions_reject_invalid_requests(tmp_path: Path):
+    app, settings, _, _ = make_app(tmp_path)
+    client = TestClient(app)
+    headers = auth(settings)
+    job_id = create_job(client, headers)["id"]
+    envelope = {"code", "message", "details", "retriable", "retry_after_seconds"}
+    invalid_bodies = (
+        {},
+        {"action": "cancel"},
+        {"ids": [job_id]},
+        {"action": "cancel", "ids": []},
+        {"action": "cancel", "ids": "abc"},
+        {"action": "cancel", "ids": [123]},
+        {"action": "cancel", "ids": [None]},
+        {"action": "cancel", "ids": [""]},
+        {"action": "cancel", "ids": ["bad id"]},
+        {"action": "cancel", "ids": ["bad.id"]},
+        {"action": "cancel", "ids": ["x" * 65]},
+        {"action": "cancel", "ids": [job_id, job_id]},
+        {"action": "cancel", "ids": [job_id], "extra": True},
+        {"action": "bogus", "ids": [job_id]},
+        {"action": "CANCEL", "ids": [job_id]},
+        {"action": "", "ids": [job_id]},
+        {"action": 1, "ids": [job_id]},
+        {"action": "cancel", "ids": [f"job-{index}" for index in range(257)]},
+        [],
+    )
+    for payload in invalid_bodies:
+        response = client.post("/api/jobs/actions", json=payload, headers=headers)
+        assert response.status_code == 400, payload
+        error = response.json()["error"]
+        assert set(error) == envelope, payload
+        assert error["code"] == "validation_failed", payload
+        assert error["retriable"] is False, payload
+    malformed = client.post(
+        "/api/jobs/actions",
+        content=b'{"action": "cancel", "ids": [',
+        headers={**headers, "Content-Type": "application/json"},
+    )
+    assert malformed.status_code == 400
+    assert malformed.json()["error"]["code"] == "validation_failed"
+    assert client.get(f"/api/jobs/{job_id}", headers=headers).json()["status"] == "queued"
+
+    boundary = client.post(
+        "/api/jobs/actions",
+        json=batch_action("cancel", [f"job-{index}" for index in range(256)]),
+        headers=headers,
+    )
+    assert boundary.status_code == 200
+    assert boundary.json()["succeeded"] == []
+    assert len(boundary.json()["failed"]) == 256
+
+
+def test_job_http_batch_actions_require_token(tmp_path: Path):
+    app, settings, _, _ = make_app(tmp_path)
+    client = TestClient(app)
+    payload = batch_action("cancel", ["job-1"])
+    denied = client.post("/api/jobs/actions", json=payload)
+    assert denied.status_code == 401
+    error = denied.json()["error"]
+    assert set(error) == {"code", "message", "details", "retriable", "retry_after_seconds"}
+    assert error["code"] == "unauthorized"
+    assert denied.headers["www-authenticate"] == "Bearer"
+    wrong = client.post("/api/jobs/actions", json=payload, headers={"Authorization": "Bearer wrong"})
+    assert wrong.status_code == 401
+    assert wrong.json()["error"]["code"] == "unauthorized"
+    assert client.post("/api/jobs/actions", json={}).status_code == 401
+
+
+def test_job_http_batch_actions_openapi_contract(tmp_path: Path):
+    app, _, _, _ = make_app(tmp_path)
+    document = TestClient(app).get("/api/openapi.json").json()
+    operation = document["paths"]["/api/jobs/actions"]["post"]
+    assert operation["security"] == [{"HTTPBearer": []}]
+    assert "422" not in operation["responses"]
+    for status in ("400", "401"):
+        schema = operation["responses"][status]["content"]["application/json"]["schema"]
+        assert schema["$ref"].endswith("ErrorEnvelope")
+    success = operation["responses"]["200"]["content"]["application/json"]["schema"]
+    assert success["$ref"].endswith("JobBatchActionOutput")
+
+    components = document["components"]["schemas"]
+    action_input = components["JobBatchActionInput"]
+    assert set(action_input["properties"]) == {"action", "ids"}
+    assert action_input["additionalProperties"] is False
+    assert action_input["properties"]["action"]["enum"] == ["cancel", "delete"]
+    identifiers = action_input["properties"]["ids"]
+    assert identifiers["minItems"] == 1
+    assert identifiers["maxItems"] == 256
+    assert identifiers["items"]["pattern"] == "^[A-Za-z0-9_-]{1,64}$"
+    output = components["JobBatchActionOutput"]
+    assert set(output["properties"]) == {"succeeded", "failed"}
+    assert set(output["required"]) == {"succeeded", "failed"}
+    failure = components["JobBatchFailureOutput"]
+    assert set(failure["properties"]) == {"id", "code", "message"}
+    assert set(failure["required"]) == {"id", "code", "message"}
