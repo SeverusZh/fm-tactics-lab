@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { invoke } from "@tauri-apps/api/core";
 
@@ -69,6 +69,10 @@ describe("App shell", () => {
     });
   });
 
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   it("shows the sidecar status and navigation", async () => {
     renderApp();
     expect(await screen.findByText("sidecar 正常")).toBeInTheDocument();
@@ -77,6 +81,17 @@ describe("App shell", () => {
   });
 
   it("navigates to the results page", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          ({
+            ok: true,
+            status: 200,
+            json: async () => ({ items: [], total: 0, next_offset: null }),
+          }) as unknown as Response,
+      ),
+    );
     renderApp();
     await screen.findByText("sidecar 正常");
     fireEvent.click(screen.getByRole("link", { name: /实验结果/ }));

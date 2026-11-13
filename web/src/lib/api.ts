@@ -126,6 +126,34 @@ export type JobRunQuery = {
   offset?: number;
 };
 
+export type JobMetrics = {
+  n: number;
+  wins: number;
+  draws: number;
+  losses: number;
+  win_rate: number;
+  win_interval: [number, number];
+  goals_for: number;
+  goals_against: number;
+  points: number;
+  xg: number | null;
+  xga: number | null;
+  possession: number | null;
+  shots: number | null;
+  pass_completion: number | null;
+};
+
+export type JobPaired = {
+  n: number;
+  goal_difference_delta: number | null;
+};
+
+export type JobSummary = {
+  job: Job;
+  metrics: JobMetrics | null;
+  paired: JobPaired;
+};
+
 function queryString(params: Record<string, string | number | undefined | null>): string {
   const search = new URLSearchParams();
   for (const [key, value] of Object.entries(params)) {
@@ -180,4 +208,107 @@ export function listJobRuns(
 ): Promise<JobRunList> {
   const search = queryString({ limit: query.limit, offset: query.offset });
   return apiJson<JobRunList>(connection, `/api/jobs/${encodeURIComponent(jobId)}/runs${search}`);
+}
+
+export function getJobSummary(
+  connection: Connection,
+  jobId: string,
+  side: 0 | 1 = 0,
+): Promise<JobSummary> {
+  const search = queryString({ side });
+  return apiJson<JobSummary>(
+    connection,
+    `/api/jobs/${encodeURIComponent(jobId)}/summary${search}`,
+  );
+}
+
+export async function downloadJobCsv(connection: Connection, jobId: string): Promise<string> {
+  const response = await apiFetch(
+    connection,
+    `/api/jobs/${encodeURIComponent(jobId)}/export.csv`,
+  );
+  return response.text();
+}
+
+export type SaveStatus = "pending" | "reading" | "ready" | "error" | "cancelled";
+
+export type Save = {
+  id: string;
+  source_path: string;
+  source_sha256: string;
+  status: SaveStatus;
+  stage: string | null;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+};
+
+export type SaveList = {
+  items: Save[];
+  total: number;
+  next_offset: number | null;
+};
+
+export type SaveCreate = {
+  source_path: string;
+  source_sha256: string;
+  status?: SaveStatus;
+  stage?: string | null;
+  metadata?: Record<string, unknown> | null;
+};
+
+export type SaveUpdate = {
+  status?: SaveStatus;
+  stage?: string | null;
+  metadata?: Record<string, unknown>;
+};
+
+export type SaveImport = {
+  leagues: Record<string, Record<string, unknown>>;
+  clubs: Record<string, Record<string, unknown>>;
+  stage?: string | null;
+};
+
+export type SaveQuery = {
+  status?: SaveStatus;
+  limit?: number;
+  offset?: number;
+};
+
+export function listSaves(connection: Connection, query: SaveQuery = {}): Promise<SaveList> {
+  const search = queryString({ status: query.status, limit: query.limit, offset: query.offset });
+  return apiJson<SaveList>(connection, `/api/saves${search}`);
+}
+
+export function createSave(connection: Connection, input: SaveCreate): Promise<Save> {
+  return apiJson<Save>(connection, "/api/saves", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export function updateSave(
+  connection: Connection,
+  saveId: string,
+  changes: SaveUpdate,
+): Promise<Save> {
+  return apiJson<Save>(connection, `/api/saves/${encodeURIComponent(saveId)}`, {
+    method: "PATCH",
+    body: JSON.stringify(changes),
+  });
+}
+
+export async function deleteSave(connection: Connection, saveId: string): Promise<void> {
+  await apiFetch(connection, `/api/saves/${encodeURIComponent(saveId)}`, { method: "DELETE" });
+}
+
+export function importSave(
+  connection: Connection,
+  saveId: string,
+  payload: SaveImport,
+): Promise<Save> {
+  return apiJson<Save>(connection, `/api/saves/${encodeURIComponent(saveId)}/import`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
 }
