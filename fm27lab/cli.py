@@ -11,7 +11,9 @@ import typer
 import fm27lab
 from fm27lab.client import SidecarClient, SidecarError, discover_endpoint
 from fm27lab.config import Settings
+from fm27lab.interfaces.mcp.prompts import build_prompts
 from fm27lab.interfaces.mcp.protocol import McpServer
+from fm27lab.interfaces.mcp.resources import build_resources
 from fm27lab.interfaces.mcp.tools import build_tools
 from fm27lab.sidecar import run
 
@@ -116,6 +118,8 @@ def run_mcp(
         name=MCP_SERVER_NAME,
         version=fm27lab.__version__,
         tools=build_tools(client),
+        resources=build_resources(client),
+        prompts=build_prompts(),
     )
     server.serve(instream, outstream)
     return 0

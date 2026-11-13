@@ -124,7 +124,11 @@ def test_run_mcp_serves_handshake_lists_tools_and_routes_tool_call(monkeypatch, 
     assert [reply["id"] for reply in replies] == [1, 2, 3]
     assert replies[0]["result"] == {
         "protocolVersion": "2024-11-05",
-        "capabilities": {"tools": {"listChanged": False}},
+        "capabilities": {
+            "tools": {"listChanged": False},
+            "resources": {"listChanged": False},
+            "prompts": {"listChanged": False},
+        },
         "serverInfo": {"name": "fm27lab", "version": fm27lab.__version__},
     }
     listed = replies[1]["result"]["tools"]
@@ -434,3 +438,59 @@ def test_mcp_command_serves_protocol_over_stdio_end_to_end(monkeypatch, tmp_path
     assert replies[2]["result"]["structuredContent"] == payload
     assert result.stderr == ""
     assert TOKEN not in result.stdout + result.stderr
+
+
+def test_run_mcp_exposes_resources_and_prompts_alongside_tools(monkeypatch, tmp_path, capsys):
+    payload = {"items": [{"id": "dr_1"}], "total": 1, "next_offset": None}
+    fake, _ = install_fake_sidecar(monkeypatch, [payload])
+    messages = (
+        INITIALIZE,
+        INITIALIZED_NOTIFICATION,
+        request(2, "resources/list"),
+        request(3, "prompts/list"),
+        request(4, "tools/list"),
+        request(5, "resources/read", {"uri": "fm27lab://drafts"}),
+        request(
+            6,
+            "prompts/get",
+            {
+                "name": "experiment-design",
+                "arguments": {"draft_id": "dr_1", "instruction": "提高逼抢"},
+            },
+        ),
+    )
+    outstream = io.BytesIO()
+    assert cli.run_mcp(tmp_path, encode_messages(*messages), outstream) == 0
+    replies = decode_replies(outstream)
+    assert [reply["id"] for reply in replies] == [1, 2, 3, 4, 5, 6]
+    capabilities = replies[0]["result"]["capabilities"]
+    assert capabilities == {
+        "tools": {"listChanged": False},
+        "resources": {"listChanged": False},
+        "prompts": {"listChanged": False},
+    }
+    assert [item["uri"] for item in replies[1]["result"]["resources"]] == [
+        "fm27lab://drafts",
+        "fm27lab://pools",
+        "fm27lab://jobs",
+        "fm27lab://saves",
+    ]
+    assert [item["name"] for item in replies[2]["result"]["prompts"]] == [
+        "experiment-design",
+        "pool-review",
+    ]
+    assert [item["name"] for item in replies[3]["result"]["tools"]] == list(tool_names())
+    contents = replies[4]["result"]["contents"][0]
+    assert contents["uri"] == "fm27lab://drafts"
+    assert contents["mimeType"] == "application/json"
+    assert json.loads(contents["text"]) == payload
+    prompt_message = replies[5]["result"]["messages"][0]
+    assert prompt_message["role"] == "user"
+    assert prompt_message["content"]["type"] == "text"
+    assert "dr_1" in prompt_message["content"]["text"]
+    assert fake.calls == [
+        {"method": "GET", "path": HEALTH_PATH, "body": None, "query": None},
+        {"method": "GET", "path": "/api/drafts", "body": None, "query": {"limit": 128, "offset": 0}},
+    ]
+    assert capsys.readouterr().err == ""
+    assert TOKEN not in outstream.getvalue().decode("utf-8")

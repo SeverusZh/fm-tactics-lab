@@ -5,7 +5,13 @@ import json
 
 import pytest
 
-from fm27lab.interfaces.mcp.protocol import McpServer, McpTool
+from fm27lab.interfaces.mcp.protocol import (
+    McpPrompt,
+    McpPromptArgument,
+    McpResource,
+    McpServer,
+    McpTool,
+)
 
 CJK_START = "\u4e00"
 CJK_END = "\u9fff"
@@ -400,3 +406,261 @@ def test_register_rejects_empty_name():
     server = make_server()
     with pytest.raises(ValueError):
         server.register(McpTool("", "空名工具", {"type": "object"}, lambda arguments: {}))
+
+
+def make_resource(uri: str = "fm27lab://drafts", text: str = '{"items":[],"total":0}') -> McpResource:
+    return McpResource(
+        uri=uri,
+        name="drafts",
+        description="草案分页列表",
+        mime_type="application/json",
+        handler=lambda: text,
+    )
+
+
+def make_prompt() -> McpPrompt:
+    return McpPrompt(
+        name="design",
+        description="引导设计受控实验",
+        arguments=(
+            McpPromptArgument("draft_id", "候选草案标识", True),
+            McpPromptArgument("seeds", "种子范围", False),
+        ),
+        handler=lambda arguments: f"草案 {arguments['draft_id']}，种子 {arguments.get('seeds', '默认')}",
+    )
+
+
+def feature_server() -> McpServer:
+    return McpServer(
+        name="fm27lab-test",
+        version="9.9.9",
+        resources=[make_resource()],
+        prompts=[make_prompt()],
+    )
+
+
+def test_initialize_declares_resources_and_prompts_capabilities():
+    result = single(feature_server(), request("initialize", {"protocolVersion": "2024-11-05"}))["result"]
+    assert result["capabilities"] == {
+        "tools": {"listChanged": False},
+        "resources": {"listChanged": False},
+        "prompts": {"listChanged": False},
+    }
+
+
+def test_initialize_omits_capabilities_for_absent_features():
+    resources_only = McpServer(name="fm27lab-test", version="9.9.9", resources=[make_resource()])
+    capabilities = single(resources_only, request("initialize", {}))["result"]["capabilities"]
+    assert capabilities == {
+        "tools": {"listChanged": False},
+        "resources": {"listChanged": False},
+    }
+    prompts_only = McpServer(name="fm27lab-test", version="9.9.9", prompts=[make_prompt()])
+    capabilities = single(prompts_only, request("initialize", {}))["result"]["capabilities"]
+    assert capabilities == {
+        "tools": {"listChanged": False},
+        "prompts": {"listChanged": False},
+    }
+
+
+def test_resources_list_returns_uri_name_description_and_mimetype():
+    response = single(feature_server(), request("resources/list", {}))
+    assert response["result"] == {
+        "resources": [
+            {
+                "uri": "fm27lab://drafts",
+                "name": "drafts",
+                "description": "草案分页列表",
+                "mimeType": "application/json",
+            }
+        ]
+    }
+
+
+def test_resources_list_is_empty_without_resources():
+    assert single(make_server(), request("resources/list", {}))["result"] == {"resources": []}
+
+
+def test_resources_read_returns_contents_with_uri_mimetype_and_text():
+    response = single(feature_server(), request("resources/read", {"uri": "fm27lab://drafts"}))
+    assert response["result"] == {
+        "contents": [
+            {
+                "uri": "fm27lab://drafts",
+                "mimeType": "application/json",
+                "text": '{"items":[],"total":0}',
+            }
+        ]
+    }
+
+
+def test_resources_read_unknown_uri_returns_invalid_params():
+    response = single(feature_server(), request("resources/read", {"uri": "fm27lab://missing"}))
+    assert "result" not in response
+    assert response["error"]["code"] == -32602
+    assert "未知资源" in response["error"]["message"]
+    assert_chinese(response["error"]["message"])
+
+
+def test_resources_read_invalid_params_returns_invalid_params():
+    responses = exchange(
+        feature_server(),
+        request("resources/read", {}, 1),
+        request("resources/read", {"uri": ""}, 2),
+        request("resources/read", {"uri": 7}, 3),
+        '{"jsonrpc":"2.0","id":4,"method":"resources/read","params":["fm27lab://drafts"]}',
+    )
+    assert [response["error"]["code"] for response in responses] == [-32602] * 4
+    for response in responses:
+        assert_chinese(response["error"]["message"])
+
+
+def test_resources_read_handler_failure_is_isolated():
+    def explode() -> str:
+        raise RuntimeError("存储不可用")
+
+    resource = McpResource("fm27lab://drafts", "drafts", "草案分页列表", "application/json", explode)
+    server = McpServer(name="fm27lab-test", version="9.9.9", resources=[resource])
+    responses = exchange(
+        server,
+        request("resources/read", {"uri": "fm27lab://drafts"}, 1),
+        request("resources/list", {}, 2),
+    )
+    assert responses[0]["error"]["code"] == -32603
+    assert "资源读取失败" in responses[0]["error"]["message"]
+    assert "存储不可用" in responses[0]["error"]["message"]
+    assert_chinese(responses[0]["error"]["message"])
+    assert [item["uri"] for item in responses[1]["result"]["resources"]] == ["fm27lab://drafts"]
+
+
+def test_prompts_list_returns_name_description_and_arguments():
+    response = single(feature_server(), request("prompts/list", {}))
+    assert response["result"] == {
+        "prompts": [
+            {
+                "name": "design",
+                "description": "引导设计受控实验",
+                "arguments": [
+                    {"name": "draft_id", "description": "候选草案标识", "required": True},
+                    {"name": "seeds", "description": "种子范围", "required": False},
+                ],
+            }
+        ]
+    }
+
+
+def test_prompts_list_is_empty_without_prompts():
+    assert single(make_server(), request("prompts/list", {}))["result"] == {"prompts": []}
+
+
+def test_prompts_get_renders_user_message():
+    result = single(
+        feature_server(),
+        request("prompts/get", {"name": "design", "arguments": {"draft_id": "dr_1", "seeds": "101:20"}}),
+    )["result"]
+    assert result == {
+        "description": "引导设计受控实验",
+        "messages": [{"role": "user", "content": {"type": "text", "text": "草案 dr_1，种子 101:20"}}],
+    }
+
+
+def test_prompts_get_treats_missing_arguments_as_empty_object():
+    prompt = McpPrompt(
+        name="brief",
+        description="无参数提示词",
+        arguments=(),
+        handler=lambda arguments: f"参数 {arguments}",
+    )
+    server = McpServer(name="fm27lab-test", version="9.9.9", prompts=[prompt])
+    result = single(server, request("prompts/get", {"name": "brief"}))["result"]
+    assert result["messages"][0]["content"]["text"] == "参数 {}"
+    listed = single(server, request("prompts/list", {}))["result"]["prompts"][0]
+    assert listed["arguments"] == []
+
+
+def test_prompts_get_unknown_prompt_returns_invalid_params():
+    response = single(feature_server(), request("prompts/get", {"name": "nope"}))
+    assert "result" not in response
+    assert response["error"]["code"] == -32602
+    assert "未知提示词" in response["error"]["message"]
+    assert_chinese(response["error"]["message"])
+
+
+def test_prompts_get_missing_required_argument_returns_invalid_params():
+    responses = exchange(
+        feature_server(),
+        request("prompts/get", {"name": "design", "arguments": {}}, 1),
+        request("prompts/get", {"name": "design", "arguments": {"seeds": "101:20"}}, 2),
+    )
+    assert [response["error"]["code"] for response in responses] == [-32602, -32602]
+    for response in responses:
+        assert "缺少必填参数" in response["error"]["message"]
+        assert "draft_id" in response["error"]["message"]
+        assert_chinese(response["error"]["message"])
+
+
+def test_prompts_get_invalid_params_returns_invalid_params():
+    responses = exchange(
+        feature_server(),
+        request("prompts/get", {}, 1),
+        request("prompts/get", {"name": ""}, 2),
+        '{"jsonrpc":"2.0","id":3,"method":"prompts/get","params":["design"]}',
+        request("prompts/get", {"name": "design", "arguments": ["draft_id"]}, 4),
+        request("prompts/get", {"name": "design", "arguments": {"draft_id": "dr_1", "bogus": "x"}}, 5),
+        request("prompts/get", {"name": "design", "arguments": {"draft_id": 3}}, 6),
+    )
+    assert [response["error"]["code"] for response in responses] == [-32602] * 6
+    messages = [response["error"]["message"] for response in responses]
+    assert "需要提示词名称" in messages[0]
+    assert "需要提示词名称" in messages[1]
+    assert "参数必须是 JSON 对象" in messages[2]
+    assert "参数必须是 JSON 对象" in messages[3]
+    assert "未知提示词参数" in messages[4]
+    assert "类型必须是字符串" in messages[5]
+    for message in messages:
+        assert_chinese(message)
+
+
+def test_notifications_remain_silent_for_resource_and_prompt_methods():
+    responses = exchange(
+        feature_server(),
+        '{"jsonrpc":"2.0","method":"notifications/initialized"}',
+        '{"jsonrpc":"2.0","method":"notifications/resources/updated","params":{"uri":"fm27lab://drafts"}}',
+        '{"jsonrpc":"2.0","method":"notifications/prompts/list_changed"}',
+    )
+    assert responses == []
+
+
+def test_register_resource_rejects_empty_uri_and_duplicates():
+    server = make_server()
+    server.register_resource(make_resource())
+    assert [resource.uri for resource in server.resources] == ["fm27lab://drafts"]
+    with pytest.raises(ValueError):
+        server.register_resource(make_resource())
+    with pytest.raises(ValueError):
+        server.register_resource(McpResource("", "drafts", "草案分页列表", "application/json", lambda: ""))
+
+
+def test_register_prompt_rejects_empty_name_duplicate_name_and_duplicate_arguments():
+    server = make_server()
+    prompt = make_prompt()
+    server.register_prompt(prompt)
+    assert [item.name for item in server.prompts] == ["design"]
+    with pytest.raises(ValueError):
+        server.register_prompt(prompt)
+    with pytest.raises(ValueError):
+        server.register_prompt(
+            McpPrompt(name="", description="空名提示词", arguments=(), handler=lambda arguments: "")
+        )
+    with pytest.raises(ValueError):
+        server.register_prompt(
+            McpPrompt(
+                name="duplicated",
+                description="重复参数",
+                arguments=(
+                    McpPromptArgument("draft_id", "候选草案标识", True),
+                    McpPromptArgument("draft_id", "种子范围", False),
+                ),
+                handler=lambda arguments: "",
+            )
+        )
