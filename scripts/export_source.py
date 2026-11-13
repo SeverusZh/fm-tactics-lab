@@ -9,7 +9,7 @@ import zipfile
 ROOT = Path(__file__).resolve().parents[1]
 TOP = {'README.md', 'README.en.md', 'LICENSE', 'THIRD_PARTY_NOTICES.md', 'CONTRIBUTING.md',
        'CHANGELOG.md', 'DESIGN.md', 'TODO.md', 'pyproject.toml', 'requirements.txt',
-       '.gitignore', '.gitattributes', 'Launcher.cs'}
+       '.gitignore', '.gitattributes'}
 TYPES = {'src': {'.py', '.js', '.css', '.html'},
          'fm27lab': {'.py', '.sql', '.md'},
          'web': {'.ts', '.tsx', '.js', '.jsx', '.css', '.html', '.json', '.svg', '.png', '.ico', '.yaml', '.yml'},

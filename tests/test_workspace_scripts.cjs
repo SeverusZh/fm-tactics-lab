@@ -16,9 +16,4 @@ new vm.Script(source, { filename: 'concatenated-ui.js' });
 const squad = fs.readFileSync(path.join(ui, 'squad-editor.js'), 'utf8');
 assert.match(squad, /function showSquadSelection\(/, 'squad selection must be declared');
 assert.doesNotMatch(squad, /^showSquadSelection\s*=/m, 'strict mode assignment is invalid');
-
-const launcher = fs.readFileSync(path.join(root, 'Launcher.cs'), 'utf8');
-assert.ok(launcher.includes('/workspace-controls.js'), 'launcher self-test must include workspace controls');
-assert.ok(launcher.includes('/workspace.css'), 'launcher self-test must include workspace styles');
-assert.ok(!launcher.includes('/save-mode.js'), 'launcher self-test must not request removed assets');
-console.log('workspace scripts compile and retirement assets are wired');
+console.log('workspace scripts compile and squad selection is declared');
