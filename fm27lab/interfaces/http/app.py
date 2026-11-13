@@ -10,9 +10,11 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from fm27lab.adapters.storage_sqlite.db import Database
+from fm27lab.adapters.storage_sqlite.idempotency import IdempotencyRepository
 from fm27lab.adapters.storage_sqlite.repositories import DraftRepository, JobRepository, PoolRepository
 from fm27lab.adapters.storage_sqlite.saves import SavesRepository
 from fm27lab.application.drafts import DraftService
+from fm27lab.application.idempotency import IdempotencyService
 from fm27lab.application.jobs import JobService
 from fm27lab.application.pools import PoolService
 from fm27lab.application.saves import SavesService
@@ -26,6 +28,7 @@ from fm27lab.interfaces.http.common import (
     error_body,
     require_token,
 )
+from fm27lab.interfaces.http.idempotency import IdempotencyMiddleware
 from fm27lab.interfaces.http.routes import register_routes
 
 TAURI_ORIGINS = ("tauri://localhost", "http://tauri.localhost")
@@ -54,6 +57,7 @@ def create_app(
     draft_service: DraftService | None = None,
     job_service: JobService | None = None,
     saves_service: SavesService | None = None,
+    idempotency_service: IdempotencyService | None = None,
 ) -> FastAPI:
     app = FastAPI(
         title="FM Tactics Lab Sidecar",
@@ -68,14 +72,16 @@ def create_app(
     app.state.drafts = draft_service or DraftService(DraftRepository(database))
     app.state.jobs = job_service or JobService(JobRepository(database))
     app.state.saves = saves_service or SavesService(SavesRepository(database))
+    app.state.idempotency = idempotency_service or IdempotencyService(IdempotencyRepository(database))
     app.state.shutdown = shutdown
 
     origins = list(TAURI_ORIGINS + (DEV_ORIGINS if settings.dev else ()))
+    app.add_middleware(IdempotencyMiddleware, service=app.state.idempotency)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=origins,
         allow_credentials=False,
-        allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
         allow_headers=["Authorization", "Content-Type", "Last-Event-ID", "Idempotency-Key"],
     )
 
