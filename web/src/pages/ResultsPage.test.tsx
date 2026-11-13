@@ -7,12 +7,15 @@ import { App } from "../App";
 import { AppContext } from "../app-context";
 import {
   downloadJobCsv,
+  getJobPoolSummary,
   getJobSummary,
   type Health,
   type Job,
   type JobMetrics,
   type JobRun,
   type JobSummary,
+  type PoolSummary,
+  type PoolSummaryEntry,
 } from "../lib/api";
 import { ResultsPage } from "./ResultsPage";
 
@@ -133,10 +136,47 @@ function makeRun(overrides: Partial<JobRun> = {}): JobRun {
   };
 }
 
+function makePoolEntry(overrides: Partial<PoolSummaryEntry> = {}): PoolSummaryEntry {
+  return {
+    index: 0,
+    name: "客队战术 1",
+    weight: 1,
+    probability: 1 / 3,
+    roster: false,
+    ...overrides,
+  };
+}
+
+function makePoolSummary(overrides: Partial<PoolSummary> = {}): PoolSummary {
+  return {
+    enabled: true,
+    entry_count: 2,
+    mode: "random",
+    rounds: 1,
+    players: "uniform",
+    uniform: { enabled: true, attribute_value: 15 },
+    entries: [
+      makePoolEntry(),
+      makePoolEntry({ index: 1, name: "客队战术 2", weight: 2, probability: 2 / 3, roster: true }),
+    ],
+    draws: { "0": 2, "1": 3 },
+    ...overrides,
+  };
+}
+
+const emptyPool: PoolSummary = {
+  enabled: false,
+  entry_count: 0,
+  mode: null,
+  players: null,
+  draws: {},
+};
+
 type ResultsFixtures = {
   jobs?: { items: Job[]; total: number; next_offset: number | null };
   summary?: JobSummary | ((url: string) => JobSummary);
   runs?: (url: string) => { items: JobRun[]; total: number; next_offset: number | null };
+  pool?: PoolSummary | ((url: string) => PoolSummary);
   csv?: () => Response;
 };
 
@@ -144,6 +184,10 @@ function resultsFetch(fixtures: ResultsFixtures = {}): FetchHandler {
   return (url) => {
     if (url.includes("/export.csv")) {
       return fixtures.csv?.() ?? textResponse("job_id,sequence\r\njob-1,1\r\n");
+    }
+    if (url.includes("/pool-summary")) {
+      const pool = typeof fixtures.pool === "function" ? fixtures.pool(url) : fixtures.pool;
+      return jsonResponse(pool ?? emptyPool);
     }
     if (url.includes("/summary")) {
       const summary =
@@ -184,6 +228,23 @@ function metricValue(label: string): string {
   const card = screen.getByText(label).closest(".metric");
   if (card === null) throw new Error("未找到指标卡片：" + label);
   return card.querySelector(".metric-value")?.textContent ?? "";
+}
+
+function poolCard(): HTMLElement {
+  const card = screen.getByText("客队战术池").closest(".pool-card");
+  if (!(card instanceof HTMLElement)) throw new Error("未找到客队战术池卡片");
+  return card;
+}
+
+function poolRowTexts(): string[][] {
+  return within(poolCard())
+    .getAllByRole("row")
+    .slice(1)
+    .map((row) =>
+      within(row)
+        .getAllByRole("cell")
+        .map((cell) => cell.textContent ?? ""),
+    );
 }
 
 function captureDownload() {
@@ -492,6 +553,210 @@ describe("ResultsPage", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("任务不存在");
   });
 
+  it("客队战术池默认折叠并支持展开与再次折叠", async () => {
+    stubFetch(resultsFetch({ pool: makePoolSummary() }));
+    renderResultsPage();
+
+    expect(await screen.findByText("客队战术池")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "展开" })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+    expect(screen.queryByText("客队战术 1")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "展开" }));
+
+    expect(screen.getByRole("button", { name: "折叠" })).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
+    expect(screen.getByText("客队战术 1")).toBeInTheDocument();
+    expect(screen.getByText("客队战术 2")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "折叠" }));
+
+    expect(screen.queryByText("客队战术 1")).not.toBeInTheDocument();
+  });
+
+  it("客队战术池展示条目数、模式、名单来源与逐条数据", async () => {
+    stubFetch(resultsFetch({ pool: makePoolSummary({ draws: { "0": 2 } }) }));
+    renderResultsPage();
+
+    expect(await screen.findByText("客队战术池")).toBeInTheDocument();
+    const card = poolCard();
+    expect(within(card).getByText("共 2 套")).toBeInTheDocument();
+    expect(within(card).getByText("随机抽取")).toBeInTheDocument();
+    expect(within(card).getByText("名单：统一属性")).toBeInTheDocument();
+
+    fireEvent.click(within(card).getByRole("button", { name: "展开" }));
+
+    expect(poolRowTexts()).toEqual([
+      ["客队战术 1", "1", "33.3%", "统一属性", "2"],
+      ["客队战术 2", "2", "66.7%", "真实名单", "0"],
+    ]);
+  });
+
+  it("轮战模式展示概率占位与真实名单标签", async () => {
+    stubFetch(
+      resultsFetch({
+        pool: makePoolSummary({
+          mode: "rotation",
+          rounds: 2,
+          players: "real",
+          entries: [
+            makePoolEntry({ probability: null }),
+            makePoolEntry({ index: 1, name: "客队战术 2", weight: 2, probability: null, roster: true }),
+          ],
+          draws: { "0": 2, "1": 2 },
+        }),
+      }),
+    );
+    renderResultsPage();
+
+    expect(await screen.findByText("客队战术池")).toBeInTheDocument();
+    const card = poolCard();
+    expect(within(card).getByText("轮战")).toBeInTheDocument();
+    expect(within(card).getByText("名单：真实名单")).toBeInTheDocument();
+
+    fireEvent.click(within(card).getByRole("button", { name: "展开" }));
+
+    expect(poolRowTexts()).toEqual([
+      ["客队战术 1", "1", "—", "统一属性", "2"],
+      ["客队战术 2", "2", "—", "真实名单", "2"],
+    ]);
+  });
+
+  it("客队战术池禁用时提示未启用并保留条目数", async () => {
+    stubFetch(
+      resultsFetch({
+        pool: { enabled: false, entry_count: 2, mode: null, players: null, draws: {} },
+      }),
+    );
+    renderResultsPage();
+
+    expect(await screen.findByText("客队战术池")).toBeInTheDocument();
+    const card = poolCard();
+    expect(within(card).getByText("未启用客队战术池")).toBeInTheDocument();
+    expect(within(card).getByText("共 2 套")).toBeInTheDocument();
+    expect(within(card).queryByRole("button")).not.toBeInTheDocument();
+    expect(within(card).queryByRole("table")).not.toBeInTheDocument();
+  });
+
+  it("无客队战术池配置时不渲染卡片", async () => {
+    stubFetch(resultsFetch());
+    renderResultsPage();
+
+    await screen.findByText("场次");
+    await waitFor(() => expect(callsTo("/pool-summary")).toHaveLength(1));
+    expect(screen.queryByText("客队战术池")).not.toBeInTheDocument();
+    expect(screen.queryByText("未启用客队战术池")).not.toBeInTheDocument();
+  });
+
+  it("切换任务后各任务的折叠状态在会话内保留", async () => {
+    stubFetch(
+      resultsFetch({
+        jobs: {
+          items: [makeJob(), makeJob({ id: "job-2", name: "批次二" })],
+          total: 2,
+          next_offset: null,
+        },
+        pool: (url) =>
+          url.includes("job-2")
+            ? makePoolSummary({
+                entry_count: 1,
+                entries: [makePoolEntry({ name: "客队战术 B" })],
+                draws: { "0": 0 },
+              })
+            : makePoolSummary(),
+      }),
+    );
+    renderResultsPage();
+
+    expect(await screen.findByText("客队战术池")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "展开" }));
+    expect(screen.getByText("客队战术 1")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("实验任务"), { target: { value: "job-2" } });
+
+    expect(await screen.findByRole("button", { name: "展开" })).toBeInTheDocument();
+    expect(screen.queryByText("客队战术 B")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "展开" }));
+    expect(await screen.findByText("客队战术 B")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("实验任务"), { target: { value: "job-1" } });
+
+    expect(await screen.findByRole("button", { name: "折叠" })).toBeInTheDocument();
+    expect(screen.getByText("客队战术 1")).toBeInTheDocument();
+    expect(screen.queryByText("客队战术 B")).not.toBeInTheDocument();
+  });
+
+  it("切换任务后池摘要返回前不展示上一任务的条目", async () => {
+    const pending = deferred<Response>();
+    const base = resultsFetch({
+      jobs: {
+        items: [makeJob(), makeJob({ id: "job-2", name: "批次二" })],
+        total: 2,
+        next_offset: null,
+      },
+      pool: () => makePoolSummary(),
+    });
+    stubFetch((url, init) =>
+      url.includes("/job-2/pool-summary") ? pending.promise : base(url, init),
+    );
+    renderResultsPage();
+
+    expect(await screen.findByText("客队战术池")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "展开" }));
+    expect(screen.getByText("客队战术 1")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("实验任务"), { target: { value: "job-2" } });
+
+    expect(await screen.findByText("正在加载客队战术池…")).toBeInTheDocument();
+    expect(screen.queryByText("客队战术 1")).not.toBeInTheDocument();
+
+    pending.resolve(
+      jsonResponse(
+        makePoolSummary({
+          entry_count: 1,
+          entries: [makePoolEntry({ name: "客队战术 B" })],
+          draws: { "0": 1 },
+        }),
+      ),
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "展开" }));
+    expect(await screen.findByText("客队战术 B")).toBeInTheDocument();
+    expect(screen.queryByText("客队战术 1")).not.toBeInTheDocument();
+  });
+
+  it("池摘要请求失败时展示内联错误并可重试", async () => {
+    let attempts = 0;
+    const base = resultsFetch();
+    stubFetch((url, init) => {
+      if (!url.includes("/pool-summary")) return base(url, init);
+      attempts += 1;
+      if (attempts === 1) {
+        return jsonResponse({ error: { code: "not_found", message: "战术池读取失败" } }, 404);
+      }
+      return jsonResponse(makePoolSummary());
+    });
+    renderResultsPage();
+
+    expect(await screen.findByText("场次")).toBeInTheDocument();
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("战术池读取失败");
+    expect(metricValue("场次")).toBe("4");
+    expect(await screen.findByText("2–1")).toBeInTheDocument();
+
+    fireEvent.click(within(alert).getByRole("button", { name: "重试" }));
+
+    await waitFor(() => expect(attempts).toBe(2));
+    expect(await screen.findByText("客队战术池")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "展开" }));
+    expect(screen.getByText("客队战术 1")).toBeInTheDocument();
+  });
+
   it("sidecar 未连接时显示空态", async () => {
     stubFetch(resultsFetch());
     renderResultsPage(null);
@@ -519,6 +784,23 @@ describe("结果读取 API 客户端", () => {
     expect(summary.metrics?.n).toBe(4);
     expect(fetchCalls()[0].url).toBe(
       "http://127.0.0.1:43210/api/jobs/job%2F1/summary?side=1",
+    );
+    expect(new Headers(fetchCalls()[0].init.headers).get("Authorization")).toBe(
+      "Bearer test-token",
+    );
+  });
+
+  it("getJobPoolSummary 读取客队战术池摘要并编码任务 id", async () => {
+    stubFetch(resultsFetch({ pool: makePoolSummary() }));
+
+    const summary = await getJobPoolSummary(connection, "job/1");
+
+    expect(summary.entry_count).toBe(2);
+    expect(summary.mode).toBe("random");
+    expect(summary.entries?.[0].name).toBe("客队战术 1");
+    expect(summary.draws).toEqual({ "0": 2, "1": 3 });
+    expect(fetchCalls()[0].url).toBe(
+      "http://127.0.0.1:43210/api/jobs/job%2F1/pool-summary",
     );
     expect(new Headers(fetchCalls()[0].init.headers).get("Authorization")).toBe(
       "Bearer test-token",

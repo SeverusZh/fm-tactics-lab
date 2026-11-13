@@ -242,6 +242,35 @@ export function getJobSummary(
   );
 }
 
+export type PoolSummaryEntry = {
+  index: number;
+  name: string;
+  weight: number;
+  probability: number | null;
+  roster: boolean;
+};
+
+export type PoolSummary = {
+  enabled: boolean;
+  entry_count: number;
+  mode: string | null;
+  rounds?: number | null;
+  players: string | null;
+  uniform?: { enabled: boolean; attribute_value: number } | null;
+  entries?: PoolSummaryEntry[] | null;
+  draws: Record<string, number>;
+};
+
+export function getJobPoolSummary(
+  connection: Connection,
+  jobId: string,
+): Promise<PoolSummary> {
+  return apiJson<PoolSummary>(
+    connection,
+    `/api/jobs/${encodeURIComponent(jobId)}/pool-summary`,
+  );
+}
+
 export async function downloadJobCsv(connection: Connection, jobId: string): Promise<string> {
   const response = await apiFetch(
     connection,

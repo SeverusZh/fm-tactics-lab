@@ -7,12 +7,14 @@ import { EmptyState } from "../components/EmptyState";
 import { Panel } from "../components/Panel";
 import {
   downloadJobCsv,
+  getJobPoolSummary,
   getJobSummary,
   listJobRuns,
   listJobs,
   type JobMetrics,
   type JobStatus,
   type JobSummary,
+  type PoolSummary,
 } from "../lib/api";
 
 const PAGE_SIZE = 20;
@@ -35,6 +37,24 @@ const STATUS_TONES: Record<JobStatus, "ok" | "warn" | "error" | undefined> = {
   error: "error",
   cancelled: undefined,
 };
+
+const POOL_MODE_LABELS: Record<string, string> = {
+  random: "随机抽取",
+  rotation: "轮战",
+};
+
+const POOL_PLAYERS_LABELS: Record<string, string> = {
+  uniform: "统一属性",
+  real: "真实名单",
+};
+
+function poolModeLabel(mode: PoolSummary["mode"]): string {
+  return mode === null ? "—" : (POOL_MODE_LABELS[mode] ?? "—");
+}
+
+function poolPlayersLabel(players: PoolSummary["players"]): string {
+  return players === null ? "—" : (POOL_PLAYERS_LABELS[players] ?? "—");
+}
 
 const dateFormat = new Intl.DateTimeFormat("zh-CN", { dateStyle: "short", timeStyle: "short" });
 
@@ -108,6 +128,7 @@ export function ResultsPage() {
   const [runsOffset, setRunsOffset] = useState(0);
   const [downloading, setDownloading] = useState(false);
   const [downloadError, setDownloadError] = useState<string | null>(null);
+  const [poolExpandedJobs, setPoolExpandedJobs] = useState<Record<string, boolean>>({});
 
   const jobs = useQuery({
     queryKey: ["results-jobs", connection?.url],
@@ -133,6 +154,12 @@ export function ResultsPage() {
     enabled: connection !== null && activeJobId !== null && summary.data?.metrics != null,
   });
 
+  const poolSummary = useQuery({
+    queryKey: ["job-pool-summary", connection?.url, activeJobId],
+    queryFn: () => getJobPoolSummary(connection!, activeJobId!),
+    enabled: connection !== null && activeJobId !== null && summary.data !== undefined,
+  });
+
   const changeJob = (jobId: string) => {
     setSelectedJobId(jobId);
     setRunsOffset(0);
@@ -144,12 +171,23 @@ export function ResultsPage() {
     setDownloadError(null);
   };
 
+  const togglePool = () => {
+    if (activeJobId === null) return;
+    setPoolExpandedJobs((previous) => ({
+      ...previous,
+      [activeJobId]: !(previous[activeJobId] ?? false),
+    }));
+  };
+
   const refresh = () => {
     setDownloadError(null);
     void jobs.refetch();
     if (activeJobId !== null) {
       void summary.refetch();
       void runs.refetch();
+      if (summary.data !== undefined) {
+        void poolSummary.refetch();
+      }
     }
   };
 
@@ -263,41 +301,146 @@ export function ResultsPage() {
   } else {
     const data = summaryData;
     const metrics = data.metrics;
-    if (metrics === null) {
-      summaryContent = (
-        <EmptyState
-          icon={ChartBar}
-          title="尚无比赛结果"
-          description="该任务还没有已完成的比赛，完成后会显示指标与逐场记录。"
-        />
+    const poolData = poolSummary.data;
+    const poolExpanded = activeJobId !== null && (poolExpandedJobs[activeJobId] ?? false);
+
+    let poolContent: ReactNode = null;
+    if (poolSummary.isError) {
+      poolContent = (
+        <div className="inline-alert" role="alert">
+          <span>{errorMessage(poolSummary.error)}</span>
+          <button
+            className="button small"
+            type="button"
+            onClick={() => void poolSummary.refetch()}
+          >
+            重试
+          </button>
+        </div>
       );
-    } else {
-      summaryContent = (
-        <>
-          <div className="results-meta">
-            <strong>{data.job.name ?? "未命名任务"}</strong>
-            <span className="jobs-id">{data.job.id}</span>
-            <span className="badge" data-tone={STATUS_TONES[data.job.status]}>
-              {STATUS_LABELS[data.job.status]}
-            </span>
-            <span>
-              完成 {data.job.completed} / {data.job.total}
-            </span>
+    } else if (poolSummary.isPending) {
+      poolContent = (
+        <p className="jobs-loading" role="status">
+          正在加载客队战术池…
+        </p>
+      );
+    } else if (poolData !== undefined && poolData.entry_count > 0) {
+      const entries = poolData.entries ?? [];
+      poolContent = (
+        <section className="pool-card" aria-labelledby="pool-card-title">
+          <div className="pool-card-header">
+            <h3 className="pool-card-title" id="pool-card-title">
+              客队战术池
+            </h3>
+            <span className="pool-card-meta">共 {poolData.entry_count} 套</span>
+            {poolData.enabled ? (
+              <>
+                <span className="pool-card-meta">{poolModeLabel(poolData.mode)}</span>
+                <span className="pool-card-meta">
+                  名单：{poolPlayersLabel(poolData.players)}
+                </span>
+                <button
+                  className="button small pool-card-toggle"
+                  type="button"
+                  aria-expanded={poolExpanded}
+                  aria-controls="pool-card-body"
+                  onClick={togglePool}
+                >
+                  {poolExpanded ? "折叠" : "展开"}
+                </button>
+              </>
+            ) : (
+              <span className="pool-card-note">未启用客队战术池</span>
+            )}
           </div>
-          <div className="metric-grid">
-            {metricCards(metrics, data.paired).map((card) => (
-              <div className="metric" key={card.label}>
-                <span className="metric-label">{card.label}</span>
-                <strong className="metric-value">{card.value}</strong>
-                {card.hint === undefined ? null : <span className="metric-hint">{card.hint}</span>}
-              </div>
-            ))}
-          </div>
-          <h3 className="results-section-title">逐场记录</h3>
-          {runsContent}
-        </>
+          {poolData.enabled && poolExpanded ? (
+            <div className="pool-card-body" id="pool-card-body">
+              <table className="jobs-table pool-card-table">
+                <caption className="sr-only">客队战术池明细</caption>
+                <thead>
+                  <tr>
+                    <th scope="col">名称</th>
+                    <th scope="col" className="jobs-number">
+                      权重
+                    </th>
+                    <th scope="col" className="jobs-number">
+                      概率
+                    </th>
+                    <th scope="col">名单</th>
+                    <th scope="col" className="jobs-number">
+                      抽中次数
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {entries.map((entry) => (
+                    <tr key={entry.index}>
+                      <td>{entry.name}</td>
+                      <td className="jobs-number">{entry.weight}</td>
+                      <td className="jobs-number">
+                        {entry.probability === null
+                          ? "—"
+                          : formatRatioPercent(entry.probability)}
+                      </td>
+                      <td>
+                        <span className="badge">
+                          {entry.roster ? "真实名单" : "统一属性"}
+                        </span>
+                      </td>
+                      <td className="jobs-number">
+                        {poolData.draws[String(entry.index)] ?? 0}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : null}
+        </section>
       );
     }
+
+    summaryContent = (
+      <>
+        <div className="results-meta">
+          <strong>{data.job.name ?? "未命名任务"}</strong>
+          <span className="jobs-id">{data.job.id}</span>
+          <span className="badge" data-tone={STATUS_TONES[data.job.status]}>
+            {STATUS_LABELS[data.job.status]}
+          </span>
+          <span>
+            完成 {data.job.completed} / {data.job.total}
+          </span>
+        </div>
+        {metrics === null ? (
+          <>
+            <EmptyState
+              icon={ChartBar}
+              title="尚无比赛结果"
+              description="该任务还没有已完成的比赛，完成后会显示指标与逐场记录。"
+            />
+            {poolContent}
+          </>
+        ) : (
+          <>
+            <div className="metric-grid">
+              {metricCards(metrics, data.paired).map((card) => (
+                <div className="metric" key={card.label}>
+                  <span className="metric-label">{card.label}</span>
+                  <strong className="metric-value">{card.value}</strong>
+                  {card.hint === undefined ? null : (
+                    <span className="metric-hint">{card.hint}</span>
+                  )}
+                </div>
+              ))}
+            </div>
+            {poolContent}
+            <h3 className="results-section-title">逐场记录</h3>
+            {runsContent}
+          </>
+        )}
+      </>
+    );
   }
 
   let body: ReactNode;

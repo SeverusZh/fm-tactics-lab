@@ -363,6 +363,65 @@
   font-weight: 600;
 }
 
+.pool-card {
+  margin-bottom: var(--space-5);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--surface-raised);
+}
+
+.pool-card-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  padding: var(--space-3) var(--space-4);
+}
+
+.pool-card-title {
+  margin: 0;
+  font-size: var(--type-body-lg);
+  font-weight: 600;
+}
+
+.pool-card-meta {
+  color: var(--text-subtle);
+  font-size: var(--type-caption);
+}
+
+.pool-card-note {
+  color: var(--amber);
+  font-size: var(--type-caption);
+}
+
+.pool-card-toggle {
+  margin-left: auto;
+}
+
+.pool-card-body {
+  padding: 0 var(--space-4) var(--space-4);
+  overflow-x: auto;
+}
+
+.pool-card-table {
+  min-width: 460px;
+}
+
+.pool-card-table th,
+.pool-card-table td {
+  padding: var(--space-2) var(--space-3);
+}
+
+.pool-card-table .jobs-number {
+  font-size: var(--type-body-sm);
+}
+
+@media (max-width: 900px) {
+  .pool-card-toggle {
+    margin-left: 0;
+  }
+}
+
 .field textarea {
   min-height: 88px;
   padding: var(--space-2) var(--space-3);
