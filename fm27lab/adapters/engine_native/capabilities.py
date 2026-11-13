@@ -10,6 +10,8 @@ from fm27lab.ports.engine import EngineCapabilities, RuntimePlan
 LEGACY_JOBS_PER_SESSION = 64
 MIN_JOBS_PER_SESSION = 1
 MAX_JOBS_PER_SESSION = 4096
+MAX_NATIVE_JOBS = 1000000
+REAL_PROTOCOL_VERSION = 2
 COUNTED_SESSION_SCOPE = "remaining_batch_lane"
 COUNTED_SESSIONS_UNAVAILABLE = "counted_sessions_unavailable"
 INVALID_CAPABILITIES = "引擎能力声明无效"
@@ -53,19 +55,46 @@ def _legacy_capabilities() -> EngineCapabilities:
     )
 
 
+def _native_counted_capabilities(payload: Mapping[str, Any]) -> EngineCapabilities | None:
+    """Interpret the real native protocol declaration; None means a legacy host.
+
+    The native host declares protocol 2 sessions only when it can reset the
+    execution context and release per-match resources after every match.
+    """
+    if payload.get("protocol") != REAL_PROTOCOL_VERSION:
+        return None
+    maximum = payload.get("max_jobs")
+    if type(maximum) is not int or not MIN_JOBS_PER_SESSION <= maximum <= MAX_NATIVE_JOBS:
+        return None
+    if payload.get("execution_context_reset") is not True:
+        return None
+    if payload.get("per_match_resource_release") is not True:
+        return None
+    return EngineCapabilities(
+        counted_sessions=True,
+        jobs_per_session=None,
+        session_scope=COUNTED_SESSION_SCOPE,
+        capability_version=REAL_PROTOCOL_VERSION,
+    )
+
+
 def parse_capabilities(payload: Mapping[str, Any] | None) -> EngineCapabilities:
     """Parse a host capability declaration.
 
-    A missing declaration or a payload without ``counted_sessions`` describes a
-    legacy host: sessions are isolated and rebuilt after 64 matches. A declared
-    ``counted_sessions`` field is authoritative and strictly validated.
+    Two declarations are understood. The desktop worker protocol uses the
+    protocol, max_jobs, execution_context_reset and per_match_resource_release
+    fields and opts into counted sessions only when all four fields pass. The
+    earlier counted_sessions declaration is authoritative and strictly
+    validated. A missing, unknown or unusable declaration describes a legacy
+    host: isolated sessions rebuilt after 64 matches.
     """
     if payload is None:
         return _legacy_capabilities()
     if not isinstance(payload, Mapping):
         raise ValueError(INVALID_CAPABILITIES)
     if "counted_sessions" not in payload:
-        return _legacy_capabilities()
+        native = _native_counted_capabilities(payload)
+        return native if native is not None else _legacy_capabilities()
     counted_sessions = payload["counted_sessions"]
     if type(counted_sessions) is not bool:
         raise ValueError(INVALID_CAPABILITIES)

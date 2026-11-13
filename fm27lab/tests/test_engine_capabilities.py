@@ -389,3 +389,45 @@ def test_ports_layer_does_not_import_adapters():
         check=False,
     )
     assert completed.returncode == 0, completed.stderr
+
+
+NATIVE_PAYLOAD = {
+    "protocol": 2,
+    "max_jobs": 512,
+    "execution_context_reset": True,
+    "per_match_resource_release": True,
+}
+
+
+def test_parse_native_counted_declaration():
+    capabilities = parse_capabilities(NATIVE_PAYLOAD)
+    assert capabilities.counted_sessions is True
+    assert capabilities.jobs_per_session is None
+    assert capabilities.session_scope == "remaining_batch_lane"
+    assert capabilities.capability_version == 2
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {**NATIVE_PAYLOAD, "protocol": 1},
+        {**NATIVE_PAYLOAD, "protocol": 3},
+        {key: value for key, value in NATIVE_PAYLOAD.items() if key != "protocol"},
+        {**NATIVE_PAYLOAD, "max_jobs": 0},
+        {**NATIVE_PAYLOAD, "max_jobs": -1},
+        {**NATIVE_PAYLOAD, "max_jobs": 1_000_001},
+        {**NATIVE_PAYLOAD, "max_jobs": True},
+        {**NATIVE_PAYLOAD, "max_jobs": "512"},
+        {key: value for key, value in NATIVE_PAYLOAD.items() if key != "max_jobs"},
+        {**NATIVE_PAYLOAD, "execution_context_reset": False},
+        {**NATIVE_PAYLOAD, "execution_context_reset": 1},
+        {key: value for key, value in NATIVE_PAYLOAD.items() if key != "execution_context_reset"},
+        {**NATIVE_PAYLOAD, "per_match_resource_release": False},
+        {**NATIVE_PAYLOAD, "per_match_resource_release": "yes"},
+        {key: value for key, value in NATIVE_PAYLOAD.items() if key != "per_match_resource_release"},
+    ],
+)
+def test_parse_native_declaration_falls_back_to_legacy_host(payload):
+    capabilities = parse_capabilities(payload)
+    assert capabilities.counted_sessions is False
+    assert capabilities.jobs_per_session == 64
