@@ -51,7 +51,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - run: cargo test --manifest-path rust/Cargo.toml -p fm27lab-core
+      - run: cargo test --locked --manifest-path rust/Cargo.toml -p fm27lab-core
 
   windows-tauri:
     runs-on: windows-latest
@@ -73,8 +73,8 @@ jobs:
       - run: pnpm --dir web run build
       - run: python scripts/build_sidecar.py
       - run: python -m pytest fm27lab/tests -q
-      - run: cargo build --manifest-path src-tauri/Cargo.toml
-      - run: cargo test --manifest-path src-tauri/Cargo.toml
+      - run: cargo build --locked --manifest-path src-tauri/Cargo.toml
+      - run: cargo test --locked --manifest-path src-tauri/Cargo.toml
       - run: npm install --global @tauri-apps/cli@^2
       - run: tauri build --bundles nsis
       - name: Verify sidecar payload and installer

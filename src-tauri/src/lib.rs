@@ -520,6 +520,7 @@ pub fn run() {
                 let _ = window.set_focus();
             }
         }))
+        .plugin(tauri_plugin_dialog::init())
         .manage(SidecarState::default())
         .setup(|app| {
             let handle = app.handle().clone();
