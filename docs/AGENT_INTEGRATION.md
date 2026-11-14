@@ -263,6 +263,7 @@ retriable 默认在状态码不小于 500 或等于 409 时为 true。证据 fm2
 | drafts_attributes | POST /api/drafts/{draft_id}/attributes | drafts attributes | drafts_attributes |
 | drafts_export_fmf | GET /api/drafts/{draft_id}/export.fmf | drafts export-fmf | drafts_export_fmf |
 | drafts_import_fmf | POST /api/drafts/import-fmf | drafts import-fmf | drafts_import_fmf |
+| drafts_import_fmf_file | POST /api/drafts/import-fmf-file | drafts import-fmf-file | 无 |
 | drafts_apply_roster | POST /api/drafts/{draft_id}/apply-roster | drafts apply-roster | drafts_apply_roster |
 | drafts_undo_roster | POST /api/drafts/{draft_id}/undo-roster | drafts undo-roster | drafts_undo_roster |
 | jobs_list | GET /api/jobs | jobs list | jobs_list |
@@ -303,12 +304,12 @@ retriable 默认在状态码不小于 500 或等于 409 时为 true。证据 fm2
 | results_compare | POST /api/results/compare | results compare | results_compare |
 | system_resources | GET /api/system/resources | system resources | 无 |
 
-证据 fm27lab/registry.py:96-101、fm27lab/registry.py:104-421。共 51 项能力，其中 jobs_summary 与 system_resources 没有 MCP 工具。
+证据 fm27lab/registry.py:96-101、fm27lab/registry.py:105-427。共 52 项能力，其中 jobs_summary、system_resources 与 drafts_import_fmf_file 没有 MCP 工具。
 
 ### 4.7 文档端点
 
 - GET /api/docs 返回 Swagger UI，GET /api/openapi.json 返回 OpenAPI 文档；二者无 token 依赖，仅供本机调试。证据 fm27lab/interfaces/http/app.py:107-113。
-- 契约核对以 openapi.json 为准：当前 39 条路径、55 个操作、63 个组件模型。
+- 契约核对以 openapi.json 为准：当前 40 条路径、56 个操作、64 个组件模型。
 
 ## 5. 数据模型
 
@@ -451,7 +452,7 @@ retriable 默认在状态码不小于 500 或等于 409 时为 true。证据 fm2
 | serve | 启动 sidecar |
 | mcp | 以 stdio 启动 MCP 服务 |
 | pools | list、get、create、delete |
-| drafts | list、get、create、update、delete、attributes、export-fmf、import-fmf、apply-roster、undo-roster |
+| drafts | list、get、create、update、delete、attributes、export-fmf、import-fmf、import-fmf-file、apply-roster、undo-roster |
 | jobs | list、get、create、update、cancel、delete、runs、summary、batch-action、batch-delete、export、pool-summary |
 | saves | list、get、create、update、delete、import、import-file、squad |
 | artifacts | list、get、content、create、delete |
@@ -586,6 +587,7 @@ python -m fm27lab --data-dir /absolute/path/data jobs runs <job_id> --limit 50
 
 - 导出：drafts export-fmf，下载文件名为草案名加 .fmf 后缀。
 - 导入：drafts import-fmf，name 长度 1 到 80，内容为 base64，解码后不超过 4 MiB。证据 fm27lab/interfaces/http/routes/fmf.py:19-20。
+- 路径导入：drafts import-fmf-file，按本地路径读取 FMF；source_path 长度 1 到 4096，name 可选 1 到 80，文件不超过 4 MiB，source 记录 kind 与路径。证据 fm27lab/interfaces/http/routes/fmf.py:37-47、79-93、168-178。
 
 ## 10. 安全与隐私
 

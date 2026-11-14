@@ -123,7 +123,7 @@ sidecar 绑定端口后写入 data_dir/agent/endpoint.json（fm27lab/config.py:9
 | 命令组 | 子命令与主要选项 |
 | --- | --- |
 | pools | list --limit --offset；get ENTRY_ID；create --name --tactic --weight --roster --id；delete ENTRY_ID |
-| drafts | list --limit --offset；get；create --name --scenario --source；update --name/--scenario/--source；delete；attributes --side --scope --operation --params --player-index；export-fmf --output；import-fmf --name --file --source；apply-roster --save-id --club-uid --side --scope；undo-roster |
+| drafts | list --limit --offset；get；create --name --scenario --source；update --name/--scenario/--source；delete；attributes --side --scope --operation --params --player-index；export-fmf --output；import-fmf --name --file --source；import-fmf-file FILE --name；apply-roster --save-id --club-uid --side --scope；undo-roster |
 | jobs | list --status --limit --offset；get；create --kind --name --config --workers --total；update --status/--completed/--summary/--name；cancel；delete；runs --limit --offset；summary --side；batch-action --action --ids；batch-delete --ids；export --output；pool-summary |
 | saves | list --status --limit --offset；get；create --source-path --source-sha256 --status --stage --metadata；update；delete；import SAVE_ID --leagues --clubs --stage；import-file --source-path --replace；squad SAVE_ID --club-uid |
 | artifacts | list --kind --job-id --limit --offset；get；content --output；create --kind --filename --file --job-id；delete |
