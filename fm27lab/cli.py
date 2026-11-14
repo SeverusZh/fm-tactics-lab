@@ -68,6 +68,7 @@ def serve(
     ctx: typer.Context,
     data_dir: Path | None = typer.Option(None, "--data-dir", help="Data directory"),
     engine_root: Path | None = typer.Option(None, "--engine-root", help="Engine workspace"),
+    game_root: Path | None = typer.Option(None, "--game-root", help="Game installation directory"),
     host: str | None = typer.Option(None, "--host", help="Loopback host"),
     port: int | None = typer.Option(None, "--port", help="Port; 0 selects a free port"),
     token: str | None = typer.Option(None, "--token", help="Bearer token; generated when omitted"),
@@ -78,13 +79,17 @@ def serve(
     root_data_dir = ctx.obj.get("data_dir") if isinstance(ctx.obj, dict) else None
     settings = Settings.create(
         data_dir=data_dir or root_data_dir or base.data_dir,
-        engine_root=engine_root or base.engine_root,
         token=token or base.token,
         host=base.host if host is None else host,
         port=base.port if port is None else port,
         dev=base.dev if dev is None else dev,
     )
-    raise typer.Exit(run(settings))
+    explicit: dict[str, Path] = {}
+    if engine_root is not None:
+        explicit["engine_root"] = engine_root
+    if game_root is not None:
+        explicit["game_root"] = game_root
+    raise typer.Exit(run(settings) if not explicit else run(settings, **explicit))
 
 
 @app.command()

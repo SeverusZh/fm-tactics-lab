@@ -179,6 +179,12 @@ def _internal_value(value: float) -> int:
     return max(1, min(100, _round_half_up(value * 5)))
 
 
+def _position_value(value: Any) -> int:
+    if type(value) is not int or not 0 <= value <= 20:
+        raise ValueError("位置熟练度必须是 0–20 的整数")
+    return value
+
+
 def _personality_value(value: float) -> int:
     return max(1, min(20, _round_half_up(value)))
 
@@ -263,12 +269,42 @@ def apply_position_attributes(
 ) -> dict[str, Any]:
     """Set one position familiarity index for every player in the roster."""
     index = _position_index(position)
-    if type(value) is not int or not 0 <= value <= 20:
-        raise ValueError("位置熟练度必须是 0–20 的整数")
+    number = _position_value(value)
     states = _player_states(players, require_uid=True)
     snapshot = _snapshot([index], False, states)
     for state in states:
-        state.attributes[index] = value
+        state.attributes[index] = number
+    return snapshot
+
+
+def apply_attribute_cells(
+    players: Sequence[MutableMapping[str, Any]],
+    *,
+    values: Mapping[int, float],
+) -> dict[str, Any]:
+    """Set exact attribute cells from a mapping of index to display value.
+
+    Position familiarity indices take the 0–20 integer that the position
+    operation uses; every other index takes the 1–20 display value of bulk
+    edits and is stored on the internal 5–100 scale.
+    """
+    if isinstance(values, (str, bytes, bytearray)) or not isinstance(values, Mapping):
+        raise ValueError("属性值必须是索引到显示值的对象")
+    if not values:
+        raise ValueError("至少需要一个属性值")
+    converted: dict[int, int] = {}
+    for index, value in values.items():
+        target = _index(index)
+        if target < POSITION_ATTRIBUTE_COUNT:
+            converted[target] = _position_value(value)
+        else:
+            converted[target] = _internal_value(_display_value(value))
+    indices = sorted(converted)
+    states = _player_states(players, require_uid=True)
+    snapshot = _snapshot(indices, False, states)
+    for state in states:
+        for index in indices:
+            state.attributes[index] = converted[index]
     return snapshot
 
 

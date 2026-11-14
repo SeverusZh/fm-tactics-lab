@@ -59,6 +59,21 @@ def test_repr_does_not_leak_token(tmp_path: Path):
     assert "topsecret" not in str(settings)
 
 
+def test_settings_create_resolves_game_root(tmp_path: Path):
+    settings = Settings.create(data_dir=tmp_path, token="a" * 64, game_root=tmp_path / "game")
+    assert settings.game_root == tmp_path / "game"
+
+
+def test_settings_from_environment_reads_game_root(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("FM27LAB_DATA", str(tmp_path))
+    monkeypatch.setenv("FM27LAB_TOKEN", "b" * 64)
+    monkeypatch.setenv("FM27_GAME_ROOT", str(tmp_path / "game"))
+    settings = Settings.from_env()
+    assert settings.game_root == tmp_path / "game"
+    empty = Settings.from_env({"FM27LAB_DATA": str(tmp_path), "FM27LAB_TOKEN": "b" * 64, "FM27_GAME_ROOT": ""})
+    assert empty.game_root is None
+
+
 def test_empty_environment_data_dir_is_rejected():
     import pytest
 

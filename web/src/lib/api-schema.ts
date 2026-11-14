@@ -140,6 +140,51 @@ export interface DraftUpdateInput {
   source?: { [key: string]: unknown } | null;
 }
 
+export interface EngineAvailabilityOutput {
+  available: boolean;
+  missing: string[];
+}
+
+export interface EngineDiagnosisOutput {
+  compatible: boolean;
+  trial_allowed: boolean;
+  reason: string | null;
+  adapter_version?: string | null;
+  image_sha256: string | null;
+}
+
+export interface EngineImportCopiedOutput {
+  path: string;
+  bytes: number;
+}
+
+export interface EngineImportInput {
+  source_path: string;
+}
+
+export interface EngineImportOutput {
+  target_root: string;
+  available: boolean;
+  missing: string[];
+  matched: boolean;
+  adapter_version: string | null;
+  catalog_path: string | null;
+  copied: EngineImportCopiedOutput[];
+  total_bytes: number;
+}
+
+export interface EngineSelectInput {
+  engine_root?: string | null;
+  game_root?: string | null;
+}
+
+export interface EngineStatusOutput {
+  engine_root: string | null;
+  game_root: string | null;
+  engine: EngineAvailabilityOutput;
+  game: EngineAvailabilityOutput;
+}
+
 export interface ErrorBody {
   code: string;
   message: string;
@@ -413,6 +458,29 @@ export interface SaveOutput {
   updated_at: string;
 }
 
+export interface SaveTacticImportInput {
+  name?: string | null;
+}
+
+export interface SaveTacticImportOutput {
+  draft: DraftOutput;
+}
+
+export interface SaveTacticListOutput {
+  items: SaveTacticOutput[];
+}
+
+export interface SaveTacticOutput {
+  index: number;
+  name: string;
+  style: string;
+  mentality: number | null;
+  club_uid: number | null;
+  club_name: string | null;
+  team_slot: number | null;
+  importable: boolean;
+}
+
 export interface SaveUpdateInput {
   status?: string | null;
   stage?: string | null;
@@ -449,6 +517,10 @@ export interface SystemResourcesOutput {
   available_memory_bytes: number;
   free_disk_bytes: number;
   recommended_workers: number;
+}
+
+export interface TacticsTemplateOutput {
+  scenario: { [key: string]: unknown };
 }
 
 export interface ValidationError {

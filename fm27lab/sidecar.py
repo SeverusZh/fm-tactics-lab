@@ -5,6 +5,7 @@ import json
 import os
 import socket
 import subprocess
+from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 
@@ -12,6 +13,8 @@ import uvicorn
 
 import fm27lab
 from fm27lab.adapters.storage_sqlite.db import Database
+from fm27lab.adapters.storage_sqlite.repositories import SettingsRepository
+from fm27lab.application.engine_config import EngineConfigService
 from fm27lab.config import Settings
 from fm27lab.interfaces.http.app import create_app
 
@@ -68,10 +71,32 @@ def clear_endpoint(settings: Settings) -> None:
         pass
 
 
-def run(settings: Settings) -> int:
+def resolve_settings(
+    settings: Settings,
+    database: Database,
+    *,
+    engine_root: str | Path | None = None,
+    game_root: str | Path | None = None,
+) -> Settings:
+    service = EngineConfigService(
+        SettingsRepository(database),
+        settings.data_dir,
+        environment=os.environ,
+    )
+    resolved = service.resolve(engine_root=engine_root, game_root=game_root)
+    return replace(settings, engine_root=resolved.engine_root, game_root=resolved.game_root)
+
+
+def run(
+    settings: Settings,
+    *,
+    engine_root: str | Path | None = None,
+    game_root: str | Path | None = None,
+) -> int:
     settings.ensure_dirs()
     database = Database(settings.database_path)
     database.initialize()
+    settings = resolve_settings(settings, database, engine_root=engine_root, game_root=game_root)
     server_state: dict[str, uvicorn.Server | None] = {"server": None}
 
     def shutdown() -> None:

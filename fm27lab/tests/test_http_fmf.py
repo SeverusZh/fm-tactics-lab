@@ -3,14 +3,28 @@
 from __future__ import annotations
 
 import base64
+import dataclasses
 import hashlib
 import json
+import sys
 from pathlib import Path
+from string import Template
 from urllib.parse import unquote
 
+import pytest
 from fastapi.testclient import TestClient
 
+from fm27lab.adapters.engine_native import scenario_codec
+from fm27lab.adapters.engine_native.scenario_assets import load_scenario_assets
 from fm27lab.adapters.fmf import FmfCodec
+from fm27lab.adapters.fmf.archive import ARCHIVE_HEADER, read_tactics_archive
+from fm27lab.adapters.storage_sqlite.db import Database
+from fm27lab.application.tactic_export import (
+    EXPORT_FAILED_ERROR,
+    ROUND_TRIP_ERROR,
+    UNCONFIGURED_ERROR,
+)
+from fm27lab.config import Settings
 from fm27lab.domain.scenario import normalize_scenario
 from fm27lab.interfaces.http.app import create_app
 from fm27lab.interfaces.http.routes.fmf import (
@@ -21,6 +35,15 @@ from fm27lab.interfaces.http.routes.fmf import (
 from fm27lab.ports.fmf import FMF_LENGTH_BYTES, FMF_MAGIC
 from fm27lab.tests.test_http_drafts import auth, scenario
 from fm27lab.tests.test_http_health import make_app
+from fm27lab.tests.test_scenario_assets import write_engine_root
+from fm27lab.tests.test_tactic_export import encode_plan, faithful_plan, plan_document
+from fm27lab.tests.test_tactic_file import install_native_host, write_spec
+from fm27lab.tests.test_tactic_import import (
+    DUTY_BIT,
+    fixture_duty_phases,
+    native_plan_events,
+    plan_from_defaults,
+)
 
 ERROR_FIELDS = {"code", "message", "details", "retriable", "retry_after_seconds"}
 
@@ -86,24 +109,19 @@ def test_fmf_http_requires_bearer_token(tmp_path: Path):
     assert client.post(IMPORT_PATH, json=body, headers={"Authorization": "Bearer wrong"}).status_code == 401
 
 
-def test_fmf_http_export_returns_attachment_with_sha256_etag(tmp_path: Path):
+def test_fmf_http_export_requires_engine_configuration(tmp_path: Path):
     app, settings, _, _ = make_app(tmp_path)
     client = TestClient(app)
     headers = auth(settings)
     draft = create_draft(client, headers, name="Home Plan")
     response = export(client, headers, draft["id"])
-    assert response.status_code == 200, response.text
-    assert response.headers["content-type"] == "application/octet-stream"
-    disposition = response.headers["content-disposition"]
-    assert disposition.startswith("attachment;")
-    assert 'filename="Home Plan.fmf"' in disposition
-    payload = response.content
-    assert payload[: len(FMF_MAGIC)] == FMF_MAGIC
-    assert response.headers["etag"] == f'"{hashlib.sha256(payload).hexdigest()}"'
-    assert FmfCodec().decode(payload) == draft["scenario"]
-    repeated = export(client, headers, draft["id"])
-    assert repeated.content == payload
-    assert repeated.headers["etag"] == response.headers["etag"]
+    assert response.status_code == 503, response.text
+    error = error_of(response)
+    assert error["code"] == "engine_unavailable"
+    assert error["message"] == UNCONFIGURED_ERROR
+    assert error["retriable"] is True
+    assert "content-disposition" not in response.headers
+    assert "x-fmf-format" not in response.headers
 
 
 def test_fmf_http_export_missing_draft_is_not_found(tmp_path: Path):
@@ -119,7 +137,7 @@ def test_fmf_http_import_round_trip_creates_draft(tmp_path: Path):
     client = TestClient(app)
     headers = auth(settings)
     source_draft = create_draft(client, headers, name="Home Plan")
-    payload = export(client, headers, source_draft["id"]).content
+    payload = FmfCodec().encode(source_draft["scenario"])
     response = import_fmf(client, headers, payload, name="Imported Plan", source={"kind": "fmf"})
     assert response.status_code == 201, response.text
     imported = response.json()
@@ -129,7 +147,7 @@ def test_fmf_http_import_round_trip_creates_draft(tmp_path: Path):
     listed = client.get("/api/drafts", headers=headers).json()
     assert {item["id"] for item in listed["items"]} == {source_draft["id"], imported["id"]}
     assert listed["total"] == 2
-    assert export(client, headers, imported["id"]).content == payload
+    assert FmfCodec().decode(payload) == imported["scenario"]
 
 
 def test_fmf_http_export_preserves_scenario_and_import_normalizes(tmp_path: Path):
@@ -137,7 +155,7 @@ def test_fmf_http_export_preserves_scenario_and_import_normalizes(tmp_path: Path
     client = TestClient(app)
     headers = auth(settings)
     source_draft = create_draft(client, headers, count=26)
-    payload = export(client, headers, source_draft["id"]).content
+    payload = FmfCodec().encode(source_draft["scenario"])
     assert FmfCodec().decode(payload) == source_draft["scenario"]
     imported = import_fmf(client, headers, payload).json()
     assert imported["scenario"] == normalize_scenario(source_draft["scenario"])
@@ -217,8 +235,9 @@ def test_fmf_http_import_body_validation(tmp_path: Path):
 
 
 def test_fmf_http_export_escapes_attachment_filename(tmp_path: Path):
-    app, settings, _, _ = make_app(tmp_path)
-    client = TestClient(app)
+    engine = write_engine_root(tmp_path)
+    plan = faithful_plan(load_scenario_assets(engine))
+    client, settings, _ = make_export_app(tmp_path, plan, engine=engine)
     headers = auth(settings)
     non_ascii = create_draft(client, headers, name="主场 计划")
     disposition = export(client, headers, non_ascii["id"]).headers["content-disposition"]
@@ -238,7 +257,7 @@ def test_fmf_http_openapi_contract(tmp_path: Path):
     export_operation = document["paths"][EXPORT_PATH]["get"]
     assert "422" not in export_operation["responses"]
     assert export_operation["security"] == [{"HTTPBearer": []}]
-    for status in ("400", "401", "404"):
+    for status in ("400", "401", "404", "503"):
         schema = export_operation["responses"][status]["content"]["application/json"]["schema"]
         assert schema["$ref"].endswith("ErrorEnvelope")
     assert "application/octet-stream" in export_operation["responses"]["200"]["content"]
@@ -336,7 +355,7 @@ def export_to_file(
 ) -> tuple[dict, Path]:
     draft = create_draft(client, headers, name=name)
     path = tmp_path / f"{name}.fmf"
-    path.write_bytes(export(client, headers, draft["id"]).content)
+    path.write_bytes(FmfCodec().encode(draft["scenario"]))
     return draft, path
 
 
@@ -363,7 +382,7 @@ def test_fmf_file_http_imports_exported_file_and_derives_name(tmp_path: Path):
     assert imported["name"] == "主场 战术"
     assert imported["scenario"] == source["scenario"]
     assert imported["source"] == {"kind": "fmf", "path": str(path)}
-    assert export(client, headers, imported["id"]).content == path.read_bytes()
+    assert FmfCodec().decode(path.read_bytes()) == imported["scenario"]
     assert client.get("/api/drafts", headers=headers).json()["total"] == 2
 
 
@@ -497,7 +516,7 @@ def test_fmf_file_http_openapi_contract(tmp_path: Path):
     operation = document["paths"][IMPORT_FILE_PATH]["post"]
     assert "422" not in operation["responses"]
     assert operation["security"] == [{"HTTPBearer": []}]
-    for status in ("400", "401"):
+    for status in ("400", "401", "503"):
         schema = operation["responses"][status]["content"]["application/json"]["schema"]
         assert schema["$ref"].endswith("ErrorEnvelope")
     created = operation["responses"]["201"]["content"]["application/json"]["schema"]
@@ -505,3 +524,378 @@ def test_fmf_file_http_openapi_contract(tmp_path: Path):
     model = document["components"]["schemas"]["FmfFileImportInput"]
     assert model["additionalProperties"] is False
     assert set(model["properties"]) == {"source_path", "name"}
+NATIVE_PAYLOAD_PREFIX = b"\x02\x01afe."
+
+
+def write_native_payload(tmp_path: Path, name: str = "本地战术.fmf") -> Path:
+    path = tmp_path / name
+    path.write_bytes(NATIVE_PAYLOAD_PREFIX + b"\x00" * 64)
+    return path
+
+
+def build_game_root(path: Path) -> Path:
+    plugins = path / "fm_Data" / "Plugins" / "x86_64"
+    plugins.mkdir(parents=True)
+    (plugins / "game_plugin.dll").write_bytes(b"")
+    return path
+
+
+EXPORT_HOST_TEMPLATE = Template(
+    '''
+import json
+import os
+import sys
+from pathlib import Path
+
+PLAN = json.loads(r"""$plan_json""")
+PLAN_BYTES = bytes.fromhex("$plan_hex")
+TITLE = $title_json
+EXIT_CODE = $exit_code
+OUTPUT = Path(sys.argv[sys.argv.index("--output") + 1])
+events = []
+export_path = os.environ.get("FM27_EXPORT_TAC")
+if export_path:
+    Path(export_path).write_bytes(PLAN_BYTES)
+    events.append(
+        {
+            "event": "native_tactic_file_written",
+            "accepted": True,
+            "stream_error": 0,
+            "size": len(PLAN_BYTES),
+            "side": 0,
+        }
+    )
+else:
+    payload = Path(os.environ["FM27_IMPORT_FMF"]).read_bytes()
+    if not payload.startswith(bytes.fromhex("$archive_header")):
+        raise SystemExit(172)
+    events.append(
+        {
+            "event": "native_fmf_decoded",
+            "accepted": True,
+            "bytes": 8,
+            "name_utf8_hex": TITLE.encode("utf-8").hex(),
+            "setpiece_type": -1,
+            "stream_revision": 60,
+        }
+    )
+    events.append(
+        {
+            "event": "native_tactic_file_parsed",
+            "accepted": True,
+            "stream_error": 0,
+            "consumed": 8,
+            "size": 8,
+            "mentality": PLAN["mentality"],
+            "team_bits": "$team_bits_hex",
+            "mapping": PLAN["mapping"],
+            "phases": [
+                [
+                    {
+                        "position": cell["position"],
+                        "role_flags": str(cell["role_flags"]),
+                        "pi_flags": str(cell["pi_flags"]),
+                        "target_player": cell["target_player"],
+                        "target_position": cell["target_position"],
+                    }
+                    for cell in phase
+                ]
+                for phase in PLAN["phases"]
+            ],
+        }
+    )
+OUTPUT.write_text("\\n".join(json.dumps(event) for event in events), encoding="utf-8")
+raise SystemExit(EXIT_CODE)
+'''
+)
+
+
+def install_export_host(engine: Path, plan, *, exit_code: int = 0) -> None:
+    source = EXPORT_HOST_TEMPLATE.substitute(
+        plan_json=json.dumps(plan_document(plan)),
+        plan_hex=encode_plan(plan).hex(),
+        title_json=json.dumps(plan.name),
+        team_bits_hex=plan.team_bits.to_bytes(16, "little").hex(),
+        exit_code=exit_code,
+        archive_header=ARCHIVE_HEADER.hex(),
+    )
+    host = engine / "fm27_native" / "FM27Simulator.exe"
+    host.write_text("#!" + sys.executable + "\n" + source, encoding="utf-8")
+    host.chmod(0o755)
+
+
+def make_export_app(
+    tmp_path: Path,
+    plan,
+    *,
+    host: bool = True,
+    exit_code: int = 0,
+    engine: Path | None = None,
+) -> tuple[TestClient, Settings, Path]:
+    engine_root = engine if engine is not None else write_engine_root(tmp_path)
+    if host:
+        install_export_host(engine_root, plan, exit_code=exit_code)
+    game_root = build_game_root(tmp_path / "game")
+    settings = Settings.create(
+        data_dir=tmp_path / "data",
+        token="c" * 64,
+        engine_root=engine_root,
+        game_root=game_root,
+        dev=True,
+    )
+    settings.ensure_dirs()
+    database = Database(settings.database_path)
+    database.initialize()
+    return TestClient(create_app(settings, database)), settings, engine_root
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows 无法直接执行脚本型宿主")
+def test_fmf_http_export_returns_native_fmf_v8(tmp_path: Path):
+    engine = write_engine_root(tmp_path)
+    plan = faithful_plan(load_scenario_assets(engine))
+    client, settings, _ = make_export_app(tmp_path, plan, engine=engine)
+    headers = auth(settings)
+    draft = create_draft(client, headers, name="Home Plan")
+    response = export(client, headers, draft["id"])
+    assert response.status_code == 200, response.text
+    assert response.headers["content-type"] == "application/octet-stream"
+    assert response.headers["x-fmf-format"] == "fmfv8"
+    disposition = response.headers["content-disposition"]
+    assert disposition.startswith("attachment;")
+    assert 'filename="Home Plan.fmf"' in disposition
+    payload = response.content
+    assert payload.startswith(ARCHIVE_HEADER)
+    archive = read_tactics_archive(payload)
+    assert archive.title == "Home Plan"
+    assert archive.plan == encode_plan(plan)
+    assert response.headers["etag"] == f'"{hashlib.sha256(payload).hexdigest()}"'
+    repeated = export(client, headers, draft["id"])
+    assert repeated.status_code == 200, repeated.text
+    assert repeated.headers["x-fmf-format"] == "fmfv8"
+    assert read_tactics_archive(repeated.content).plan == encode_plan(plan)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows 无法直接执行脚本型宿主")
+def test_fmf_http_export_reports_serialization_failure(tmp_path: Path):
+    engine = write_engine_root(tmp_path)
+    plan = faithful_plan(load_scenario_assets(engine))
+    client, settings, _ = make_export_app(tmp_path, plan, exit_code=171, engine=engine)
+    headers = auth(settings)
+    draft = create_draft(client, headers)
+    response = export(client, headers, draft["id"])
+    assert response.status_code == 400, response.text
+    error = error_of(response)
+    assert error["code"] == "validation_failed"
+    assert error["message"] == EXPORT_FAILED_ERROR
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows 无法直接执行脚本型宿主")
+def test_fmf_http_export_reports_round_trip_mismatch(tmp_path: Path):
+    engine = write_engine_root(tmp_path)
+    plan = dataclasses.replace(faithful_plan(load_scenario_assets(engine)), mentality=5)
+    client, settings, _ = make_export_app(tmp_path, plan, engine=engine)
+    headers = auth(settings)
+    draft = create_draft(client, headers)
+    response = export(client, headers, draft["id"])
+    assert response.status_code == 400, response.text
+    error = error_of(response)
+    assert error["code"] == "validation_failed"
+    assert error["message"] == ROUND_TRIP_ERROR
+
+
+def test_fmf_http_export_reports_incomplete_engine(tmp_path: Path):
+    engine = write_engine_root(tmp_path)
+    plan = faithful_plan(load_scenario_assets(engine))
+    client, settings, _ = make_export_app(tmp_path, plan, host=False, engine=engine)
+    headers = auth(settings)
+    draft = create_draft(client, headers)
+    response = export(client, headers, draft["id"])
+    assert response.status_code == 503, response.text
+    error = error_of(response)
+    assert error["code"] == "engine_unavailable"
+    assert error["message"].startswith("引擎资源不完整")
+    assert "fm27_native/FM27Simulator.exe" in error["message"]
+    assert error["retriable"] is True
+
+
+def test_fmf_http_export_reports_missing_editor_snapshot_as_engine_unavailable(tmp_path: Path):
+    engine = write_engine_root(tmp_path)
+    plan = faithful_plan(load_scenario_assets(engine))
+    client, settings, _ = make_export_app(tmp_path, plan, engine=engine)
+    (engine / "fm27_native" / "editor_advanced_snapshot.json").unlink()
+    headers = auth(settings)
+    draft = create_draft(client, headers)
+    response = export(client, headers, draft["id"])
+    assert response.status_code == 503, response.text
+    error = error_of(response)
+    assert error["code"] == "engine_unavailable"
+    assert error["message"].startswith("引擎资源不完整")
+    assert "fm27_native/editor_advanced_snapshot.json" in error["message"]
+    assert error["retriable"] is True
+
+
+def make_native_app(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    events: list[dict],
+    *,
+    exit_code: int = 0,
+    engine: Path | None = None,
+    host: bool = True,
+) -> tuple[TestClient, Settings, Path]:
+    engine_root = engine if engine is not None else write_engine_root(tmp_path)
+    if host:
+        install_native_host(engine_root)
+    game_root = build_game_root(tmp_path / "game")
+    write_spec(monkeypatch, tmp_path, events, exit_code=exit_code)
+    settings = Settings.create(
+        data_dir=tmp_path / "data",
+        token="c" * 64,
+        engine_root=engine_root,
+        game_root=game_root,
+        dev=True,
+    )
+    settings.ensure_dirs()
+    database = Database(settings.database_path)
+    database.initialize()
+    return TestClient(create_app(settings, database)), settings, engine_root
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows 无法直接执行脚本型宿主")
+def test_fmf_file_http_imports_native_archive(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    engine = write_engine_root(tmp_path)
+    assets = load_scenario_assets(engine)
+    plan = plan_from_defaults(assets)
+    client, settings, _ = make_native_app(tmp_path, monkeypatch, native_plan_events(plan), engine=engine)
+    headers = auth(settings)
+    path = write_native_payload(tmp_path)
+    response = import_fmf_file(client, headers, str(path))
+    assert response.status_code == 201, response.text
+    imported = response.json()
+    assert imported["name"] == plan.name
+    assert imported["source"] == {"kind": "fmf", "path": str(path)}
+    body = imported["scenario"]
+    base = scenario_codec.defaults(assets)["teams"][0]
+    assert body["schema"] == scenario_codec.SCHEMA
+    home = body["teams"][0]
+    assert home["tactic_name"] == plan.name
+    assert home["mentality"] == base["mentality"]
+    assert home["instructions"] == base["instructions"]
+    assert home["phases"] == fixture_duty_phases(base["phases"])
+    assert {cell["duty"] for phase in home["phases"] for cell in phase} == {str(DUTY_BIT)}
+    assert client.get("/api/drafts", headers=headers).json()["total"] == 1
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows 无法直接执行脚本型宿主")
+def test_fmf_file_http_native_import_prefers_explicit_name(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    engine = write_engine_root(tmp_path)
+    assets = load_scenario_assets(engine)
+    plan = plan_from_defaults(assets)
+    client, settings, _ = make_native_app(tmp_path, monkeypatch, native_plan_events(plan), engine=engine)
+    headers = auth(settings)
+    path = write_native_payload(tmp_path)
+    response = import_fmf_file(client, headers, str(path), name="后端名称")
+    assert response.status_code == 201, response.text
+    imported = response.json()
+    assert imported["name"] == "后端名称"
+    assert imported["scenario"]["teams"][0]["tactic_name"] == plan.name
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows 无法直接执行脚本型宿主")
+def test_fmf_file_http_native_import_falls_back_to_stem(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    engine = write_engine_root(tmp_path)
+    assets = load_scenario_assets(engine)
+    plan = plan_from_defaults(assets)
+    events = native_plan_events(plan, name_hex="zz")
+    client, settings, _ = make_native_app(tmp_path, monkeypatch, events, engine=engine)
+    headers = auth(settings)
+    path = write_native_payload(tmp_path)
+    response = import_fmf_file(client, headers, str(path))
+    assert response.status_code == 201, response.text
+    imported = response.json()
+    assert imported["name"] == path.stem
+    assert imported["scenario"]["teams"][0]["tactic_name"] == path.stem
+
+
+def test_fmf_file_http_native_import_requires_engine_configuration(tmp_path: Path):
+    app, settings, _, _ = make_app(tmp_path)
+    client = TestClient(app)
+    headers = auth(settings)
+    path = write_native_payload(tmp_path)
+    response = import_fmf_file(client, headers, str(path))
+    assert response.status_code == 503
+    error = error_of(response)
+    assert error["code"] == "engine_unavailable"
+    assert error["message"] == "未配置游戏与引擎目录，无法解析 FM 战术文件"
+    assert error["retriable"] is True
+    assert client.get("/api/drafts", headers=headers).json()["total"] == 0
+
+
+def test_fmf_file_http_native_import_reports_missing_host(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    client, settings, engine = make_native_app(tmp_path, monkeypatch, [], host=False)
+    path = write_native_payload(tmp_path)
+    response = import_fmf_file(client, auth(settings), str(path))
+    assert response.status_code == 400
+    expected = engine / "fm27_native" / "FM27Simulator.exe"
+    assert error_of(response)["message"] == f"原生宿主程序不存在：{expected}"
+
+
+def test_fmf_file_http_native_import_reports_non_tactic_archive(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    client, settings, _ = make_native_app(tmp_path, monkeypatch, [], exit_code=171)
+    path = write_native_payload(tmp_path)
+    response = import_fmf_file(client, auth(settings), str(path))
+    assert response.status_code == 400
+    assert error_of(response)["message"] == "文件不是 FM 战术归档"
+
+
+def test_fmf_file_http_native_import_reports_parse_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    events = [
+        {
+            "event": "native_fmf_decoded",
+            "accepted": True,
+            "bytes": 64,
+            "name_utf8_hex": "主场战术".encode().hex(),
+            "setpiece_type": -1,
+            "stream_revision": 60,
+        },
+        {
+            "event": "native_tactic_file_parsed",
+            "accepted": False,
+            "stream_error": 0,
+            "consumed": 64,
+            "size": 64,
+        },
+    ]
+    client, settings, _ = make_native_app(tmp_path, monkeypatch, events, exit_code=173)
+    path = write_native_payload(tmp_path)
+    response = import_fmf_file(client, auth(settings), str(path))
+    assert response.status_code == 400
+    error = error_of(response)
+    assert error["code"] == "validation_failed"
+    assert error["message"] == "游戏引擎无法解析该战术文件：解析器未接受"
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows 无法直接执行脚本型宿主")
+def test_fmf_file_http_keeps_fmfv2_import_on_configured_app(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    engine = write_engine_root(tmp_path)
+    client, settings, _ = make_native_app(tmp_path, monkeypatch, [], engine=engine)
+    headers = auth(settings)
+    source, path = export_to_file(tmp_path, client, headers, name="旧格式")
+    response = import_fmf_file(client, headers, str(path))
+    assert response.status_code == 201, response.text
+    imported = response.json()
+    assert imported["name"] == "旧格式"
+    assert imported["scenario"] == source["scenario"]
+    assert client.get("/api/drafts", headers=headers).json()["total"] == 2

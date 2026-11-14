@@ -93,6 +93,12 @@ def register(app: FastAPI) -> None:
             app.state.shutdown()
         return {"status": "shutting_down"}
 
+    @app.post("/api/system/restart", status_code=202, responses={401: {"model": ErrorEnvelope}})
+    def restart_sidecar(_: None = Depends(require_token)):
+        if app.state.shutdown is not None:
+            app.state.shutdown()
+        return {"status": "restarting"}
+
     @app.get("/api/events")
     async def events(
         request: Request,

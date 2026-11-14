@@ -27,10 +27,12 @@ class LazyNativeEngine:
         root: Path,
         work_dir: Path,
         *,
+        game_root: Path | None = None,
         factory: Callable[..., NativeEngineHost] = NativeEngineHost,
     ) -> None:
         self._root = root
         self._work_dir = work_dir
+        self._game_root = game_root
         self._factory = factory
         self._workers = DEFAULT_WORKERS
         self._host: NativeEngineHost | None = None
@@ -66,6 +68,9 @@ class LazyNativeEngine:
             with self._lock:
                 host = self._host
                 if host is None:
-                    host = self._factory(self._root, self._work_dir, workers=self._workers)
+                    options: dict[str, object] = {"workers": self._workers}
+                    if self._game_root is not None:
+                        options["game_root"] = self._game_root
+                    host = self._factory(self._root, self._work_dir, **options)
                     self._host = host
         return host

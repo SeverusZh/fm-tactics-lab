@@ -125,7 +125,7 @@ def create_app(
         validator=tactics_validator,
     )
     app.state.draft_attributes = draft_attribute_service or DraftAttributeService(app.state.drafts)
-    app.state.fmf_service = fmf_service or FmfService(FmfCodec(), app.state.drafts)
+    app.state.fmf_service = fmf_service or FmfService(FmfCodec(), app.state.drafts, settings)
     app.state.jobs = job_service or JobService(JobRepository(database), publisher=app.state.events)
     if experiment_service is not None:
         app.state.experiments = experiment_service
@@ -141,6 +141,7 @@ def create_app(
             resolved_engine = LazyNativeEngine(
                 settings.engine_root,
                 settings.data_dir / "agent" / "engine",
+                game_root=settings.game_root,
             )
         else:
             resolved_engine = MissingEngine()

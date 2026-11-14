@@ -57,7 +57,7 @@ ENV_PREFIXES = (
     "FM27_SAVED_CORE_",
     "FM27_AI_",
 )
-ENV_EXCLUDED = frozenset({"FM27_DESKTOP_STATS_AUDIT", "FM27_SKIP_EVENT_DETAILS"})
+ENV_EXCLUDED = frozenset({"FM27_DESKTOP_STATS_AUDIT", "FM27_GAME_ROOT", "FM27_SKIP_EVENT_DETAILS"})
 UNSAFE_VARIANT_CHARACTERS = ("/", "\\", ":", "*", "?", '"', "<", ">", "|")
 
 
@@ -260,9 +260,11 @@ class NativeEngineHost:
         retries: int = 1,
         cleanup_seconds: float = CLEANUP_SECONDS,
         workers: int = 1,
+        game_root: Path | None = None,
     ) -> None:
         self._root = Path(root)
         self._work_dir = Path(work_dir)
+        self._game_root = Path(game_root) if game_root is not None else None
         self._executable = (
             Path(executable) if executable is not None else self._root / "fm27_native" / "FM27Simulator.exe"
         )
@@ -407,6 +409,8 @@ class NativeEngineHost:
         for name in list(environment):
             if name in ENV_EXCLUDED or name.startswith(ENV_PREFIXES):
                 environment.pop(name, None)
+        if self._game_root is not None:
+            environment["FM27_GAME_ROOT"] = str(self._game_root)
         return environment
 
     def _run_chunk(

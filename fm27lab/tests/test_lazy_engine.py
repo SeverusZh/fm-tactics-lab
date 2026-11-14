@@ -24,10 +24,18 @@ CAPABILITIES = EngineCapabilities(
 
 
 class FakeHost:
-    def __init__(self, root: Path, work_dir: Path, *, workers: int = 1) -> None:
+    def __init__(
+        self,
+        root: Path,
+        work_dir: Path,
+        *,
+        workers: int = 1,
+        game_root: Path | None = None,
+    ) -> None:
         self.root = root
         self.work_dir = work_dir
         self.workers = workers
+        self.game_root = game_root
         self.configured: list[int] = []
         self.capabilities_calls = 0
         self.batches: list[list[dict[str, Any]]] = []
@@ -230,6 +238,38 @@ class FlakyFactory:
         host = FakeHost(*args, **kwargs)
         self.hosts.append(host)
         return host
+
+
+def test_configured_game_root_reaches_the_host_factory(tmp_path: Path):
+    factory = RecordingFactory()
+    game_root = tmp_path / "game"
+    engine = LazyNativeEngine(
+        tmp_path / "engine",
+        tmp_path / "work",
+        game_root=game_root,
+        factory=factory,
+    )
+    assert engine.capabilities() == CAPABILITIES
+    assert factory.calls[0][1] == {"workers": 1, "game_root": game_root}
+    assert factory.hosts[0].game_root == game_root
+
+
+def test_unset_game_root_leaves_the_factory_call_unchanged(tmp_path: Path):
+    factory = RecordingFactory()
+    engine = make_engine(tmp_path, factory)
+    assert engine.capabilities() == CAPABILITIES
+    assert factory.calls[0][1] == {"workers": 1}
+
+
+def test_lazy_engine_exposes_the_configured_game_root(tmp_path: Path):
+    game_root = tmp_path / "game"
+    engine = LazyNativeEngine(
+        tmp_path / "engine",
+        tmp_path / "work",
+        game_root=game_root,
+        factory=RecordingFactory(),
+    )
+    assert engine._game_root == game_root
 
 
 def test_factory_failure_is_not_cached_and_next_use_retries(tmp_path: Path):

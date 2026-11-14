@@ -975,6 +975,24 @@ def test_configure_workers_replaces_the_constructor_value(tmp_path):
     assert len(manifest_paths(tmp_path)) == 5
 
 
+def test_worker_environment_without_game_root_drops_inherited_value(tmp_path, monkeypatch):
+    monkeypatch.setenv("FM27_GAME_ROOT", str(tmp_path / "inherited"))
+    host = make_host(tmp_path)
+    assert "FM27_GAME_ROOT" not in host._worker_environment()
+
+
+def test_worker_environment_sets_configured_game_root(tmp_path, monkeypatch):
+    monkeypatch.setenv("FM27_GAME_ROOT", str(tmp_path / "inherited"))
+    root = tmp_path / "configured" / "engine"
+    root.mkdir(parents=True)
+    work = tmp_path / "configured" / "work"
+    work.mkdir(parents=True)
+    game_root = tmp_path / "game"
+    game_root.mkdir()
+    host = NativeEngineHost(root, work, executable=FAKE_SIMULATOR, game_root=game_root)
+    assert host._worker_environment()["FM27_GAME_ROOT"] == str(game_root)
+
+
 def test_configure_workers_does_not_reprobe_capabilities(tmp_path, monkeypatch):
     probe_log = tmp_path / "probe.log"
     monkeypatch.setenv("FAKE_SIMULATOR_PROBE_LOG", str(probe_log))

@@ -615,3 +615,196 @@ def test_persisted_draft_reload_matches_returned_summary(env):
     reloaded = DraftService(DraftRepository(database)).get(draft["id"])
     assert result["draft"] == {key: reloaded[key] for key in SUMMARY_KEYS}
     assert reloaded["source"]["attribute_snapshot"] == result["snapshot"]
+
+
+def test_cells_scope_player_updates_single_cell_and_undo_restores(env):
+    service, drafts, _ = env
+    draft = create(drafts)
+    original = drafts.get(draft["id"])
+    result = service.apply(
+        draft["id"],
+        side="home",
+        scope="player",
+        player_index=0,
+        operation="cells",
+        params={"values": {"7": 12, "68": 15}},
+    )
+    assert result["changed_players"] == 1
+    snapshot = result["snapshot"]
+    assert snapshot["scope"] == "player"
+    assert snapshot["operation"] == "cells"
+    assert snapshot["indices"] == [7, 68]
+    assert snapshot["include_personality"] is False
+    assert drafts.get(draft["id"])["source"]["attribute_snapshot"] == snapshot
+    home, away = teams(drafts.get(draft["id"]))
+    assert home[0]["attributes"][7] == 12
+    assert home[0]["attributes"][68] == 75
+    assert home[0]["attributes"][15] == 10
+    assert home[1]["attributes"][7] == 18
+    assert home[1]["attributes"][68] == 10
+    assert away == team("Away")["players"]
+    undone = service.apply(
+        draft["id"],
+        side="home",
+        scope="player",
+        player_index=0,
+        operation="undo",
+        params={},
+    )
+    assert undone["snapshot"] is None
+    assert undone["changed_players"] == 1
+    stored = drafts.get(draft["id"])
+    assert stored["scenario"] == original["scenario"]
+    assert stored["source"] == original["source"]
+
+
+def test_cells_scope_squad_updates_every_player_and_undo_restores(env):
+    service, drafts, _ = env
+    draft = create(drafts)
+    original = drafts.get(draft["id"])
+    result = service.apply(
+        draft["id"],
+        side="home",
+        scope="squad",
+        player_index=None,
+        operation="cells",
+        params={"values": {"14": 12, "68": 15}},
+    )
+    assert result["changed_players"] == 23
+    home, away = teams(drafts.get(draft["id"]))
+    for entry in home:
+        assert entry["attributes"][14] == 12
+        assert entry["attributes"][68] == 75
+    assert away == team("Away")["players"]
+    service.apply(
+        draft["id"],
+        side="home",
+        scope="squad",
+        player_index=None,
+        operation="undo",
+        params={},
+    )
+    stored = drafts.get(draft["id"])
+    assert stored["scenario"] == original["scenario"]
+    assert stored["source"] == original["source"]
+
+
+def test_cells_accepts_canonical_json_string_keys(env):
+    service, drafts, _ = env
+    draft = create(drafts)
+    result = service.apply(
+        draft["id"],
+        side="home",
+        scope="player",
+        player_index=3,
+        operation="cells",
+        params={"values": {"0": 9, "15": 13, "68": 20}},
+    )
+    assert result["snapshot"]["indices"] == [0, 15, 68]
+    assert result["changed_players"] == 1
+    home, _ = teams(drafts.get(draft["id"]))
+    assert home[3]["attributes"][0] == 9
+    assert home[3]["attributes"][15] == 65
+    assert home[3]["attributes"][68] == 100
+    assert home[3]["attributes"][16] == 10
+
+
+def test_cells_rejects_malformed_index_keys_and_keeps_draft_unchanged(env):
+    service, drafts, _ = env
+    draft = create(drafts)
+    before = drafts.get(draft["id"])
+    base: dict[str, Any] = {
+        "side": "home",
+        "scope": "player",
+        "player_index": 0,
+        "operation": "cells",
+    }
+    cases: list[tuple[dict[str, Any], str]] = [
+        ({"values": {"+68": 15}}, "十进制字符串"),
+        ({"values": {" 68": 15}}, "十进制字符串"),
+        ({"values": {"68 ": 15}}, "十进制字符串"),
+        ({"values": {"068": 15}}, "十进制字符串"),
+        ({"values": {"68.0": 15}}, "十进制字符串"),
+        ({"values": {"-1": 15}}, "十进制字符串"),
+        ({"values": {"ab": 15}}, "十进制字符串"),
+        ({"values": {"６８": 15}}, "十进制字符串"),
+        ({"values": {68: 15}}, "十进制字符串"),
+        ({"values": {"69": 15}}, "十进制字符串"),
+        ({"values": []}, "索引到显示值"),
+        ({"values": "68"}, "索引到显示值"),
+        ({"values": None}, "索引到显示值"),
+        ({"values": {}}, "至少需要一个属性值"),
+        ({}, "values"),
+        ({"values": {"0": 21}}, "位置熟练度"),
+        ({"values": {"68": 0}}, "属性显示值"),
+    ]
+    for params, message in cases:
+        with pytest.raises(ValueError, match=message):
+            service.apply(draft["id"], **{**base, "params": params})
+    assert drafts.get(draft["id"]) == before
+
+
+def test_cells_replaces_previous_snapshot_slot(env):
+    service, drafts, _ = env
+    draft = create(drafts)
+    service.apply(
+        draft["id"],
+        side="home",
+        scope="all",
+        player_index=None,
+        operation="bulk",
+        params={"value": 12},
+    )
+    home_after_bulk = copy.deepcopy(teams(drafts.get(draft["id"]))[0])
+    result = service.apply(
+        draft["id"],
+        side="home",
+        scope="player",
+        player_index=0,
+        operation="cells",
+        params={"values": {"68": 15}},
+    )
+    assert drafts.get(draft["id"])["source"]["attribute_snapshot"] == result["snapshot"]
+    home, _ = teams(drafts.get(draft["id"]))
+    assert home[0]["attributes"][68] == 75
+    assert home[0]["attributes"][15] == 60
+    undone = service.apply(
+        draft["id"],
+        side="home",
+        scope="player",
+        player_index=0,
+        operation="undo",
+        params={},
+    )
+    assert undone["changed_players"] == 1
+    stored = drafts.get(draft["id"])
+    assert teams(stored)[0] == home_after_bulk
+    assert "attribute_snapshot" not in stored["source"]
+
+
+def test_cells_noop_keeps_changed_players_zero_and_undo_restores(env):
+    service, drafts, _ = env
+    draft = create(drafts)
+    original = drafts.get(draft["id"])
+    result = service.apply(
+        draft["id"],
+        side="home",
+        scope="all",
+        player_index=None,
+        operation="cells",
+        params={"values": {"68": 2}},
+    )
+    assert result["changed_players"] == 0
+    assert result["snapshot"]["players"][0]["attributes"] == [10]
+    undone = service.apply(
+        draft["id"],
+        side="home",
+        scope="all",
+        player_index=None,
+        operation="undo",
+        params={},
+    )
+    assert undone["changed_players"] == 0
+    stored = drafts.get(draft["id"])
+    assert stored["scenario"] == original["scenario"]
+    assert stored["source"] == original["source"]

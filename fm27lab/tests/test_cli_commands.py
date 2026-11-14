@@ -16,6 +16,7 @@ from typer.testing import CliRunner
 
 import fm27lab
 import fm27lab.cli as cli
+from fm27lab.adapters.fmf import FmfCodec
 from fm27lab.client import SidecarError
 from fm27lab.tests.test_http_drafts import scenario as draft_scenario
 
@@ -2159,8 +2160,9 @@ def test_live_sidecar_round_trip_covers_new_commands(live_data_dir: Path):
 
     fmf_path = data_dir / "tactic.fmf"
     exported = invoke_live(data_dir, ["drafts", "export-fmf", draft["id"], "--output", str(fmf_path)])
-    assert exported.exit_code == 0, exported.output
-    assert json.loads(exported.stdout) == {"path": str(fmf_path), "bytes": fmf_path.stat().st_size}
+    assert exported.exit_code == 1
+    assert "engine_unavailable" in exported.output
+    fmf_path.write_bytes(FmfCodec().encode(draft_scenario()))
     imported = invoke_live(data_dir, ["drafts", "import-fmf", "--name", "导入", "--file", str(fmf_path)])
     assert imported.exit_code == 0, imported.output
     drafts_list = invoke_live(data_dir, ["drafts", "list"])

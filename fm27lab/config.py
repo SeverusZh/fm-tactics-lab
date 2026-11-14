@@ -29,6 +29,7 @@ class Settings:
     data_dir: Path
     token: str = field(repr=False)
     engine_root: Path | None = None
+    game_root: Path | None = None
     host: str = "127.0.0.1"
     port: int = 0
     dev: bool = False
@@ -49,6 +50,7 @@ class Settings:
         cls,
         data_dir: Path,
         engine_root: Path | None = None,
+        game_root: Path | None = None,
         token: str | None = None,
         host: str = "127.0.0.1",
         port: int = 0,
@@ -65,6 +67,7 @@ class Settings:
         return cls(
             data_dir=resolved,
             engine_root=Path(engine_root).expanduser().resolve() if engine_root is not None else None,
+            game_root=Path(game_root).expanduser().resolve() if game_root is not None else None,
             token=token or secrets.token_hex(32),
             host=host,
             port=port,
@@ -79,11 +82,13 @@ class Settings:
             raise ValueError("FM27LAB_DATA must not be empty")
         data_dir = Path(raw_data_dir) if raw_data_dir is not None else default_data_dir()
         engine_root = values.get("FM27_ENGINE_ROOT")
+        game_root = values.get("FM27_GAME_ROOT")
         token = values.get("FM27LAB_TOKEN") or None
         port = int(values.get("FM27LAB_PORT", "0"))
         return cls.create(
             data_dir=data_dir,
             engine_root=Path(engine_root) if engine_root else None,
+            game_root=Path(game_root) if game_root else None,
             token=token,
             host=values.get("FM27LAB_HOST", "127.0.0.1"),
             port=port,

@@ -164,9 +164,17 @@ def test_openapi_business_operations_match_registry(tmp_path: Path):
         assert item.http in operations, item.name
     declared_paths = {path for _method, path in operations}
     assert declared_paths - {path for _method, path in registered} == {
+        "/api/engine",
+        "/api/engine/diagnose",
+        "/api/engine/import",
+        "/api/engine/select",
         "/api/events",
         "/api/health",
         "/api/shutdown",
+        "/api/saves/{save_id}/tactics",
+        "/api/saves/{save_id}/tactics/{tactic_index}/import",
+        "/api/system/restart",
+        "/api/tactics/template",
         "/api/version",
     }
     business = {(method, path) for method, path in operations if path not in SYSTEM_PATHS}

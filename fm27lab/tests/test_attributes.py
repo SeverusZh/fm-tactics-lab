@@ -16,6 +16,7 @@ from fm27lab.domain.attributes import (
     POSITION_ATTRIBUTE_COUNT,
     TECHNICAL,
     VISIBLE_GROUPS,
+    apply_attribute_cells,
     apply_bulk_attributes,
     apply_position_attributes,
     attribute_group,
@@ -791,3 +792,127 @@ def test_undo_accepts_boundary_old_values():
     undo_bulk([position], twenty_snapshot)
     undo_bulk([position], zero_snapshot)
     assert position == position_original
+
+
+def test_cells_sets_single_visible_attribute_from_display_value():
+    player = make_player(100)
+    snapshot = apply_attribute_cells([player], values={68: 15})
+    assert attrs(player)[68] == 75
+    for index in range(ATTRIBUTE_COUNT):
+        if index != 68:
+            assert attrs(player)[index] == 10
+    assert snapshot["indices"] == [68]
+    assert snapshot["include_personality"] is False
+    assert snapshot["players"] == [
+        {
+            "source_uid": 100,
+            "profile_present": False,
+            "attributes": [10],
+            "personality": {},
+        }
+    ]
+
+
+def test_cells_position_indices_take_raw_values_without_scaling():
+    player = make_player(100)
+    snapshot = apply_attribute_cells([player], values={0: 0, 7: 13, 14: 20})
+    assert attrs(player)[0] == 0
+    assert attrs(player)[7] == 13
+    assert attrs(player)[14] == 20
+    assert attrs(player)[15] == 10
+    assert snapshot["indices"] == [0, 7, 14]
+    assert snapshot["players"][0]["attributes"] == [10, 10, 10]
+
+
+def test_cells_applies_sorted_indices_to_every_player_and_keeps_old_values():
+    players = [make_player(100), make_player(101)]
+    attrs(players[0])[68] = 30
+    attrs(players[1])[15] = 45
+    before = copy.deepcopy(players)
+    snapshot = apply_attribute_cells(players, values={68: 15, 0: 4, 15: 19.9})
+    for player in players:
+        assert attrs(player)[0] == 4
+        assert attrs(player)[15] == 100
+        assert attrs(player)[68] == 75
+    assert snapshot["indices"] == [0, 15, 68]
+    assert [entry["source_uid"] for entry in snapshot["players"]] == [100, 101]
+    assert snapshot["players"][0]["attributes"] == [attrs(before[0])[index] for index in (0, 15, 68)]
+    assert snapshot["players"][1]["attributes"] == [attrs(before[1])[index] for index in (0, 15, 68)]
+
+
+def test_cells_rejects_empty_or_non_mapping_values():
+    player = make_player(100)
+    with pytest.raises(ValueError, match="至少需要一个属性值"):
+        apply_attribute_cells([player], values={})
+    for values in ([], (), "68", b"68"):
+        with pytest.raises(ValueError, match="索引到显示值"):
+            apply_attribute_cells([player], values=values)
+    assert attrs(player) == [10] * ATTRIBUTE_COUNT
+
+
+def test_cells_rejects_invalid_indices():
+    player = make_player(100)
+    for values in ({"68": 15}, {69: 15}, {-1: 15}, {True: 15}, {68: 15, "68": 20}):
+        with pytest.raises(ValueError, match="属性索引"):
+            apply_attribute_cells([player], values=values)
+    assert attrs(player) == [10] * ATTRIBUTE_COUNT
+
+
+def test_cells_rejects_invalid_values_without_partial_write():
+    player = make_player(100)
+    for values, message in (
+        ({0: 21}, "位置熟练度"),
+        ({0: 10.5}, "位置熟练度"),
+        ({0: True}, "位置熟练度"),
+        ({15: 0.9}, "属性显示值"),
+        ({15: 20.1}, "属性显示值"),
+        ({15: "15"}, "属性显示值"),
+        ({15: float("nan")}, "属性显示值"),
+        ({68: 15, 15: 0}, "属性显示值"),
+    ):
+        with pytest.raises(ValueError, match=message):
+            apply_attribute_cells([player], values=values)
+    assert attrs(player) == [10] * ATTRIBUTE_COUNT
+
+
+def test_cells_validates_players_before_mutation():
+    good = make_player(100)
+    broken = make_player(101)
+    broken["attributes"] = broken["attributes"][:-1]
+    with pytest.raises(ValueError, match="69"):
+        apply_attribute_cells([good, broken], values={68: 15})
+    assert attrs(good) == [10] * ATTRIBUTE_COUNT
+
+    with pytest.raises(ValueError, match="source_uid"):
+        apply_attribute_cells([{"attributes": [10] * ATTRIBUTE_COUNT}], values={68: 15})
+    with pytest.raises(ValueError, match="source_uid"):
+        apply_attribute_cells([make_player(100), make_player(100)], values={68: 15})
+
+
+def test_cells_rounds_display_values_to_internal_scale():
+    player = make_player(100)
+    apply_attribute_cells([player], values={15: 1, 16: 20, 17: 13.4, 18: 13.5})
+    assert attrs(player)[15] == 5
+    assert attrs(player)[16] == 100
+    assert attrs(player)[17] == 67
+    assert attrs(player)[18] == 68
+
+
+def test_cells_snapshot_undoes_to_original_state():
+    player = make_player(100)
+    attrs(player)[0] = 18
+    original = copy.deepcopy(player)
+    snapshot = apply_attribute_cells([player], values={0: 6, 15: 3, 68: 17})
+    assert (attrs(player)[0], attrs(player)[15], attrs(player)[68]) == (6, 15, 85)
+    undo_bulk([player], snapshot)
+    assert player == original
+
+
+def test_cells_snapshot_undoes_only_columns_it_changed():
+    player = make_player(100)
+    cells_snapshot = apply_attribute_cells([player], values={68: 15})
+    apply_bulk_attributes([player], value=4)
+    undo_bulk([player], cells_snapshot)
+    assert attrs(player)[68] == 10
+    for index in VISIBLE_ATTRIBUTES - {68}:
+        assert attrs(player)[index] == 20

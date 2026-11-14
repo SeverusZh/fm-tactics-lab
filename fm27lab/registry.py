@@ -10,10 +10,18 @@ HTTP_METHODS: frozenset[str] = frozenset({"DELETE", "GET", "PATCH", "POST", "PUT
 SYSTEM_PATHS: frozenset[str] = frozenset(
     {
         "/api/docs",
+        "/api/engine",
+        "/api/engine/diagnose",
+        "/api/engine/import",
+        "/api/engine/select",
         "/api/events",
         "/api/health",
         "/api/openapi.json",
         "/api/shutdown",
+        "/api/saves/{save_id}/tactics",
+        "/api/saves/{save_id}/tactics/{tactic_index}/import",
+        "/api/system/restart",
+        "/api/tactics/template",
         "/api/version",
     }
 )

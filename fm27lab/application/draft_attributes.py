@@ -8,6 +8,8 @@ from typing import Any
 
 from fm27lab.application.drafts import DraftService
 from fm27lab.domain.attributes import (
+    ATTRIBUTE_COUNT,
+    apply_attribute_cells,
     apply_bulk_attributes,
     apply_position_attributes,
     copy_player_profile,
@@ -17,7 +19,7 @@ from fm27lab.domain.attributes import (
 
 SIDES: dict[str, int] = {"home": 0, "away": 1}
 SCOPES: tuple[str, ...] = ("all", "starters", "player", "squad")
-OPERATIONS: tuple[str, ...] = ("bulk", "position", "copy", "pair_feet", "undo")
+OPERATIONS: tuple[str, ...] = ("bulk", "position", "cells", "copy", "pair_feet", "undo")
 SNAPSHOT_KEY = "attribute_snapshot"
 
 
@@ -32,12 +34,14 @@ def _valid_uid(uid: Any) -> bool:
 _PARAMETERS: dict[str, frozenset[str]] = {
     "bulk": frozenset({"value", "groups", "include_personality"}),
     "position": frozenset({"position", "value"}),
+    "cells": frozenset({"values"}),
     "copy": frozenset({"source_uid", "source_index", "groups", "copy_personality"}),
     "pair_feet": frozenset({"left_index", "right_index", "preferred", "preferred_value", "weaker_value"}),
 }
 _REQUIRED: dict[str, tuple[str, ...]] = {
     "bulk": ("value",),
     "position": ("position", "value"),
+    "cells": ("values",),
     "pair_feet": ("left_index", "right_index", "preferred", "preferred_value", "weaker_value"),
 }
 
@@ -93,6 +97,9 @@ class DraftAttributeService:
         if operation == "position":
             kwargs = self._operation_params(operation, params)
             return self._position(selected, kwargs)
+        if operation == "cells":
+            kwargs = self._operation_params(operation, params)
+            return self._cells(selected, kwargs)
         if operation == "copy":
             return self._copy(all_players, selected, params)
         return self._pair_feet(selected, params)
@@ -113,6 +120,16 @@ class DraftAttributeService:
     ) -> tuple[dict[str, Any], int]:
         before = copy.deepcopy(selected)
         snapshot = apply_position_attributes(selected, **kwargs)
+        return snapshot, _changed_count(before, selected)
+
+    @staticmethod
+    def _cells(
+        selected: list[dict[str, Any]],
+        kwargs: dict[str, Any],
+    ) -> tuple[dict[str, Any], int]:
+        values = _cell_values(kwargs["values"])
+        before = copy.deepcopy(selected)
+        snapshot = apply_attribute_cells(selected, values=values)
         return snapshot, _changed_count(before, selected)
 
     def _copy(
@@ -305,3 +322,17 @@ class DraftAttributeService:
 
 def _changed_count(before: Sequence[Mapping[str, Any]], after: Sequence[Mapping[str, Any]]) -> int:
     return sum(1 for old, new in zip(before, after, strict=True) if old != new)
+
+
+def _cell_values(raw: Any) -> dict[int, float]:
+    if isinstance(raw, (str, bytes, bytearray)) or not isinstance(raw, Mapping):
+        raise ValueError("values 必须是属性索引到显示值的对象")
+    values: dict[int, float] = {}
+    for key, value in raw.items():
+        if not isinstance(key, str) or not (key.isascii() and key.isdigit()):
+            raise ValueError("values 的键必须是 0–68 的规范十进制字符串")
+        index = int(key)
+        if not 0 <= index < ATTRIBUTE_COUNT or key != str(index):
+            raise ValueError("values 的键必须是 0–68 的规范十进制字符串")
+        values[index] = value
+    return values

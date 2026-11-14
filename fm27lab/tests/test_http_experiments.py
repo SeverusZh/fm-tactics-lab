@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+from dataclasses import replace
 from pathlib import Path
 from typing import NamedTuple
 
@@ -685,6 +686,19 @@ def test_create_app_builds_materializer_and_lazy_default_engine(tmp_path: Path):
     assert job["summary"]["configs_count"] == 1
     assert job["summary"]["runtime_mode"] == DEFAULT_PLAN.runtime_mode
     assert job["summary"]["provenance"] == DEFAULT_PLAN.provenance
+
+
+def test_create_app_passes_the_configured_game_root_to_the_lazy_engine(tmp_path: Path):
+    settings = build_settings(tmp_path)
+    game_root = tmp_path / "game"
+    game_root.mkdir()
+    settings = replace(settings, game_root=game_root)
+    database = Database(settings.database_path)
+    database.initialize()
+    app = create_app(settings, database)
+    engine = app.state.experiments._engine
+    assert isinstance(engine, LazyNativeEngine)
+    assert engine._game_root == game_root
 
 
 class _RecordingHostFactory:
