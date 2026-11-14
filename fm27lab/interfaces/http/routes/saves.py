@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Response
 from pydantic import BaseModel, ConfigDict
@@ -40,7 +40,7 @@ class SaveOutput(BaseModel):
     id: str
     source_path: str
     source_sha256: str
-    status: str
+    status: Literal["pending", "reading", "ready", "error", "cancelled"]
     stage: str | None
     metadata: dict[str, Any]
     created_at: str

@@ -248,7 +248,7 @@ export interface JobMetricsOutput {
 export interface JobOutput {
   id: string;
   kind: string;
-  status: string;
+  status: "queued" | "running" | "interrupted" | "completed" | "error" | "cancelled";
   name: string | null;
   config: { [key: string]: unknown };
   summary: { [key: string]: unknown };
@@ -401,7 +401,7 @@ export interface SaveOutput {
   id: string;
   source_path: string;
   source_sha256: string;
-  status: string;
+  status: "pending" | "reading" | "ready" | "error" | "cancelled";
   stage: string | null;
   metadata: { [key: string]: unknown };
   created_at: string;

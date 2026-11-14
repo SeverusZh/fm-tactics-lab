@@ -1,5 +1,50 @@
-import type { Connection } from "./connection";
+// API 类型映射：生成别名 40 项；保留手写类型 25 项；字段派生 2 项；ApiError 类保留；明细见 api-types.test.ts。
 
+import type { Connection } from "./connection";
+import type {
+  CompareInput as GeneratedCompareInput,
+  CompareJobOutput,
+  ComparePairingOutput,
+  ConcurrencyCheckOutput,
+  DraftAttributeInput,
+  DraftAttributeOutput,
+  DraftCreateInput,
+  DraftListOutput,
+  DraftOutput,
+  DraftSummary as GeneratedDraftSummary,
+  DraftUpdateInput,
+  ExperimentSubmitInput as GeneratedExperimentSubmitInput,
+  ImportedClubOutput,
+  JobBatchDeleteFailureOutput,
+  JobBatchDeleteOutput,
+  JobCreateInput,
+  JobListOutput,
+  JobMetricsOutput,
+  JobOutput,
+  JobRunListOutput,
+  JobRunOutput,
+  JobUpdateInput,
+  PairedOutput,
+  PoolSummaryEntryOutput,
+  ResultsSummaryOutput,
+  RosterAppliedOutput,
+  RosterApplyInput as GeneratedRosterApplyInput,
+  RosterApplyOutput,
+  RosterUndoOutput,
+  SaveCreateInput,
+  SaveFileImportInput as GeneratedSaveFileImportInput,
+  SaveFileImportOutput,
+  SaveImportInput,
+  SaveListOutput,
+  SaveOutput,
+  SaveUpdateInput,
+  SettingListOutput,
+  SettingOutput,
+  SettingPutInput,
+  SystemResourcesOutput,
+} from "./api-schema";
+
+// 健康检查响应未纳入 OpenAPI 组件模型，保留手写。
 export type Health = {
   status: string;
   api: string;
@@ -52,107 +97,38 @@ export async function apiJson<T>(
   return (await response.json()) as T;
 }
 
-export type JobStatus =
-  | "queued"
-  | "running"
-  | "interrupted"
-  | "completed"
-  | "error"
-  | "cancelled";
+export type JobStatus = Job["status"];
 
-export type Job = {
-  id: string;
-  kind: string;
-  status: JobStatus;
-  name: string | null;
-  config: Record<string, unknown>;
-  summary: Record<string, unknown>;
-  workers: number;
-  total: number;
-  completed: number;
-  created_at: string;
-  started_at: string | null;
-  finished_at: string | null;
-};
+export type Job = JobOutput;
 
-export type JobRun = {
-  job_id: string;
-  sequence: number;
-  variant: string;
-  seed: number;
-  score: [number, number] | null;
-  verified: boolean;
-  stats: Record<string, unknown>;
-  events: Record<string, unknown> | null;
-  log_path: string | null;
-  created_at: string;
-};
+export type JobRun = JobRunOutput;
 
-export type JobList = {
-  items: Job[];
-  total: number;
-  next_offset: number | null;
-};
+export type JobList = JobListOutput;
 
-export type JobRunList = {
-  items: JobRun[];
-  total: number;
-  next_offset: number | null;
-};
+export type JobRunList = JobRunListOutput;
 
-export type JobCreate = {
-  kind: string;
-  name?: string | null;
-  config?: Record<string, unknown>;
-  workers?: number;
-  total?: number;
-};
+export type JobCreate = JobCreateInput;
 
-export type JobUpdate = {
-  status?: JobStatus;
-  completed?: number;
-  summary?: Record<string, unknown>;
-  name?: string | null;
-};
+export type JobUpdate = JobUpdateInput;
 
+// 任务查询参数未在 OpenAPI 中单独建模，保留手写。
 export type JobQuery = {
   status?: JobStatus;
   limit?: number;
   offset?: number;
 };
 
+// 运行查询参数未在 OpenAPI 中单独建模，保留手写。
 export type JobRunQuery = {
   limit?: number;
   offset?: number;
 };
 
-export type JobMetrics = {
-  n: number;
-  wins: number;
-  draws: number;
-  losses: number;
-  win_rate: number;
-  win_interval: [number, number];
-  goals_for: number;
-  goals_against: number;
-  points: number;
-  xg: number | null;
-  xga: number | null;
-  possession: number | null;
-  shots: number | null;
-  pass_completion: number | null;
-};
+export type JobMetrics = JobMetricsOutput;
 
-export type JobPaired = {
-  n: number;
-  goal_difference_delta: number | null;
-};
+export type JobPaired = PairedOutput;
 
-export type JobSummary = {
-  job: Job;
-  metrics: JobMetrics | null;
-  paired: JobPaired;
-};
+export type JobSummary = ResultsSummaryOutput;
 
 function queryString(params: Record<string, string | number | boolean | undefined | null>): string {
   const search = new URLSearchParams();
@@ -201,15 +177,9 @@ export async function deleteJob(connection: Connection, jobId: string): Promise<
   await apiFetch(connection, `/api/jobs/${encodeURIComponent(jobId)}`, { method: "DELETE" });
 }
 
-export type JobBatchDeleteFailure = {
-  id: string;
-  error: string;
-};
+export type JobBatchDeleteFailure = JobBatchDeleteFailureOutput;
 
-export type JobBatchDeleteResult = {
-  deleted: string[];
-  failed: JobBatchDeleteFailure[];
-};
+export type JobBatchDeleteResult = JobBatchDeleteOutput;
 
 export function deleteJobsBatch(
   connection: Connection,
@@ -242,14 +212,9 @@ export function getJobSummary(
   );
 }
 
-export type PoolSummaryEntry = {
-  index: number;
-  name: string;
-  weight: number;
-  probability: number | null;
-  roster: boolean;
-};
+export type PoolSummaryEntry = PoolSummaryEntryOutput;
 
+// 生成接口把 draws、mode、players 设为可选，页面依赖必填的 draws 索引，保留手写。
 export type PoolSummary = {
   enabled: boolean;
   entry_count: number;
@@ -279,21 +244,11 @@ export async function downloadJobCsv(connection: Connection, jobId: string): Pro
   return response.text();
 }
 
-export type CompareInput = {
-  baseline_job_id: string;
-  candidate_job_ids: string[];
-  variant?: "A" | "B";
-  side?: 0 | 1;
-  reps?: number;
-};
+export type CompareInput = GeneratedCompareInput;
 
-export type ComparePairing = {
-  common_seeds: number;
-  draw_mismatches: number | null;
-  mismatched_seeds: number[];
-  missing_seeds: number[];
-};
+export type ComparePairing = ComparePairingOutput;
 
+// 生成接口的置信区间是 number[]，页面按固定二元组使用，保留手写。
 export type ComparePaired = {
   seeds: number;
   win_rate_delta: number | null;
@@ -306,13 +261,9 @@ export type ComparePaired = {
   xgd_delta_ci: [number, number] | null;
 };
 
-export type CompareJob = {
-  job_id: string;
-  name: string | null;
-  metrics: JobMetrics | null;
-  tactic_pool: PoolSummary;
-};
+export type CompareJob = CompareJobOutput;
 
+// 引用保留手写的 ComparePaired，避免置信区间退化为 number[]。
 export type CompareCandidate = CompareJob & {
   comparable: boolean;
   reason: string | null;
@@ -320,6 +271,7 @@ export type CompareCandidate = CompareJob & {
   paired: ComparePaired | null;
 };
 
+// 生成接口的 candidates 会把置信区间退化为 number[]，保留手写。
 export type CompareResult = {
   baseline: CompareJob;
   variant: "A" | "B";
@@ -337,45 +289,19 @@ export function compareResults(
   });
 }
 
-export type SaveStatus = "pending" | "reading" | "ready" | "error" | "cancelled";
+export type SaveStatus = Save["status"];
 
-export type Save = {
-  id: string;
-  source_path: string;
-  source_sha256: string;
-  status: SaveStatus;
-  stage: string | null;
-  metadata: Record<string, unknown>;
-  created_at: string;
-  updated_at: string;
-};
+export type Save = SaveOutput;
 
-export type SaveList = {
-  items: Save[];
-  total: number;
-  next_offset: number | null;
-};
+export type SaveList = SaveListOutput;
 
-export type SaveCreate = {
-  source_path: string;
-  source_sha256: string;
-  status?: SaveStatus;
-  stage?: string | null;
-  metadata?: Record<string, unknown> | null;
-};
+export type SaveCreate = SaveCreateInput;
 
-export type SaveUpdate = {
-  status?: SaveStatus;
-  stage?: string | null;
-  metadata?: Record<string, unknown>;
-};
+export type SaveUpdate = SaveUpdateInput;
 
-export type SaveImport = {
-  leagues: Record<string, Record<string, unknown>>;
-  clubs: Record<string, Record<string, unknown>>;
-  stage?: string | null;
-};
+export type SaveImport = SaveImportInput;
 
+// 存档查询参数未在 OpenAPI 中单独建模，保留手写。
 export type SaveQuery = {
   status?: SaveStatus;
   limit?: number;
@@ -420,35 +346,17 @@ export function importSave(
   });
 }
 
-export type Draft = {
-  id: string;
-  name: string;
-  scenario: Record<string, unknown>;
-  source: Record<string, unknown>;
-  created_at: string;
-  updated_at: string;
-};
+export type Draft = DraftOutput;
 
-export type DraftSummary = Omit<Draft, "scenario">;
+export type DraftSummary = GeneratedDraftSummary;
 
-export type DraftList = {
-  items: DraftSummary[];
-  total: number;
-  next_offset: number | null;
-};
+export type DraftList = DraftListOutput;
 
-export type DraftCreate = {
-  name: string;
-  scenario: Record<string, unknown>;
-  source?: Record<string, unknown> | null;
-};
+export type DraftCreate = DraftCreateInput;
 
-export type DraftUpdate = {
-  name?: string;
-  scenario?: Record<string, unknown>;
-  source?: Record<string, unknown>;
-};
+export type DraftUpdate = DraftUpdateInput;
 
+// 草案查询参数未在 OpenAPI 中单独建模，保留手写。
 export type DraftQuery = {
   limit?: number;
   offset?: number;
@@ -485,25 +393,18 @@ export async function deleteDraft(connection: Connection, draftId: string): Prom
   await apiFetch(connection, `/api/drafts/${encodeURIComponent(draftId)}`, { method: "DELETE" });
 }
 
+// 属性编辑输入模型仍是 str，页面以字面量联合类型约束，保留手写。
 export type DraftAttributeSide = "home" | "away";
 
+// 属性编辑输入模型仍是 str，页面以字面量联合类型约束，保留手写。
 export type DraftAttributeScope = "all" | "starters" | "player" | "squad";
 
+// 属性编辑输入模型仍是 str，页面以字面量联合类型约束，保留手写。
 export type DraftAttributeOperation = "bulk" | "position" | "copy" | "pair_feet" | "undo";
 
-export type DraftAttributePayload = {
-  side: DraftAttributeSide;
-  scope: DraftAttributeScope;
-  player_index?: number | null;
-  operation: DraftAttributeOperation;
-  params: Record<string, unknown>;
-};
+export type DraftAttributePayload = DraftAttributeInput;
 
-export type DraftAttributeResult = {
-  draft: DraftSummary;
-  snapshot: Record<string, unknown> | null;
-  changed_players: number;
-};
+export type DraftAttributeResult = DraftAttributeOutput;
 
 export function applyDraftAttributes(
   connection: Connection,
@@ -520,23 +421,27 @@ export function applyDraftAttributes(
   );
 }
 
+// catalog 负载在 OpenAPI 中是不透明对象，保留手写结构。
 export type CatalogOption = {
   id: number | string;
   label: string;
 };
 
+// catalog 负载在 OpenAPI 中是不透明对象，保留手写结构。
 export type CatalogPosition = {
   id: string;
   x?: number;
   y?: number;
 };
 
+// catalog 负载在 OpenAPI 中是不透明对象，保留手写结构。
 export type CatalogRole = {
   id: string;
   label?: string | null;
   name?: string | null;
 };
 
+// catalog 负载在 OpenAPI 中是不透明对象，保留手写结构。
 export type CatalogTeamInstruction = {
   id: number | string;
   name?: string | null;
@@ -546,12 +451,14 @@ export type CatalogTeamInstruction = {
   options?: CatalogOption[] | null;
 };
 
+// catalog 负载在 OpenAPI 中是不透明对象，保留手写结构。
 export type CatalogMentality = {
   id: number | string;
   label?: string | null;
   name?: string | null;
 };
 
+// catalog 负载在 OpenAPI 中是不透明对象，保留手写结构。
 export type Catalog = {
   positions: CatalogPosition[];
   roles: CatalogRole[];
@@ -559,6 +466,7 @@ export type Catalog = {
   mentalities: CatalogMentality[];
 };
 
+// catalog 负载在 OpenAPI 中是不透明对象，保留手写结构。
 export type CatalogResponse = {
   available: boolean;
   catalog: Catalog | null;
@@ -576,23 +484,13 @@ export async function getCatalog(connection: Connection): Promise<Catalog | null
   }
 }
 
-export type Setting = {
-  key: string;
-  value: unknown;
-  note: string | null;
-  updated_at: string;
-};
+export type Setting = SettingOutput;
 
-export type SettingList = {
-  items: Setting[];
-  total: number;
-};
+export type SettingList = SettingListOutput;
 
-export type SettingInput = {
-  value: unknown;
-  note?: string | null;
-};
+export type SettingInput = SettingPutInput;
 
+// 并发检查参数未在 OpenAPI 中单独建模，保留手写。
 export type ConcurrencyCheckQuery = {
   workers: number;
   cpu_count: number;
@@ -601,14 +499,7 @@ export type ConcurrencyCheckQuery = {
   allow_oversubscription: boolean;
 };
 
-export type ConcurrencyCheck = {
-  allowed: boolean;
-  code: string | null;
-  recommended_workers: number;
-  warnings: string[];
-  memory_required_bytes: number;
-  disk_required_bytes: number;
-};
+export type ConcurrencyCheck = ConcurrencyCheckOutput;
 
 function settingPath(key: string): string {
   return `/api/settings/${encodeURIComponent(key)}`;
@@ -651,24 +542,9 @@ export function checkConcurrency(
   return apiJson<ConcurrencyCheck>(connection, `/api/concurrency/check${search}`);
 }
 
-export type HostResources = {
-  cpu_count: number;
-  available_memory_bytes: number;
-  free_disk_bytes: number;
-  recommended_workers: number;
-};
+export type HostResources = SystemResourcesOutput;
 
-export type ExperimentSubmitInput = {
-  name: string | null;
-  seeds: number[];
-  draft_id: string;
-  baseline_draft_id: string | null;
-  workers: number;
-  cpu_count: number;
-  available_memory_bytes: number;
-  free_disk_bytes: number;
-  allow_oversubscription: boolean;
-};
+export type ExperimentSubmitInput = GeneratedExperimentSubmitInput;
 
 export function getHostResources(connection: Connection): Promise<HostResources> {
   return apiJson<HostResources>(connection, "/api/system/resources");
@@ -691,24 +567,13 @@ export async function startExperiment(connection: Connection): Promise<Job | nul
   return body.job;
 }
 
-export type SaveFileImportInput = {
-  source_path: string;
-  replace?: boolean;
-};
+export type SaveFileImportInput = GeneratedSaveFileImportInput;
 
-export type ImportedClub = {
-  club_uid: number;
-  club_name: string | null;
-  players: number;
-};
+export type ImportedClub = ImportedClubOutput;
 
-export type SaveFileImportResult = {
-  save_id: string;
-  status: string;
-  managed_clubs: ImportedClub[];
-  clubs: number;
-};
+export type SaveFileImportResult = SaveFileImportOutput;
 
+// squad 负载在 OpenAPI 中是不透明对象，保留手写结构。
 export type SquadPlayer = {
   source_uid: number | string;
   name: string;
@@ -716,6 +581,7 @@ export type SquadPlayer = {
   ability: number | null;
 };
 
+// squad 负载在 OpenAPI 中是不透明对象，保留手写结构。
 export type SquadSelection = {
   club_uid?: number;
   team_id?: number | null;
@@ -724,6 +590,7 @@ export type SquadSelection = {
   substitutes: (number | string)[];
 };
 
+// squad 负载在 OpenAPI 中是不透明对象，保留手写结构。
 export type SaveSquad = {
   save_id: string;
   club_uid: number;
@@ -732,30 +599,19 @@ export type SaveSquad = {
   selection: SquadSelection | null;
 };
 
+// 阵容套用输入模型仍是 str，页面以字面量联合类型约束，保留手写。
 export type RosterSide = "home" | "away";
 
+// 阵容套用输入模型仍是 str，页面以字面量联合类型约束，保留手写。
 export type RosterScope = "starters" | "bench" | "both";
 
-export type RosterApplyInput = {
-  save_id: string;
-  club_uid: number;
-  side: RosterSide;
-  scope: RosterScope;
-};
+export type RosterApplyInput = GeneratedRosterApplyInput;
 
-export type RosterApplied = {
-  starters: number;
-  substitutes: number;
-};
+export type RosterApplied = RosterAppliedOutput;
 
-export type RosterApplyResult = {
-  draft: DraftSummary;
-  applied: RosterApplied;
-};
+export type RosterApplyResult = RosterApplyOutput;
 
-export type RosterUndoResult = {
-  draft: DraftSummary;
-};
+export type RosterUndoResult = RosterUndoOutput;
 
 export function importSaveFile(
   connection: Connection,

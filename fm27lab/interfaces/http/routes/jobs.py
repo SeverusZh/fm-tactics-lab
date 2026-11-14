@@ -41,7 +41,7 @@ class JobBatchActionInput(BaseModel):
 class JobOutput(BaseModel):
     id: str
     kind: str
-    status: str
+    status: Literal["queued", "running", "interrupted", "completed", "error", "cancelled"]
     name: str | None
     config: dict[str, Any]
     summary: dict[str, Any]
