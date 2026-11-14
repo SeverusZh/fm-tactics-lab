@@ -115,6 +115,7 @@ def test_drafts_help_lists_crud_commands():
         "attributes",
         "export-fmf",
         "import-fmf",
+        "import-fmf-file",
         "apply-roster",
         "undo-roster",
     ):
@@ -2282,3 +2283,32 @@ def test_live_sidecar_round_trip_covers_new_commands(live_data_dir: Path):
     started = invoke_live(data_dir, ["experiments", "start"])
     assert started.exit_code == 0, started.output
     assert json.loads(started.stdout) == {}
+
+
+def test_drafts_import_fmf_file_posts_source_path(monkeypatch, fake_data_dir: Path):
+    payload = {"id": "d1", "name": "草案"}
+    result, fake = invoke(
+        monkeypatch,
+        ["drafts", "import-fmf-file", str(fake_data_dir / "tactic.fmf"), "--name", "草案"],
+        [payload],
+    )
+    assert result.exit_code == 0, result.output
+    assert parse_output(result) == payload
+    assert fake.calls == [
+        {
+            "method": "POST",
+            "path": "/api/drafts/import-fmf-file",
+            "body": {"source_path": str(fake_data_dir / "tactic.fmf"), "name": "草案"},
+            "query": None,
+        }
+    ]
+
+
+def test_drafts_import_fmf_file_omits_optional_name(monkeypatch, fake_data_dir: Path):
+    result, fake = invoke(
+        monkeypatch,
+        ["drafts", "import-fmf-file", str(fake_data_dir / "tactic.fmf")],
+        [{"id": "d1"}],
+    )
+    assert result.exit_code == 0, result.output
+    assert fake.calls[0]["body"] == {"source_path": str(fake_data_dir / "tactic.fmf")}

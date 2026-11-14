@@ -593,6 +593,24 @@ def drafts_import_fmf(
     _emit(_invoke(ctx, lambda client: client.request_json("POST", "/api/drafts/import-fmf", body=body)))
 
 
+@drafts_app.command("import-fmf-file")
+def drafts_import_fmf_file(
+    ctx: typer.Context,
+    file: str = typer.Argument(..., help="本地 FMF 文件路径"),
+    name: str | None = typer.Option(None, "--name", help="草案名称"),
+) -> None:
+    """从本地文件路径导入场景草案。"""
+    body: dict[str, Any] = {"source_path": file}
+    if name is not None:
+        body["name"] = name
+    _emit(
+        _invoke(
+            ctx,
+            lambda client: client.request_json("POST", "/api/drafts/import-fmf-file", body=body),
+        )
+    )
+
+
 @drafts_app.command("apply-roster")
 def drafts_apply_roster(
     ctx: typer.Context,

@@ -704,3 +704,35 @@ def test_http_save_import_replace_preserves_leagues(tmp_path: Path):
         headers=headers,
     )
     assert squad.status_code == 200
+
+
+def test_http_save_import_cleans_quoted_and_padded_paths(tmp_path: Path):
+    path = source_file(tmp_path)
+    wrappers = (f'"{path}"', f"'{path}'", f'  "{path}"  ', f"  {path}  ")
+    for index, raw in enumerate(wrappers):
+        case_dir = tmp_path / f"case{index}"
+        case_dir.mkdir()
+        app, settings, _ = make_import_app(case_dir)
+        client = TestClient(app)
+        response = client.post("/api/saves/import", json={"source_path": raw}, headers=auth(settings))
+        assert response.status_code == 201, raw
+        record = app.state.saves.get(response.json()["save_id"])
+        assert record["source_path"] == str(path)
+
+
+def test_http_save_import_rejects_path_with_unpaired_quote(tmp_path: Path):
+    app, settings, _ = make_import_app(tmp_path)
+    client = TestClient(app)
+    path = source_file(tmp_path)
+    response = client.post(
+        "/api/saves/import",
+        json={"source_path": f'"{path}'},
+        headers=auth(settings),
+    )
+    assert response.status_code == 400
+    error = response.json()["error"]
+    assert set(error) == ERROR_FIELDS
+    assert error["code"] == "validation_failed"
+    assert error["message"] == "存档文件不存在"
+    assert error["retriable"] is False
+    assert app.state.saves.list(limit=256)["items"] == []

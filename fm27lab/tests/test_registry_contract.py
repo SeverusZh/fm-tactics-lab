@@ -38,6 +38,7 @@ EXPECTED_NAMES = frozenset(
         "drafts_attributes",
         "drafts_export_fmf",
         "drafts_import_fmf",
+        "drafts_import_fmf_file",
         "drafts_apply_roster",
         "drafts_undo_roster",
         "jobs_list",
@@ -272,7 +273,7 @@ def test_every_capability_declares_cli_surface():
 
 
 def test_system_resources_serves_http_and_cli_without_mcp(tmp_path: Path):
-    assert len(CAPABILITIES) == 51
+    assert len(CAPABILITIES) == 52
     item = capability("system_resources")
     assert item.description.strip()
     assert item.http == ("GET", "/api/system/resources")
@@ -293,3 +294,11 @@ def test_saves_payload_import_keeps_existing_surfaces():
     assert file_import.http == ("POST", "/api/saves/import")
     assert file_import.cli == ("saves", "import-file")
     assert file_import.mcp == "saves_import_file"
+
+
+def test_drafts_import_fmf_file_registers_http_and_cli_without_mcp():
+    item = capability("drafts_import_fmf_file")
+    assert item.description.strip()
+    assert item.http == ("POST", "/api/drafts/import-fmf-file")
+    assert item.cli == ("drafts", "import-fmf-file")
+    assert item.mcp is None

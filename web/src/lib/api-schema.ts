@@ -168,6 +168,11 @@ export interface ExperimentSubmitInput {
   allow_oversubscription?: boolean;
 }
 
+export interface FmfFileImportInput {
+  source_path: string;
+  name?: string | null;
+}
+
 export interface FmfImportInput {
   name: string;
   content_base64: string;

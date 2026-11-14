@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import hashlib
 from collections.abc import Mapping
+from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
@@ -12,6 +13,7 @@ from fastapi import Depends, FastAPI, HTTPException, Response
 from pydantic import BaseModel, ConfigDict, Field
 
 from fm27lab.application.drafts import DraftService
+from fm27lab.application.source_paths import clean_path_text
 from fm27lab.interfaces.http.common import ErrorEnvelope, require_token
 from fm27lab.interfaces.http.routes.drafts import DraftOutput
 from fm27lab.ports.fmf import FmfCodec as FmfCodecPort
@@ -20,6 +22,9 @@ MAX_FMF_BYTES = 4 * 1024 * 1024
 MAX_FMF_BASE64_CHARS = (MAX_FMF_BYTES + 2) // 3 * 4
 ENCODING_ERROR = "FMF 文件内容不是合法的 base64"
 SIZE_ERROR = "FMF 文件超过 4 MiB 上限"
+FILE_MISSING_ERROR = "战术文件不存在"
+MAX_NAME_CHARS = 80
+FALLBACK_NAME = "导入战术"
 
 
 class FmfImportInput(BaseModel):
@@ -27,6 +32,19 @@ class FmfImportInput(BaseModel):
     name: str = Field(min_length=1, max_length=80)
     content_base64: str
     source: dict[str, Any] | None = None
+
+
+class FmfFileImportInput(BaseModel):
+    model_config = ConfigDict(strict=True, extra="forbid")
+    source_path: str = Field(min_length=1, max_length=4096)
+    name: str | None = Field(default=None, min_length=1, max_length=80)
+
+
+def _draft_name(name: str | None, path: Path) -> str:
+    candidate = name.strip() if name is not None else ""
+    if not candidate:
+        candidate = path.stem.strip()
+    return (candidate or FALLBACK_NAME)[:MAX_NAME_CHARS]
 
 
 class FmfService:
@@ -57,6 +75,22 @@ class FmfService:
         if len(payload) > MAX_FMF_BYTES:
             raise ValueError(SIZE_ERROR)
         return self.drafts.create(name, self.codec.decode(payload), source)
+
+    def import_draft_file(self, name: str | None, source_path: str) -> dict[str, Any]:
+        text = clean_path_text(source_path)
+        if text is None:
+            raise ValueError(FILE_MISSING_ERROR)
+        path = Path(text)
+        if not path.is_file():
+            raise ValueError(FILE_MISSING_ERROR)
+        if path.stat().st_size > MAX_FMF_BYTES:
+            raise ValueError(SIZE_ERROR)
+        try:
+            payload = path.read_bytes()
+        except OSError as error:
+            raise ValueError(f"战术文件无法读取：{error}") from error
+        source = {"kind": "fmf", "path": str(path)}
+        return self.drafts.create(_draft_name(name, path), self.codec.decode(payload), source)
 
 
 def _validation_error(error: ValueError) -> HTTPException:
@@ -128,5 +162,17 @@ def register(app: FastAPI) -> None:
     def import_draft_fmf(body: FmfImportInput, _: None = Depends(require_token)):
         try:
             return service().import_draft(body.name, body.content_base64, body.source)
+        except ValueError as error:
+            raise _validation_error(error) from error
+
+    @app.post(
+        "/api/drafts/import-fmf-file",
+        status_code=201,
+        response_model=DraftOutput,
+        responses={400: {"model": ErrorEnvelope}, 401: {"model": ErrorEnvelope}},
+    )
+    def import_draft_fmf_file(body: FmfFileImportInput, _: None = Depends(require_token)):
+        try:
+            return service().import_draft_file(body.name, body.source_path)
         except ValueError as error:
             raise _validation_error(error) from error

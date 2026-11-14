@@ -53,6 +53,7 @@ ACTION_METHODS: dict[str, str] = {
     "get": "GET",
     "import": "POST",
     "import_fmf": "POST",
+    "import_fmf_file": "POST",
     "import_payload": "POST",
     "list": "GET",
     "pool_summary": "GET",
@@ -179,6 +180,12 @@ CAPABILITIES: tuple[Capability, ...] = (
         ("POST", "/api/drafts/import-fmf"),
         ("drafts", "import-fmf"),
         "drafts_import_fmf",
+    ),
+    Capability(
+        "drafts_import_fmf_file",
+        "从本地 FMF 文件导入场景草案",
+        ("POST", "/api/drafts/import-fmf-file"),
+        ("drafts", "import-fmf-file"),
     ),
     Capability(
         "drafts_apply_roster",

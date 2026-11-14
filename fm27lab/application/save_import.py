@@ -10,6 +10,7 @@ from typing import Any
 
 from fm27lab.application.drafts import DraftService
 from fm27lab.application.saves import SavesService
+from fm27lab.application.source_paths import clean_path_text
 from fm27lab.domain.roster import (
     MATCH_ROSTER_SIZE,
     STARTERS,
@@ -200,9 +201,10 @@ class SaveImportService:
 
     @staticmethod
     def _source_path(source_path: Any) -> Path:
-        if not isinstance(source_path, str) or not source_path:
+        text = clean_path_text(source_path)
+        if text is None:
             raise ValueError(SAVE_MISSING_ERROR)
-        path = Path(source_path)
+        path = Path(text)
         if not path.is_file():
             raise ValueError(SAVE_MISSING_ERROR)
         return path
