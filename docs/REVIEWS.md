@@ -174,6 +174,8 @@
 | 2026-11-14 | source_uid 冲突消歧 | fm27lab/adapters/save_fmsave/reader.py、fm27lab/ports/save_reader.py、fm27lab/tests/test_save_reader.py | FAIL | 未验证构建下 unique_id 与其它球员 uid 冲突时回退 uid 或更高新号，名单与首发/替补共用同一全局映射且 34 人标识全唯一；真实应用 apply-roster 仍 400“真实名单第 22 名球员名称无效”，因该构建有缺失名称球员被领域校验拒绝；M9 跨俱乐部全局映射变异存活，已补用例。 |
 | 2026-11-14 | 缺失名称占位与 uid 回退复核 | fm27lab/adapters/save_fmsave/reader.py、fm27lab/ports/save_reader.py、fm27lab/tests/test_save_reader.py | PASS | None 或纯空白名称以“未知球员 <source_uid>”占位、占位使用消歧后的标识、uid 缺失时回退 unique_id；真实存档 import 201、squad 34 人恰 1 占位、apply-roster scope both 200（首发 11 替补 12）与 starters 200；新增 2 项判别测试使 M4 与 uid 回退变异全杀、2222 项 pytest、ruff、类型生成与 281 项 legacy 通过；残余 Minor 为病态输入下占位标识可能重复与未验证构建告警仅写 stderr。 |
 
+| 2026-11-14 | Windows 安装包实机验证存档与战术文件导入 | dist/verify 下本地 E2E 脚本（未纳入版本库） | PASS | CI run 43593986849 四 job 全 success，安装包静默安装后 sidecar 载荷含 fmsave 0.12.4；原生选择器导入 240,956,721 字节 FM27 存档 29.9 秒后 ready；名单 34 人标识唯一、恰 1 个“未知球员 2000425656”，apply-roster 范围 both 200（首发 11 替补 12）且草案 23 人标识唯一并含该占位名；免存档 FMF 导入经原生选择器建草案成功；测试数据经 API 清理。 |
+
 ## 审核规则
 
 - 审核者不得修改文件、不得执行 Git 写操作。

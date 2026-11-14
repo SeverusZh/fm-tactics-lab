@@ -96,7 +96,7 @@
 - [~] 文件对话框、打开数据目录、外部链接：文件选择已通过 tauri-plugin-dialog 接入并只授予 dialog:allow-open，存档与 FMF 导入共用；打开数据目录与外部链接仍需 tauri-plugin-opener。
 - [x] 文档与 v2 实现事实对齐：AGENT_QUICKSTART、AGENT_INTEGRATION、AGENT_VERIFICATION 已按真实 endpoint、关闭接口、命名空间与测试计数重写；已通过独立审核。
 - [x] 删除 Launcher.cs 与旧 C# 构建入口，并从 scripts/export_source.py 的 TOP 移除；同步 `docs/AGENT_INTEGRATION.md`、`docs/AGENT_VERIFICATION.md` 与 `THIRD_PARTY_NOTICES.md` 中的 Launcher 描述；已通过独立审核。
-- [~] Windows 安装包构建与卸载清理：CI 已通过 `tauri build` 生成 NSIS 并断言 sidecar resources；安装与卸载真机清理待 Windows 真机。
+- [~] Windows 安装包构建与卸载清理：CI 已通过 `tauri build` 生成 NSIS 并断言 sidecar resources；安装与升级已通过 Windows 真机验证，卸载清理仍待 Windows 真机。
 - [ ] 独立审核 PASS。
 
 ## Phase 5 UI
@@ -189,7 +189,8 @@
 - [ ] 真实引擎并发吞吐验证：1、8、256 路吞吐与结果身份对比，待 Windows 真机环境。
 - [x] 安全与隐私检查：`docs/SECURITY.md` 与 22 条边界测试覆盖鉴权矩阵、令牌与 endpoint 权限、CORS、路径包含、输入上限、幂等与仓库隐私；修复数据目录 0755 缺陷；已通过独立审核。
 - [x] 最终独立审核 PASS：全仓与增量两轮只读审核均 PASS，质量门 2222 项 pytest、281 项 legacy unittest、357 项 Vitest（14 文件）、ruff、类型生成与 manifest 394 文件通过，Windows CI run 43558281006 与打包修复后 run 43574355852 全 job success；发布候选构建与 Windows 真机验证仍为发布门槛。
-- [ ] 发布候选构建与 Windows 真机验证。
+- [x] Windows 真机验证：CI run 43593986849 的安装包静默安装后，原生选择器导入 240,956,721 字节 FM27 存档 29.9 秒后 ready，名单 34 人标识唯一且恰 1 个占位名，apply-roster 范围 both 返回 200（首发 11 替补 12）且草案 23 人标识唯一，免存档 FMF 导入经原生选择器建草案成功。
+- [ ] 发布候选构建。
 
 ## 发布门槛
 
