@@ -395,3 +395,83 @@ def test_create_app_uses_injected_tactics_validator(tmp_path: Path):
 def test_create_app_shares_catalog_repository_with_catalog_service(tmp_path: Path):
     app, _, _, _ = make_app(tmp_path)
     assert app.state.catalog_service.repository is app.state.tactics_validator.repository
+
+
+LEGACY_POSITIONS = ("GK", "DR", "DL", "DC", "DC", "DMC", "MC", "MC", "AMR", "AML", "ST")
+
+
+def legacy_cells(phase):
+    cells = []
+    for position in LEGACY_POSITIONS:
+        cells.append(
+            {
+                "position": position,
+                "role": f"{phase}-{position}",
+                "duty": "0",
+                "instructions": {"0": 1, "1": 0},
+                "target_player": 255,
+                "target_position": 0,
+            }
+        )
+    return cells
+
+
+def legacy_scenario(count=26):
+    value = scenario(count)
+    for team_value in value["teams"]:
+        team_value["phase_plans"] = [
+            {
+                "phase": "in_possession",
+                "team_instructions": {"1": 1, "2": 3},
+                "assignments": legacy_cells("in_possession"),
+            },
+            {
+                "phase": "out_of_possession",
+                "team_instructions": {"2": 8, "4": 2},
+                "assignments": legacy_cells("out_of_possession"),
+            },
+        ]
+    return value
+
+
+def assert_upgraded(scenario_value):
+    assert scenario_value["schema"] == 3
+    for team_value in scenario_value["teams"]:
+        assert "phase_plans" not in team_value
+    team_value = scenario_value["teams"][0]
+    assert team_value["instructions"] == {"1": 1, "2": 8, "4": 2}
+    assert team_value["phases"][0][0]["role"] == "in_possession-GK"
+    assert team_value["phases"][1][0]["role"] == "out_of_possession-GK"
+
+
+def test_draft_http_create_upgrades_legacy_scenario_from_phase_plans(tmp_path: Path):
+    app, settings, _, _ = make_app(tmp_path)
+    client = TestClient(app)
+    created = client.post(
+        "/api/drafts",
+        json={"name": "Legacy", "scenario": legacy_scenario(), "source": {"kind": "inline"}},
+        headers=auth(settings),
+    )
+    assert created.status_code == 201, created.text
+    assert_upgraded(created.json()["scenario"])
+    assert len(created.json()["scenario"]["teams"][0]["players"]) == 23
+    fetched = client.get(f"/api/drafts/{created.json()['id']}", headers=auth(settings))
+    assert fetched.status_code == 200
+    assert_upgraded(fetched.json()["scenario"])
+
+
+def test_draft_http_patch_upgrades_legacy_scenario(tmp_path: Path):
+    app, settings, _, _ = make_app(tmp_path)
+    client = TestClient(app)
+    headers = auth(settings)
+    created = client.post("/api/drafts", json=body(), headers=headers).json()
+    patched = client.patch(
+        f"/api/drafts/{created['id']}",
+        json={"scenario": legacy_scenario(30)},
+        headers=headers,
+    )
+    assert patched.status_code == 200, patched.text
+    value = patched.json()
+    assert_upgraded(value["scenario"])
+    assert value["scenario"]["teams"][0]["roster_trim"]["source_size"] == 30
+    assert len(value["scenario"]["teams"][0]["players"]) == 23

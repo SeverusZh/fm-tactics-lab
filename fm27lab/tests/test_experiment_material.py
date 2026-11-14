@@ -10,6 +10,9 @@ import pytest
 
 from fm27lab.adapters.engine_native.scenario_assets import load_scenario_assets
 from fm27lab.adapters.engine_native.scenario_codec import validate_scenario
+from fm27lab.adapters.storage_sqlite.db import Database
+from fm27lab.adapters.storage_sqlite.repositories import DraftRepository
+from fm27lab.application.drafts import DraftService
 from fm27lab.application.experiment_material import (
     CONFIG_CODEC,
     SCENARIO_SCHEMA,
@@ -600,3 +603,61 @@ def test_failed_submit_removes_materialized_directory_and_job(tmp_path, assets, 
     root = (settings.data_dir / "agent" / "experiments").resolve()
     assert not (root / prepared[0]).exists()
     assert list(root.iterdir()) == []
+
+
+def legacy_engine_scenario(assets, *, home_name: str = "主队") -> dict:
+    value = engine_scenario(assets, home_name=home_name)
+    value["schema"] = 4
+    for team in value["teams"]:
+        instructions = team.pop("instructions", {})
+        phases = team.pop("phases")
+        team["phase_plans"] = [
+            {
+                "phase": "in_possession",
+                "team_instructions": instructions,
+                "assignments": phases[0],
+            },
+            {
+                "phase": "out_of_possession",
+                "team_instructions": {},
+                "assignments": phases[1],
+            },
+        ]
+    return value
+
+
+def test_prepare_upgrades_legacy_scenario_stored_in_repository(tmp_path, assets, engine_root):
+    settings = make_settings(tmp_path, engine_root)
+    settings.ensure_dirs()
+    database = Database(settings.database_path)
+    database.initialize()
+    repository = DraftRepository(database)
+    row = repository.add(
+        {"name": "旧版候选", "scenario": legacy_engine_scenario(assets), "source": {}}
+    )
+    assert repository.get(row["id"])["scenario"]["schema"] == 4
+
+    worker = ExperimentMaterializer(DraftService(repository), settings)
+    result = worker.prepare(
+        job_id="job-legacy", draft_id=row["id"], baseline_draft_id=None, seeds=[3, 5]
+    )
+
+    for entry in result["configs"]:
+        config_path = Path(entry["config_file"])
+        assert config_path.read_bytes().startswith(b"FM27CFG1")
+        snapshot = read_json(Path(entry["scenario_file"]))
+        assert snapshot["schema"] == 3
+        assert "phase_plans" not in json.dumps(snapshot)
+        assert snapshot == validate_scenario(assets, engine_scenario(assets))
+
+    native = materializer(
+        tmp_path / "native",
+        engine_root,
+        {"draft-1": draft_row(engine_scenario(assets))},
+    )
+    comparable = native.prepare(
+        job_id="job-native", draft_id="draft-1", baseline_draft_id=None, seeds=[3, 5]
+    )
+    legacy_bytes = [Path(entry["config_file"]).read_bytes() for entry in result["configs"]]
+    native_bytes = [Path(entry["config_file"]).read_bytes() for entry in comparable["configs"]]
+    assert legacy_bytes == native_bytes

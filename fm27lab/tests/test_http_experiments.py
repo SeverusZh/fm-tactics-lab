@@ -1224,3 +1224,80 @@ def test_end_to_end_native_engine_host_wiring(tmp_path: Path):
     assert set(summary_body) == {"job", "metrics", "paired"}
     assert summary_body["job"]["status"] == "completed"
     assert summary_body["metrics"]["n"] == 4
+
+
+def legacy_scenario(native: dict) -> dict:
+    value = copy.deepcopy(native)
+    value["schema"] = 4
+    for team in value["teams"]:
+        instructions = team.pop("instructions", {})
+        phases = team.pop("phases")
+        team["phase_plans"] = [
+            {
+                "phase": "in_possession",
+                "team_instructions": instructions,
+                "assignments": phases[0],
+            },
+            {
+                "phase": "out_of_possession",
+                "team_instructions": {},
+                "assignments": phases[1],
+            },
+        ]
+    return value
+
+
+def test_end_to_end_legacy_scenario_drafts_materialize(tmp_path: Path):
+    app = make_engine_app(tmp_path)
+    client, settings = app.client, app.settings
+    headers = auth(settings)
+    assets = load_scenario_assets(settings.engine_root)
+    candidate = client.post(
+        "/api/drafts",
+        json={"name": "旧版候选", "scenario": legacy_scenario(normalizable_scenario(assets))},
+        headers=headers,
+    )
+    assert candidate.status_code == 201, candidate.text
+    baseline = client.post(
+        "/api/drafts",
+        json={
+            "name": "旧版基线",
+            "scenario": legacy_scenario(
+                normalizable_scenario(assets, home_name="基线主队", home_mentality=3)
+            ),
+        },
+        headers=headers,
+    )
+    assert baseline.status_code == 201, baseline.text
+    for response in (candidate, baseline):
+        stored = response.json()["scenario"]
+        assert stored["schema"] == 3
+        assert all("phase_plans" not in team for team in stored["teams"])
+    submitted = client.post(
+        "/api/experiments",
+        json=experiment_payload(
+            seeds=[21, 22],
+            draft_id=candidate.json()["id"],
+            baseline_draft_id=baseline.json()["id"],
+        ),
+        headers=headers,
+    )
+    assert submitted.status_code == 201, submitted.text
+    job = submitted.json()
+    materialized = job["config"]["materialized"]
+    assert job["total"] == 4
+    assert job["summary"]["configs_count"] == 4
+    assert [(entry["variant"], entry["seed"]) for entry in materialized["configs"]] == [
+        ("A", 21),
+        ("B", 21),
+        ("A", 22),
+        ("B", 22),
+    ]
+    started = client.post("/api/experiments/start", headers=headers)
+    assert started.status_code == 200, started.text
+    assert started.json()["job"]["status"] == "completed"
+    binaries = [Path(entry["config_file"]).read_bytes() for entry in materialized["configs"]]
+    assert all(data.startswith(b"FM27CFG1") for data in binaries)
+    runs = app.jobs.runs(job["id"], limit=10)
+    assert runs["total"] == 4
+    assert len(runs["items"]) == 4

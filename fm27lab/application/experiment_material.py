@@ -18,6 +18,7 @@ from fm27lab.adapters.engine_native.scenario_codec import encode_scenario, valid
 from fm27lab.application.drafts import DraftService
 from fm27lab.config import Settings
 from fm27lab.domain.pool import draws, expand_away_scenarios, normalize_away_pool, summary
+from fm27lab.domain.scenario import upgrade_legacy_scenario
 
 CONFIG_CODEC = "FM27CFG1"
 SCENARIO_SCHEMA = "fm27lab-scenario/1"
@@ -209,7 +210,7 @@ class ExperimentMaterializer:
         scenario = row.get("scenario") if isinstance(row, Mapping) else None
         if not isinstance(scenario, Mapping):
             raise ValueError(SCENARIO_ERROR)
-        return dict(scenario)
+        return dict(upgrade_legacy_scenario(scenario))
 
     def _resources(self) -> tuple[Path, Path]:
         configured = self._settings.engine_root
