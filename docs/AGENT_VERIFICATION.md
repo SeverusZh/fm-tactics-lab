@@ -44,7 +44,7 @@
 .venv/bin/python -m pytest
 ```
 
-配置来自 pyproject.toml，testpaths 为 fm27lab/tests，收集 2158 项，全部通过时退出码为 0。
+配置来自 pyproject.toml，testpaths 为 fm27lab/tests，收集 2162 项，全部通过时退出码为 0。
 
 覆盖范围：fm27lab/tests 下的 pytest 风格用例，包含 HTTP 路由、应用服务、领域规则、SQLite 适配器、MCP 协议与引擎宿主适配。
 
@@ -54,7 +54,7 @@
 cd web && npx vitest run
 ```
 
-期望输出包含 Test Files 9 passed 与 Tests 228 passed；测试文件为 App、RunBar 与 7 个页面测试。
+期望输出包含 Test Files 13 passed 与 Tests 319 passed；测试文件为 App、RunBar、ErrorBoundary、3 个 lib 测试与 7 个页面测试。
 
 ### 3.4 Node 脚本测试
 
@@ -75,7 +75,7 @@ workspace scripts compile and squad selection is declared
 | 测试集 | 命令 | 当前计数 |
 | --- | --- | --- |
 | legacy unittest | .venv/bin/python -m unittest discover -s tests | 281 |
-| v2 pytest | .venv/bin/python -m pytest | 2158 |
+| v2 pytest | .venv/bin/python -m pytest | 2162 |
 | web Vitest | cd web && npx vitest run | 319，共 13 个文件 |
 | Node 脚本 | node tests/test_i18n.cjs 与 node tests/test_workspace_scripts.cjs | 2 个脚本 |
 

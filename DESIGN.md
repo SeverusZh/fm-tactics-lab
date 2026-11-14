@@ -27,7 +27,7 @@
 
 - Windows x64；FM27 参考构建 27.0.1+2494687；原生适配器继续执行兼容门禁。
 - Python 3.12 作为 sidecar 运行时；玩家不需要安装 Python、Node 或 Rust。
-- Tauri 2 使用 Windows WebView2；安装包必须包含 sidecar 与原生宿主。
+- Tauri 2 使用 Windows WebView2；安装包必须包含 sidecar，原生宿主与私有引擎输入由本地构建准备并通过 engine_root 配置，不随安装包分发。
 - HTTP 仅 loopback；HTTP 写操作需要 Bearer token 与 Origin/CORS 校验；CLI/MCP 使用同一 token；业务写操作支持幂等键，系统路由按需。
 - 无桌面模式：`fm27lab serve` 可在没有 Tauri 时独立运行；未提供 token 时自行生成并写 endpoint.json。CLI/MCP 默认读取 endpoint；缺失时可显式 `--launch` 启动 sidecar。
 - 鉴权规则：无 Origin 的本地请求只校验 token；带 Origin 的浏览器请求必须命中 CORS allowlist。开发模式额外允许 `http://localhost:1420`，生产模式只允许 Tauri origin。
@@ -188,7 +188,7 @@ native/                C++17 适配器
 
 ## 兼容与打包
 
-- Tauri 安装包包含：Rust 壳、WebView2 前端资源、Python sidecar、原生宿主与私有引擎输入。
+- Tauri 安装包包含：Rust 壳、WebView2 前端资源与 Python sidecar；原生宿主与私有引擎输入由 `scripts/build_native.py` 与用户自备私有输入单独准备，安装后通过 engine_root 配置。
 - Python sidecar 使用 PyInstaller onedir 构建到 `sidecar-dist/fm27lab-sidecar`，独立可运行；`scripts/build_sidecar.py` 负责构建，`tauri.conf.json` 的 `bundle.resources` 将其复制到 `resource/sidecar/`。资源映射必须使用目录形式：glob 形式会把 onedir 的 `_internal/` 与迁移目录平铺到同一层，安装后 sidecar 无法启动。
 - `beforeBuildCommand` 先构建前端再构建 sidecar；Windows CI 执行 sidecar 打包、Python 测试、`cargo build`、Tauri 安装包构建与 `cargo test`。`src-tauri/Cargo.lock` 必须提交以固定依赖。
 - Tauri 只负责启动、健康检查、重启与退出；若 sidecar 构建失败，安装包构建失败，不生成缺少后端的发布包。

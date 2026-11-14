@@ -176,9 +176,10 @@
 - [x] 字体资产与 OFL 许可写入 THIRD_PARTY_NOTICES：Barlow 与 JetBrains Mono 的 OFL 1.1 说明已就位。
 - [x] 性能基准：`scripts/benchmark.py` 与 `docs/PERFORMANCE.md` 覆盖 HTTP 只读路径、场景归一化、客队池展开与配对 bootstrap 成本，输出结构由测试锁定；已通过独立审核。
 - [x] 并发通道对比基准：固定每场 2 秒的模拟器下实测 1、2、4 条通道的墙钟与加速比，JSON 与中文表格输出、失败路径中文受控退出；已通过独立审核。
+- [x] Windows 安装包 sidecar 资源映射修复：`bundle.resources` 改用目录形式以保留 PyInstaller onedir 的 `_internal/` 与迁移目录，CI 解包安装包校验载荷；重建安装包经 7-Zip 复核与独立审核 PASS。
 - [ ] 真实引擎并发吞吐验证：1、8、256 路吞吐与结果身份对比，待 Windows 真机环境。
 - [x] 安全与隐私检查：`docs/SECURITY.md` 与 22 条边界测试覆盖鉴权矩阵、令牌与 endpoint 权限、CORS、路径包含、输入上限、幂等与仓库隐私；修复数据目录 0755 缺陷；已通过独立审核。
-- [x] 最终独立审核 PASS：全仓与增量两轮只读审核均 PASS，质量门 2158 项 pytest、281 项 legacy unittest、319 项 Vitest、ruff、类型生成与 manifest 388 文件通过，Windows CI run 43558281006 全 job success；发布候选构建与 Windows 真机验证仍为发布门槛。
+- [x] 最终独立审核 PASS：全仓与增量两轮只读审核均 PASS，质量门 2162 项 pytest、281 项 legacy unittest、319 项 Vitest、ruff、类型生成与 manifest 389 文件通过，Windows CI run 43558281006 与打包修复后 run 43574355852 全 job success；发布候选构建与 Windows 真机验证仍为发布门槛。
 - [ ] 发布候选构建与 Windows 真机验证。
 
 ## 发布门槛

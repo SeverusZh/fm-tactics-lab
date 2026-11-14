@@ -163,6 +163,7 @@
 | 2026-11-14 | 并发通道对比基准 | scripts/concurrency_benchmark.py、fm27lab/tests/test_concurrency_benchmark.py、docs/PERFORMANCE.md | PASS | fake simulator 固定每场 2 秒下实测 1、2、4 条通道墙钟与加速比（1.99 倍与 3.96 倍）、JSON 结构与中文表格、失败路径中文退出；quick 6.2 秒、full 14.3 秒，14 用例与 9 变异 7 杀；Important 为空，Minors 为 full 档无执行覆盖、零完成路径打印 traceback、文档快照措辞与文件尾空行。 |
 | 2026-11-14 | 并发基准 Windows 输出编码修复 | scripts/concurrency_benchmark.py、fm27lab/tests/test_concurrency_benchmark.py、SOURCE_MANIFEST.json | PASS | Windows cp1252 下子进程中文错误原因被转义为 \uXXXX、中文表格抛出 UnicodeEncodeError，修复为主程序把 stdout 与 stderr 重配为 UTF-8、测试按 UTF-8 解码并新增两条 cp1252 判别用例；删除流配置调用后两条新用例失败并逐字节还原，21 用例、全量 2158 项 pytest、ruff、类型生成与 manifest 388 通过，Windows CI 的 pytest 步骤转绿。 |
 | 2026-11-14 | 并发基准 Minor 收口复核 | scripts/concurrency_benchmark.py、fm27lab/tests/test_concurrency_benchmark.py、docs/PERFORMANCE.md | PASS | PROFILES 精确断言杀死 full lanes 变异、零完成与坏模拟器改为中文受控退出无 traceback、表格按显示宽度对齐、文档补单次运行措辞并归一文件尾；19 用例、2156 项 pytest 与 ruff 通过；残余 Minor 为 full 档执行路径仍无端到端覆盖与 match_seconds 仅对 fake 模拟器成立。 |
+| 2026-11-14 | 安装包 sidecar 资源映射修复 | src-tauri/tauri.conf.json、.github/workflows/ci.yml、fm27lab/tests/test_packaging_config.py、DESIGN.md、docs/DEVELOPMENT.md、docs/AGENT_INTEGRATION.md、CHANGELOG.md、SOURCE_MANIFEST.json | PASS | 目录形式资源映射保留 PyInstaller onedir 的 `_internal/` 与迁移目录，CI 断言暂存载荷并用 7-Zip 解包安装包校验；4 项回归测试与 ruff、类型生成、manifest 389 通过，Windows CI run 43574355852 全 job success，下载 artifact 复核 sidecar/fm27lab-sidecar.exe、_internal 下 Python 运行时与 migrations 完整；静态 CI 用例断言 Test-Path $installedInternal 语句存在，删除该语句时用例失败；残余 Minor 为 CI 只解包不执行安装启动。 |
 
 ## 审核规则
 
@@ -171,6 +172,6 @@
 - 先列 findings，再列已验证项，最后给结论。
 - Critical 或 Important 未闭环时不得标记 PASS。
 - 审核通过不等于整体发布就绪；发布仍需最终验收与 Windows 真机验证。
-- 旧 `tests/` 当前 281 项通过，覆盖 legacy UI/HTTP/CLI/MCP、存档战术库、池与名单；新 `fm27lab/tests` 当前 2158 项通过，覆盖包版本、CLI 环境继承、配置/路径边界、SQLite 迁移/事务与池/草案/任务/存档/产物/幂等仓储、HTTP 健康/池/草案/任务 CRUD、鉴权、错误封套、Origin、ACL 失败清理、sidecar serve、23 人名单、真实名单应用、scenario 归一化与旧场景 schema 升级、原生场景编码与定位球记录、场景物化与实验接线、原生宿主按需构造与按任务并行配置、宿主资源探测、catalog/双阶段战术与草案写入校验、客队战术池选择与整批展开、结果指标与跨任务对比、任务状态机与输出状态枚举、存档状态机与应用服务、安全边界与数据目录权限、事件流前端订阅与刷新合并、页面错误边界、性能基准与并发通道基准、跨平台测试、README 中英文一致；Vitest 当前 319 项。
+- 旧 `tests/` 当前 281 项通过，覆盖 legacy UI/HTTP/CLI/MCP、存档战术库、池与名单；新 `fm27lab/tests` 当前 2162 项通过，覆盖包版本、CLI 环境继承、配置/路径边界、SQLite 迁移/事务与池/草案/任务/存档/产物/幂等仓储、HTTP 健康/池/草案/任务 CRUD、鉴权、错误封套、Origin、ACL 失败清理、sidecar serve、23 人名单、真实名单应用、scenario 归一化与旧场景 schema 升级、原生场景编码与定位球记录、场景物化与实验接线、原生宿主按需构造与按任务并行配置、宿主资源探测、catalog/双阶段战术与草案写入校验、客队战术池选择与整批展开、结果指标与跨任务对比、任务状态机与输出状态枚举、存档状态机与应用服务、安全边界与数据目录权限、事件流前端订阅与刷新合并、页面错误边界、性能基准与并发通道基准、跨平台测试、README 中英文一致；Vitest 当前 319 项。
 - Tauri sidecar supervisor 的静态实现已存在，但 Linux 无 WebKitGTK，Windows CI 的 `cargo build`/`cargo test`/安装包构建是唯一编译证据。PyInstaller onedir sidecar 已在 Linux 构建并通过 ready/health/shutdown 冒烟测试。
 - Rust 核心 crate 当前 4 项 cargo test 通过；前端当前 319 项 Vitest（13 个文件）通过、类型检查与生产构建通过。Windows CI run 43558281006 全 job success，含 cargo build/test、NSIS 安装包与 sidecar 资源断言；Linux 本机仍无 WebKitGTK。合并、设计、sidecar、壳层、名单五个审核门均已 PASS。
