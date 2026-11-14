@@ -44,7 +44,7 @@
 .venv/bin/python -m pytest
 ```
 
-配置来自 pyproject.toml，testpaths 为 fm27lab/tests，收集 2222 项，全部通过时退出码为 0。
+配置来自 pyproject.toml，testpaths 为 fm27lab/tests，收集 2547 项，全部通过时退出码为 0。
 
 覆盖范围：fm27lab/tests 下的 pytest 风格用例，包含 HTTP 路由、应用服务、领域规则、SQLite 适配器、MCP 协议与引擎宿主适配。
 
@@ -54,7 +54,7 @@
 cd web && npx vitest run
 ```
 
-期望输出包含 Test Files 14 passed 与 Tests 357 passed；测试文件为 App、ErrorBoundary 与 RunBar、4 个 lib 测试与 7 个页面测试。
+期望输出包含 Test Files 15 passed 与 Tests 487 passed；测试文件为 App 与 ErrorBoundary、5 个 lib 测试与 8 个页面测试。
 
 ### 3.4 Node 脚本测试
 
@@ -75,8 +75,8 @@ workspace scripts compile and squad selection is declared
 | 测试集 | 命令 | 当前计数 |
 | --- | --- | --- |
 | legacy unittest | .venv/bin/python -m unittest discover -s tests | 281 |
-| v2 pytest | .venv/bin/python -m pytest | 2222 |
-| web Vitest | cd web && npx vitest run | 357，共 14 个文件 |
+| v2 pytest | .venv/bin/python -m pytest | 2547 |
+| web Vitest | cd web && npx vitest run | 487，共 15 个文件 |
 | Node 脚本 | node tests/test_i18n.cjs 与 node tests/test_workspace_scripts.cjs | 2 个脚本 |
 
 口径说明
@@ -139,8 +139,8 @@ TOKEN=$(python -c "import json,sys;print(json.load(open(sys.argv[1]))['token'])"
 | --- | --- | --- |
 | OpenAPI 文档 | curl -s -o /dev/null -w '%{http_code}' "$URL/api/openapi.json" | 200 |
 | Swagger UI | curl -s -o /dev/null -w '%{http_code}' "$URL/api/docs" | 200 |
-| 路径数与操作数 | python -c "import json,urllib.request,sys;d=json.load(urllib.request.urlopen(sys.argv[1]));ops=sum(len([k for k in v if k in ('get','post','put','patch','delete')]) for v in d['paths'].values());print(len(d['paths']),ops)" "$URL/api/openapi.json" | 40 条路径，56 个操作 |
-| 组件模型数 | python -c "import json,urllib.request,sys;d=json.load(urllib.request.urlopen(sys.argv[1]));print(len(d['components']['schemas']))" "$URL/api/openapi.json" | 64 |
+| 路径数与操作数 | python -c "import json,urllib.request,sys;d=json.load(urllib.request.urlopen(sys.argv[1]));ops=sum(len([k for k in v if k in ('get','post','put','patch','delete')]) for v in d['paths'].values());print(len(d['paths']),ops)" "$URL/api/openapi.json" | 48 条路径，64 个操作 |
+| 组件模型数 | python -c "import json,urllib.request,sys;d=json.load(urllib.request.urlopen(sys.argv[1]));print(len(d['components']['schemas']))" "$URL/api/openapi.json" | 76 |
 
 证据 fm27lab/interfaces/http/app.py:107-113。
 

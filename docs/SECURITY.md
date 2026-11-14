@@ -9,7 +9,7 @@
 | 面 | 结论 | 证据 |
 | --- | --- | --- |
 | 监听范围 | 仅回环监听，端口由系统分配，uvicorn 不自行监听额外地址 | fm27lab/sidecar.py:83-94、fm27lab/config.py:11、fm27lab/config.py:40-41 |
-| API 鉴权 | 当前 55 个 /api operation 中 53 个要求 Bearer，仅 2 个探活公开 | fm27lab/interfaces/http/common.py:38-55、test_api_authentication_matrix、test_openapi_declares_bearer_security |
+| API 鉴权 | 当前 64 个 /api operation 中 62 个要求 Bearer，仅 2 个探活公开 | fm27lab/interfaces/http/common.py:38-55、test_api_authentication_matrix、test_openapi_declares_bearer_security |
 | 公开路由白名单 | GET /api/health 与 GET /api/version；文档路由单独列为已知边界 | fm27lab/interfaces/http/routes/system.py:40、fm27lab/interfaces/http/routes/system.py:55、test_documentation_routes_are_public_boundary |
 | 未授权响应 | 统一 401 封套 code=unauthorized、WWW-Authenticate: Bearer、不回显令牌 | fm27lab/interfaces/http/common.py:38-55、fm27lab/interfaces/http/app.py:191-217、test_unauthorized_responses_do_not_leak_token |
 | 令牌生成与存储 | secrets.token_hex(32) 生成，Settings 的 repr 不包含令牌，endpoint.json 为 0600 | fm27lab/config.py:30、fm27lab/config.py:68、fm27lab/sidecar.py:33-61、test_endpoint_file_permissions |

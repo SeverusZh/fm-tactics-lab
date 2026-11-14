@@ -244,8 +244,16 @@ retriable 默认在状态码不小于 500 或等于 409 时为 true。证据 fm2
 | GET /api/version | 否 | 返回 api、version、capabilities、limits |
 | POST /api/shutdown | 是 | 202 shutting_down |
 | GET /api/events | 是 | SSE 事件流 |
+| GET /api/engine | 是 | 引擎与游戏目录配置状态与缺失文件 |
+| POST /api/engine/select | 是 | 持久化引擎与游戏目录，返回合并状态 |
+| POST /api/engine/diagnose | 是 | 运行宿主 --check-image 校验版本兼容性 |
+| POST /api/engine/import | 是 | 从旧版安装或资源包导入引擎工作区 |
+| POST /api/system/restart | 是 | 202，触发 sidecar 优雅退出由桌面壳重启 |
+| GET /api/tactics/template | 是 | 基于运行时目录返回合法默认战术场景 |
+| GET /api/saves/{save_id}/tactics | 是 | 列出存档中的存储战术 |
+| POST /api/saves/{save_id}/tactics/{tactic_index}/import | 是 | 由存档战术创建草案 |
 
-证据 fm27lab/interfaces/http/routes/system.py、fm27lab/registry.py:10-19。GET /api/system/resources 与 GET /api/catalog 属于普通能力（system_resources、catalog_snapshot），需要 Bearer，已列入下方能力表；/api/docs 与 /api/openapi.json 见 4.7。
+证据 fm27lab/interfaces/http/routes/system.py、fm27lab/registry.py:10-19 与各路由模块。以上引擎配置、引擎导入、战术模板与存档战术路由登记在 fm27lab/registry.py 的 SYSTEM_PATHS，均需要 Bearer，不属于能力表，能力数仍为 52。GET /api/system/resources 与 GET /api/catalog 属于普通能力（system_resources、catalog_snapshot），需要 Bearer，已列入下方能力表；/api/docs 与 /api/openapi.json 见 4.7。
 
 能力端点与三入口映射
 
@@ -309,7 +317,7 @@ retriable 默认在状态码不小于 500 或等于 409 时为 true。证据 fm2
 ### 4.7 文档端点
 
 - GET /api/docs 返回 Swagger UI，GET /api/openapi.json 返回 OpenAPI 文档；二者无 token 依赖，仅供本机调试。证据 fm27lab/interfaces/http/app.py:107-113。
-- 契约核对以 openapi.json 为准：当前 40 条路径、56 个操作、64 个组件模型。
+- 契约核对以 openapi.json 为准：当前 48 条路径、64 个操作、76 个组件模型。
 
 ## 5. 数据模型
 

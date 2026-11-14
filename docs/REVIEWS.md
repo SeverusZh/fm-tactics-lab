@@ -176,6 +176,19 @@
 
 | 2026-11-14 | Windows 安装包实机验证存档与战术文件导入 | dist/verify 下本地 E2E 脚本（未纳入版本库） | PASS | CI run 43593986849 四 job 全 success，安装包静默安装后 sidecar 载荷含 fmsave 0.12.4；原生选择器导入 240,956,721 字节 FM27 存档 29.9 秒后 ready；名单 34 人标识唯一、恰 1 个“未知球员 2000425656”，apply-roster 范围 both 200（首发 11 替补 12）且草案 23 人标识唯一并含该占位名；免存档 FMF 导入经原生选择器建草案成功；测试数据经 API 清理。 |
 
+| 2026-11-15 | 战术板生命周期审核 | web/src/pages/TacticsPage.tsx 及测试 | FAIL | 默认场景被真实后端 400（球员缺 source_uid、属性全 10 使全队判为门将），测试替身不校验场景；导出文件名清洗、焦点管理与多个交互分支缺测试。已由服务端战术模板与修复切片闭环。 |
+| 2026-11-15 | UX 清理审核 | HelpPage、RunBar、Jobs/Library 页面与样式 | FAIL | RunBar 删除与死表单清理成立，但帮助页把纯 Python 能力错列为需要引擎、宣称不存在的联赛战术库与 AI 计划；已重写帮助页与测试并清理死样式。 |
+| 2026-11-15 | 真实 FMF 导入后端 | fm27lab/adapters/engine_native/tactic_file.py、fm27lab/application/tactic_import.py、routes/fmf.py 与测试 | PASS | 真实 .fmf 16 份经宿主解析与场景映射全通，错误映射与 AFE 分流成立；Important 为宿主环境变量泄漏、consumed 判据偏严与缺少串行化，已由修复切片闭环。 |
+| 2026-11-15 | 引擎资源导入后端 | fm27lab/application/engine_import.py、routes/engine.py 与测试 | PASS | 候选发现、sha256 匹配、原子复制与预检成立；Important 为符号链接越界、同进程选择后匹配陈旧、复制非原子与两条变异存活，已由修复切片闭环。 |
+| 2026-11-15 | 球员单项属性编辑 | web/src/pages/PlayersPage.tsx 及测试、players.css | PASS | 69 格逐格编辑、脏标记、只提交改动格与切换确认成立；Important 为应用按钮越界时静默禁用无原因，已由修复切片闭环并补五项测试缺口。 |
+| 2026-11-15 | 实验页三段式重写 | web/src/pages/ExperimentsPage.tsx 及测试、experiments.css | PASS | 三段式顺序、场数与种子校验、A/B 翻倍、预检与失败分流成立；Important 为成功启动后未锁定与 retriable 未处理，已由修复切片闭环。 |
+| 2026-11-15 | 真实 FMF 导出 | fm27lab/adapters/fmf/archive.py、fm27lab/application/tactic_export.py、routes/fmf.py 与测试 | PASS | 真实归档逐字节一致、回读四键校验与 200/503 语义成立；Important 为必需引擎资源清单与场景资源需求不一致导致 400 泄露路径，已由后端修复切片闭环。 |
+| 2026-11-15 | 存档战术库后端 | fm27lab/adapters/save_fmsave/tactics.py、application/save_tactics.py、routes/save_tactics.py 与测试 | PASS | 真实存档 5 条用户战术与 19 条预设、两段式回读与 fail-closed 成立；Important 为 HTTP 未暴露 name 参数、Linux 无真实宿主，name 已补，真实宿主由 Windows 实测覆盖。 |
+| 2026-11-15 | 战术板与球员页前端审核 | TacticsPage.tsx、PlayersPage.tsx 及测试、api.ts | PASS | 模板提交体、导出 503、未保存确认、原生与旧版编辑、69 格编辑成立；Important 为关闭页面丢修改与请求挂起无退出路径，已由前端修复切片闭环。 |
+| 2026-11-15 | 设置页与实验页前端审核 | SettingsPage.tsx、ExperimentsPage.tsx 及测试 | FAIL | 重启等待在连接为空时不可达且无手动出口、确认框缺对话框语义与焦点管理、实验 409 无恢复入口；已由修复切片闭环。 |
+| 2026-11-15 | 后端修复复核 | engine_config.py、engine_import.py、routes/save_tactics.py、application/save_tactics.py 与测试 | PASS | 缺 editor 资源时 503 与 400 分流、name 全分支、OSError/RuntimeError/ValueError 映射成立；17 变异 16 杀，剩余为 catalog 断言子串歧义与空白名称被归一化覆盖，已收紧断言并补空白名称用例。 |
+| 2026-11-15 | 前端修复复核 | SettingsPage、ExperimentsPage、api.ts、PlayersPage、TacticsPage 及测试 | PASS | 重启超时出口、对话框焦点、409 与阻塞恢复、超时三态、beforeunload 与挂起提示成立；14 变异全杀、20 项探针全过，Important 为超时只覆盖响应头，列为后续改进。 |
+
 ## 审核规则
 
 - 审核者不得修改文件、不得执行 Git 写操作。
@@ -183,6 +196,6 @@
 - 先列 findings，再列已验证项，最后给结论。
 - Critical 或 Important 未闭环时不得标记 PASS。
 - 审核通过不等于整体发布就绪；发布仍需最终验收与 Windows 真机验证。
-- 旧 `tests/` 当前 281 项通过，覆盖 legacy UI/HTTP/CLI/MCP、存档战术库、池与名单；新 `fm27lab/tests` 当前 2222 项通过，覆盖包版本、CLI 环境继承、配置/路径边界、SQLite 迁移/事务与池/草案/任务/存档/产物/幂等仓储、HTTP 健康/池/草案/任务 CRUD、鉴权、错误封套、Origin、ACL 失败清理、sidecar serve、23 人名单、真实名单应用、scenario 归一化与旧场景 schema 升级、原生场景编码与定位球记录、场景物化与实验接线、原生宿主按需构造与按任务并行配置、宿主资源探测、catalog/双阶段战术与草案写入校验、客队战术池选择与整批展开、结果指标与跨任务对比、任务状态机与输出状态枚举、存档状态机与应用服务、安全边界与数据目录权限、事件流前端订阅与刷新合并、页面错误边界、性能基准与并发通道基准、跨平台测试、存档导入路径清洗与 FMF 路径导入、桌面文件选择接线、战术页参数恢复、README 中英文一致；Vitest 当前 357 项（14 个文件）。
+- 旧 `tests/` 当前 281 项通过，覆盖 legacy UI/HTTP/CLI/MCP、存档战术库、池与名单；新 `fm27lab/tests` 当前 2547 项通过，覆盖包版本、CLI 环境继承、配置/路径边界、SQLite 迁移/事务与池/草案/任务/存档/产物/幂等仓储、HTTP 健康/池/草案/任务 CRUD、鉴权、错误封套、Origin、ACL 失败清理、sidecar serve、23 人名单、真实名单应用、scenario 归一化与旧场景 schema 升级、原生场景编码与定位球记录、场景物化与实验接线、原生宿主按需构造与按任务并行配置、宿主资源探测、catalog/双阶段战术与草案写入校验、客队战术池选择与整批展开、结果指标与跨任务对比、任务状态机与输出状态枚举、存档状态机与应用服务、安全边界与数据目录权限、事件流前端订阅与刷新合并、页面错误边界、性能基准与并发通道基准、跨平台测试、存档导入路径清洗与 FMF 路径导入、桌面文件选择接线、战术页参数恢复、README 中英文一致；Vitest 当前 487 项（15 个文件）。
 - Tauri sidecar supervisor 的静态实现已存在，但 Linux 无 WebKitGTK，Windows CI 的 `cargo build`/`cargo test`/安装包构建是唯一编译证据。PyInstaller onedir sidecar 已在 Linux 构建并通过 ready/health/shutdown 冒烟测试。
-- Rust 核心 crate 当前 4 项 cargo test 通过；前端当前 357 项 Vitest（14 个文件）通过、类型检查与生产构建通过。Windows CI run 43558281006 全 job success，含 cargo build/test、NSIS 安装包与 sidecar 资源断言；Linux 本机仍无 WebKitGTK。合并、设计、sidecar、壳层、名单五个审核门均已 PASS。
+- Rust 核心 crate 当前 4 项 cargo test 通过；前端当前 487 项 Vitest（15 个文件）通过、类型检查与生产构建通过。Windows CI run 43558281006 全 job success，含 cargo build/test、NSIS 安装包与 sidecar 资源断言；Linux 本机仍无 WebKitGTK。合并、设计、sidecar、壳层、名单五个审核门均已 PASS。

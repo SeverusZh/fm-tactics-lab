@@ -104,6 +104,13 @@ fm27lab/
     jobs.py            任务查询与批量管理
     results.py         汇总、对比、导出
     engine.py          引擎选择与兼容状态
+    engine_config.py   引擎与游戏目录配置
+    engine_diagnostics.py 宿主 --check-image 诊断
+    engine_import.py   引擎资源发现与导入
+    tactic_import.py   FMF 战术文件到场景映射
+    tactic_export.py   场景到 FMF 导出与回读校验
+    save_tactics.py    存档战术列表与建草案
+    tactics_template.py 默认战术模板
     settings.py        设置与并发建议
   ports/
     engine.py          EnginePort
@@ -114,13 +121,13 @@ fm27lab/
     idempotency.py     IdempotencyStore
     events.py          EventPublisher
   adapters/
-    engine_native/     原生宿主、二进制编码、counted-session
-    save_fmsave/       fmsave 读取、教练与生成输入
+    engine_native/     原生宿主、二进制编码、counted-session、战术文件解析
+    save_fmsave/       fmsave 读取、教练与生成输入、存档战术提取
     storage_sqlite/    连接、迁移、仓储实现
     fmf/               FMF 导入导出与回读校验
     locale/            中英文
   interfaces/
-    http/              FastAPI 路由、鉴权、SSE、错误封套
+    http/              FastAPI 路由、鉴权、SSE、错误封套、系统与导入端点
     cli/               Typer 命令
     mcp/               MCP stdio 服务
   registry.py          命令注册表
@@ -139,6 +146,7 @@ native/                C++17 适配器
 - 写操作支持 `Idempotency-Key`；同键同载荷返回首次响应，同键异载荷返回 409。
 - 长任务通过 `GET /api/events` 的 SSE 推送进度；React 使用 fetch 流式读取并携带 `Authorization: Bearer`、`Accept: text/event-stream` 与 `Last-Event-ID`，不使用 EventSource 或 URL token；CORS preflight 允许 `Authorization` 与 `Last-Event-ID`。服务端先发送 ready 事件并支持按 `Last-Event-ID` 重放，客户端仅在重连时携带最后事件 id，断开后按 1s 起、30s 封顶的指数退避重连；事件驱动的查询失效按 300ms 窗口合并，页面保留手动刷新作为降级路径，未实现自动轮询。
 - `registry.py` 声明每个能力的名称、HTTP 方法与路径、CLI 命令路径与 MCP 工具名；三入口适配层当前手写并保持薄，`fm27lab/tests/test_registry_contract.py` 校验 OpenAPI 业务操作、CLI 叶子命令与 MCP 工具名同注册表一致，并检测名称、方法与路径约定漂移。输入/输出模型尚未纳入注册表。
+- 系统与导入路由 `/api/engine`、`/api/engine/select`、`/api/engine/diagnose`、`/api/engine/import`、`/api/system/restart`、`/api/tactics/template`、`/api/saves/{save_id}/tactics` 与 `/api/saves/{save_id}/tactics/{tactic_index}/import` 登记在 `registry.py` 的 `SYSTEM_PATHS`，需要 Bearer，不计入能力表，能力数仍为 52。
 - 业务路由只允许在 `fm27lab/interfaces/http/routes/` 的模块中声明并登记到 `registry.py`；除 `/api/health`、`/api/version`、`/api/openapi.json`、`/api/docs`、静态资源与显式系统路由 `/api/shutdown`、`/api/events` 外，不得在其他位置新增业务路由。
 - 契约测试验证每个能力在 HTTP、CLI、MCP 三个入口都存在，并校验 OpenAPI 操作、CLI 命令与 MCP 工具名一致；输入/输出 schema 快照尚未建立。
 - MCP 提供 tools、resources、prompts，并保留 stdio 传输。
