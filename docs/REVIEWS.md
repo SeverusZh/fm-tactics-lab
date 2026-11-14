@@ -156,6 +156,7 @@
 | 2026-11-14 | SSE 事件刷新合并 | web/src/lib/useEventRefresh.ts、useEventRefresh.test.ts、三页面与测试 | PASS | 300ms 尾沿窗口按键合并失效、卸载清理、事件语义与订阅切片等价；318 项 Vitest 连跑两次、12 变异 10 杀；2 条存活为等待窗口短于合并窗口与 keysRef 刷新缺测试。 |
 | 2026-11-14 | SSE 刷新合并测试补强复核 | web/src/pages/ResultsPage.test.tsx、web/src/lib/useEventRefresh.test.ts | PASS | 等待改为合并窗口加余量、新增重渲染后按最新查询键失效用例，两条存活变异被杀且附加四条变异全部被杀；仅测试变化、319 项 Vitest 两次与 typecheck 通过。 |
 | 2026-11-14 | 跨平台测试与场景快照修复 | fm27lab/application/experiment_material.py、fm27lab/adapters/host_resources.py、tests/test_experiments_service.py、test_host_resources.py、test_cli_commands.py | PASS | 场景与 provenance 按 UTF-8 字节写出、实验夹具改用临时目录、sysconf 探测可注入且 Windows 分支保留、CLI 帮助断言不依赖富文本；2101 项 pytest 与 ruff 通过，Linux 与 Windows CI 对应用例转绿；残留 Minor 为 manifest 待重建与跨平台计时阈值。 |
+| 2026-11-14 | 最终独立审核 | 全仓 | PASS | 质量门实测 2101 项 pytest、281 项 legacy unittest、319 项 Vitest（13 文件）、ruff、类型生成与 manifest 386 文件全绿；30 余条文档断言与三入口计数逐一取证一致，CHANGELOG 68 条审核声明全部可追溯到 REVIEWS PASS，TODO [x] 抽查无虚假完成、开放项如实；无秘密泄露与 v1 活入口；6 项 Minor 为文档计数与措辞漂移，已随本轮修正；Windows CI run 43552112064 全 job success。 |
 
 ## 审核规则
 
@@ -166,4 +167,4 @@
 - 审核通过不等于整体发布就绪；发布仍需最终验收与 Windows 真机验证。
 - 旧 `tests/` 当前 281 项通过，覆盖 legacy UI/HTTP/CLI/MCP、存档战术库、池与名单；新 `fm27lab/tests` 当前 2101 项通过，覆盖包版本、CLI 环境继承、配置/路径边界、SQLite 迁移/事务与池/草案/任务/存档/产物/幂等仓储、HTTP 健康/池/草案/任务 CRUD、鉴权、错误封套、Origin、ACL 失败清理、sidecar serve、23 人名单、真实名单应用、scenario 归一化、原生场景编码与定位球记录、场景物化与实验接线、原生宿主按需构造与按任务并行配置、宿主资源探测、catalog/双阶段战术与草案写入校验、客队战术池选择与整批展开、结果指标与跨任务对比、任务状态机与输出状态枚举、存档状态机与应用服务、安全边界与数据目录权限、事件流前端订阅与刷新合并、页面错误边界、性能基准、跨平台测试、README 中英文一致；Vitest 当前 319 项。
 - Tauri sidecar supervisor 的静态实现已存在，但 Linux 无 WebKitGTK，Windows CI 的 `cargo build`/`cargo test`/安装包构建是唯一编译证据。PyInstaller onedir sidecar 已在 Linux 构建并通过 ready/health/shutdown 冒烟测试。
-- Rust 核心 crate 当前 4 项 cargo test 通过；前端当前 319 项 Vitest（13 个文件）通过、类型检查与生产构建通过。Windows CI 已通过 cargo build/test、NSIS 安装包与 sidecar 资源断言；Linux 本机仍无 WebKitGTK。合并、设计、sidecar、壳层、名单五个审核门均已 PASS。
+- Rust 核心 crate 当前 4 项 cargo test 通过；前端当前 319 项 Vitest（13 个文件）通过、类型检查与生产构建通过。Windows CI run 43552112064 全 job success，含 cargo build/test、NSIS 安装包与 sidecar 资源断言；Linux 本机仍无 WebKitGTK。合并、设计、sidecar、壳层、名单五个审核门均已 PASS。

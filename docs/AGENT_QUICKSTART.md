@@ -229,7 +229,7 @@ MCP 没有 notifications/progress、notifications/cancelled 或 logging 能力�
 1. 创建草案：drafts create 需要 name 与 scenario，scenario 可用 @文件传入；成功返回草案 ID、source、时间字段。
 2. 调整属性：drafts attributes 按 side、scope、operation、params 修改，bulk 的 value 为 1 到 20 的显示值，内部按乘 5 存储（fm27lab/domain/attributes.py:165-183）。操作会写入属性快照，可用 undo 撤销（fm27lab/application/draft_attributes.py:23-40）。
 3. 提交实验：experiments submit 的 seeds 不可重复，总数不超过 10000；未显式给出资源字段时 CLI 先调用 GET /api/system/resources 自动探测（fm27lab/cli.py:806-836、840-881）。
-4. 启动执行：experiments start 调用 POST /api/experiments/start，服务端同步推进队首任务；当前构建会返回 503 engine_unavailable，这是引擎尚未接入 sidecar 的边界，不是调用错误（fm27lab/interfaces/http/app.py:49、125-133）。
+4. 启动执行：experiments start 调用 POST /api/experiments/start，服务端同步推进队首任务；未注入引擎且未配置 engine_root 时返回 503 engine_unavailable（fm27lab/interfaces/http/app.py:137-146、fm27lab/interfaces/http/routes/experiments.py:62-65），配置 engine_root 后首次启动按需构造原生宿主，引擎执行失败同样返回该码。
 5. 查看结果：jobs runs 分页读取每场结果，jobs summary 给出胜平负、进球、xG 等指标与配对差值，results compare 做跨任务同种子配对比较，jobs pool-summary 展示客队战术池抽签（fm27lab/interfaces/http/routes/results.py、fm27lab/domain/results.py）。
 6. 导出：jobs export 写 CSV，列固定为 job_id、sequence、variant、seed、score_home、score_away、verified、created_at、stats_json、events_json（fm27lab/application/results.py:19-30）。
 

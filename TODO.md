@@ -12,12 +12,12 @@
 - [x] React/Tauri 壳层第五轮 PASS；Windows cargo build/test、NSIS 与 sidecar 资源断言在 Actions run 43252465016 全部通过。
 - [ ] 安装包内 sidecar 启动/退出/卸载真机 QA（发布门槛）。
 - [x] 23 人名单领域切片（31 项测试）第五轮审核 PASS；bench/显式多 GK/短名单规则闭环。
-- [x] 存档对战退役最终 PASS；核心 career 入口、旧 UI、测试与文档已删除。
+- [x] 存档对战退役最终 PASS；核心 career 入口、存档对战旧 UI、测试与文档已删除。
 - [x] sidecar 基础切片：三轮审核 PASS；28 项测试；迁移/health/错误封套/连接/Origin/token repr/CLI env/入口/ACL 已闭环。
 - [x] PyInstaller onedir sidecar 构建成功，并通过 ready/health/shutdown 冒烟测试（Linux）。
 - [x] Rust 纯核心 crate：ready/token/backoff/connection，4 项 cargo test 通过。
 - [x] Python 3.12 sidecar 可独立启动与自检；PyInstaller onedir 冒烟通过。
-- [~] Tauri 2 壳、React 前端与打包链路：Windows cargo build/test 与 NSIS 已通过；sidecar 资源路径断言与新 CI run 待验证。
+- [x] Tauri 2 壳、React 前端与打包链路：Windows CI run 43252465016 与 43552112064 全 job success，cargo build/test、`tauri build --bundles nsis`、sidecar 资源与安装包断言均通过；安装包内真机启动与卸载 QA 仍为发布门槛。
 
 ## Phase 0 基础设施
 
@@ -28,7 +28,7 @@
 - [x] 建立 DESIGN.md、TODO.md、ADR 与设计系统文档。
 - [x] 修复设计审核 findings 并复审 PASS。
 - [x] Rust 工具链与纯核心 crate（ready/token/backoff/connection），4 项 cargo test 通过。
-- [~] CI：Linux Python/前端/Rust core 与 Windows sidecar 构建、`cargo build/test`、`tauri build --bundles nsis` 工作流已写入；等待 GitHub Actions 首次运行。
+- [x] CI：Linux Python/前端/Rust core 与 Windows sidecar 构建、`cargo build/test`、`tauri build --bundles nsis` 工作流已建立；run 43552112064 全 job success。
 - [ ] Rust 核心 crate 补齐 sidecar 进程监督测试。
 - [ ] Windows sidecar 打包、Tauri 安装包构建与真机验证。
 - [x] Python 3.12 sidecar 打包与自检：PyInstaller onedir 构建与独立启动冒烟通过。
@@ -70,7 +70,7 @@
 - [x] 实验提交接线：草案与客队战术池按种子物化为 FM27CFG1 场景、A/B 共用同一次抽签、提交持锁与失败清理、删除任务清理物化目录；已通过独立审核。
 - [x] 原生引擎生产接线：create_app 按注入 engine、engine_root 惰性宿主、未配置占位的顺序解析，运行时计划在启动时按能力协商，派发前按任务并行数配置宿主分道；已通过独立审核。
 - [x] 宿主资源探测：CPU、可用内存、空闲磁盘与推荐并行数，CLI 自动预填；已通过独立审核。
-- [~] 旧宿主回退到 64 场或执行力隔离模式，并记录 provenance：运行时计划与 provenance 进行中。
+- [x] 旧宿主回退到 64 场或执行力隔离模式，并记录 provenance：运行时计划按能力协商 counted/legacy 分支并写入任务 summary；已通过独立审核，真实旧宿主联调见 Phase 2 开放项。
 - [ ] 并发验收矩阵：1、8、256 路提交、取消、续跑、结果身份一致。
 - [ ] 真实引擎 Windows 验证脚本。
 - [ ] 独立审核 PASS。
@@ -96,7 +96,7 @@
 - [ ] 文件对话框、打开数据目录、外部链接：需要 tauri-plugin-dialog 与 tauri-plugin-opener 及 Rust 命令，本机无 Rust 工具链与 CI 运行记录，须在有 cargo 与 CI 可见的环境完成。
 - [x] 文档与 v2 实现事实对齐：AGENT_QUICKSTART、AGENT_INTEGRATION、AGENT_VERIFICATION 已按真实 endpoint、关闭接口、命名空间与测试计数重写；已通过独立审核。
 - [x] 删除 Launcher.cs 与旧 C# 构建入口，并从 scripts/export_source.py 的 TOP 移除；同步 `docs/AGENT_INTEGRATION.md`、`docs/AGENT_VERIFICATION.md` 与 `THIRD_PARTY_NOTICES.md` 中的 Launcher 描述；已通过独立审核。
-- [ ] Windows 安装包与卸载清理；CI 需执行 `tauri build` 验证 sidecar resources。
+- [~] Windows 安装包构建与卸载清理：CI 已通过 `tauri build` 生成 NSIS 并断言 sidecar resources；安装与卸载真机清理待 Windows 真机。
 - [ ] 独立审核 PASS。
 
 ## Phase 5 UI

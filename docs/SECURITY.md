@@ -88,7 +88,7 @@ SSE 端点 /api/events 要求 Bearer（fm27lab/interfaces/http/routes/system.py:
 
 扫描方法如下：以 git ls-files 的跟踪清单为输入，检索私钥块、令牌赋值、Authorization Bearer 字面值、邮箱与绝对用户路径；检查 private 与 data 工作树目录是否存在被跟踪文件；读取 SOURCE_MANIFEST.json 检查键集合；检索 .gitignore 的覆盖规则。结论是无真实令牌、私钥与个人信息入库：唯一命中为文档示例占位路径 /home/user/.fm27lab（docs/AGENT_INTEGRATION.md:79-80、docs/AGENT_QUICKSTART.md:103）与文档中的错误令牌示例 wrong（docs/AGENT_VERIFICATION.md:106）。扫描把测试与文档中的占位令牌字面值排除在泄漏判定之外，例如 fm27lab/tests/test_http_health.py 的测试令牌与 docs/AGENT_VERIFICATION.md:106 的示例值。
 
-git ls-files 结果中不存在 private/、endpoint.json、*.db、*.jsonl、*.fm、*.fmf、*.pkm 与 .env。SOURCE_MANIFEST.json 共 374 个条目，不含 private 前缀、*.db 与 endpoint.json，由 test_source_manifest_excludes_private_runtime_files 守护。.gitignore 覆盖 /private/、/data/、*.jsonl、*.fm、*.fmf、*.pkm、.env、*.db 与 endpoint.json（.gitignore:4-5、.gitignore:7、.gitignore:10、.gitignore:16-21），由 test_gitignore_covers_private_and_runtime_data 守护；该用例同时用 git ls-files 校验跟踪清单不含对应模式，git 不可用时跳过跟踪检查并保留忽略规则断言。
+git ls-files 结果中不存在 private/、endpoint.json、*.db、*.jsonl、*.fm、*.fmf、*.pkm 与 .env。SOURCE_MANIFEST.json 共 386 个条目，不含 private 前缀、*.db 与 endpoint.json，由 test_source_manifest_excludes_private_runtime_files 守护。.gitignore 覆盖 /private/、/data/、*.jsonl、*.fm、*.fmf、*.pkm、.env、*.db 与 endpoint.json（.gitignore:4-5、.gitignore:7、.gitignore:10、.gitignore:16-21），由 test_gitignore_covers_private_and_runtime_data 守护；该用例同时用 git ls-files 校验跟踪清单不含对应模式，git 不可用时跳过跟踪检查并保留忽略规则断言。
 
 *.db 与 endpoint.json 已单列为忽略规则（.gitignore:20-21）。默认数据目录位于用户主目录（fm27lab/config.py:20-24），仓库内数据目录由 /data/ 覆盖；若把 FM27LAB_DATA 指向仓库内其他目录，仍可能通过 git add -f 强制跟踪，保持默认数据目录即可。
 
