@@ -15,7 +15,7 @@ TYPES = {'src': {'.py', '.js', '.css', '.html'},
          'web': {'.ts', '.tsx', '.js', '.jsx', '.css', '.html', '.json', '.svg', '.png', '.ico', '.yaml', '.yml'},
          'rust': {'.rs', '.toml', '.lock', '.md'},
          '.github': {'.yml', '.yaml', '.md'},
-         'src-tauri': {'.rs', '.toml', '.json', '.md', '.sql', '.lock', '.png', '.ico', '.svg'},
+         'src-tauri': {'.rs', '.toml', '.json', '.md', '.sql', '.lock', '.png', '.ico', '.svg', '.nsh'},
          'scripts': {'.py'}, 'tests': {'.py', '.cjs'}, 'docs': {'.md'},
          'native': {'.cpp', '.h', '.manifest'}}
 SKIP_PARTS = {'__pycache__', 'node_modules', 'target', 'dist', 'build', '.venv',

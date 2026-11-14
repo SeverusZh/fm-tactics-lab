@@ -27,6 +27,28 @@ def test_sidecar_build_produces_onedir_payload():
     assert "fm27lab/adapters/storage_sqlite/migrations" in script
 
 
+def installer_hooks() -> Path:
+    document = json.loads(CONFIG.read_text(encoding="utf-8"))
+    relative = document["bundle"]["windows"]["nsis"]["installerHooks"]
+    return (CONFIG.parent / relative).resolve()
+
+
+def test_installer_hooks_file_exists():
+    hooks = installer_hooks()
+    assert hooks.is_file()
+    assert hooks.suffix == ".nsh"
+
+
+def test_installer_hooks_stop_running_processes_before_touching_files():
+    text = installer_hooks().read_text(encoding="utf-8")
+    assert "!macro NSIS_HOOK_PREINSTALL" in text
+    assert "!macro NSIS_HOOK_PREUNINSTALL" in text
+    assert text.count("!insertmacro FM27LAB_STOP_PROCESSES") == 2
+    for image in ("fm27lab-sidecar.exe", "fm27lab-desktop.exe"):
+        assert f"nsExec::Exec 'taskkill /F /T /IM {image}'" in text
+    assert text.count("Pop $0") == 2
+
+
 def test_ci_verifies_installer_payload_layout():
     workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
     assert "sidecar/_internal" in workflow
