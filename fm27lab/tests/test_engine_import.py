@@ -258,7 +258,7 @@ def test_reports_copied_manifest_and_total_bytes(tmp_path: Path):
         "catalog.json",
     }
     actual = {
-        str(path.relative_to(target)): path.stat().st_size
+        path.relative_to(target).as_posix(): path.stat().st_size
         for path in target.rglob("*")
         if path.is_file()
     }

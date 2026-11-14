@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 from pathlib import Path
 
 import pytest
@@ -15,6 +16,9 @@ from fm27lab.interfaces.http.app import create_app
 from fm27lab.interfaces.http.routes import engine as engine_routes
 
 ERROR_FIELDS = {"code", "message", "details", "retriable", "retry_after_seconds"}
+_MISSING_ROOT = Path(os.path.abspath(os.sep))
+MISSING_ENGINE = str(_MISSING_ROOT / "definitely" / "missing" / "engine")
+MISSING_GAME = str(_MISSING_ROOT / "definitely" / "missing" / "game")
 
 
 def build_engine_root(path: Path) -> Path:
@@ -158,9 +162,9 @@ def test_engine_select_requires_a_root(tmp_path: Path):
     ("payload_name", "value", "fragment"),
     [
         ("engine_root", "engine", "必须是绝对路径"),
-        ("engine_root", "/definitely/missing/engine", "不存在或不是目录"),
+        ("engine_root", MISSING_ENGINE, "不存在或不是目录"),
         ("game_root", "game", "必须是绝对路径"),
-        ("game_root", "/definitely/missing/game", "不存在或不是目录"),
+        ("game_root", MISSING_GAME, "不存在或不是目录"),
     ],
 )
 def test_engine_select_rejects_invalid_roots(tmp_path: Path, payload_name: str, value: str, fragment: str):

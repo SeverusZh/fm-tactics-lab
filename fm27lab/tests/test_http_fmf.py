@@ -234,6 +234,7 @@ def test_fmf_http_import_body_validation(tmp_path: Path):
         assert error_of(response)["code"] == "validation_failed"
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows 无法直接执行脚本型宿主")
 def test_fmf_http_export_escapes_attachment_filename(tmp_path: Path):
     engine = write_engine_root(tmp_path)
     plan = faithful_plan(load_scenario_assets(engine))
@@ -846,6 +847,7 @@ def test_fmf_file_http_native_import_reports_missing_host(
     assert error_of(response)["message"] == f"原生宿主程序不存在：{expected}"
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows 无法直接执行脚本型宿主")
 def test_fmf_file_http_native_import_reports_non_tactic_archive(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
@@ -856,6 +858,7 @@ def test_fmf_file_http_native_import_reports_non_tactic_archive(
     assert error_of(response)["message"] == "文件不是 FM 战术归档"
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows 无法直接执行脚本型宿主")
 def test_fmf_file_http_native_import_reports_parse_failure(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
