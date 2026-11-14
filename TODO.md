@@ -150,10 +150,10 @@
 - [x] `MATCH_ROSTER_SIZE = 23` 单点定义，移除 23/26 分支：定义在 `fm27lab/domain/roster.py:8`；26 只作为旧池 schema 的接收上限并在 `fm27lab/domain/pool.py:552` 起裁剪，与比赛名单无关。
 - [~] 样本、存档、AI 生成、FMF、战术池与结果统计全部归一化：样本、存档、FMF、战术池与实验配置均经 `normalize_scenario` 归一化；AI 生成输入在 `fm27lab/adapters/engine_native/scenario_codec.py` 显式拒绝，待后续。
 - [x] 确定性截断与重映射，覆盖首发、替补、门将、队长、主罚与定位球优先级：`fm27lab/tests/test_roster.py:124`、`:259`、`:370` 与 `fm27lab/tests/test_roster_apply.py:50`、`:367` 覆盖。
-- [~] 不足 23 人的占位策略与 UI 提示：占位策略已实现（`fm27lab/tests/test_roster.py:72`、`fm27lab/tests/test_scenario.py:63`），UI 提示待后续。
-- [~] 旧 26 人方案加载兼容与提示：兼容与 `roster_trim` 记录已实现（`fm27lab/tests/test_roster.py:34`、`:390`、`fm27lab/tests/test_roster_apply.py:168`），UI 提示待后续。
+- [x] 不足 23 人的占位策略与 UI 提示：占位策略与球员页提示已实现（`fm27lab/tests/test_roster.py:72`、`fm27lab/tests/test_scenario.py:63`、`web/src/pages/PlayersPage.tsx`），含逐字文案与占位标识；已通过独立审核。
+- [x] 旧 26 人方案加载兼容与提示：兼容、`roster_trim` 记录与球员页裁剪提示已实现（`fm27lab/tests/test_roster.py:34`、`:390`、`fm27lab/tests/test_roster_apply.py:168`、`web/src/pages/PlayersPage.tsx`）；已通过独立审核。
 - [x] 测试矩阵覆盖 26→23、23→23、<23、只有 1 名门将、0 名门将、全部首发为 generated、引用被移除：`fm27lab/tests/test_roster.py:34`、`:57`、`:72`、`:95`、`:106`、`:222`、`:124` 与 `fm27lab/tests/test_scenario.py:63`。
-- [ ] 独立审核 PASS。
+- [x] 独立审核 PASS。
 
 ### PR #10 遗留功能
 
@@ -169,12 +169,12 @@
 
 ## Phase 7 收尾
 
-- [ ] 删除存档对战的残留引用与旧构建入口。
-- [ ] README 中英文重写并同步升级说明。
+- [x] 删除存档对战的残留引用与旧构建入口：C# Launcher 与 EXE 构建入口退役，代码、脚本、文档与清单同步；已通过独立审核。
+- [x] README 中英文重写并同步升级说明：删除 v1 语义与旧截图引用，改写为 v2 架构、三入口、实验与结果流程、构建测试与版本状态；数字与常量逐条核对、双语对称；已通过独立审核。
 - [ ] DESIGN.md、DESIGN_SYSTEM.md、CHANGELOG.md、TODO.md 同步。
 - [ ] 字体资产与 OFL 许可写入 THIRD_PARTY_NOTICES。
 - [ ] 性能基准与并发对比。
-- [ ] 安全与隐私检查。
+- [x] 安全与隐私检查：`docs/SECURITY.md` 与 22 条边界测试覆盖鉴权矩阵、令牌与 endpoint 权限、CORS、路径包含、输入上限、幂等与仓库隐私；修复数据目录 0755 缺陷；已通过独立审核。
 - [ ] 最终独立审核 PASS。
 - [ ] 发布候选构建与 Windows 真机验证。
 
