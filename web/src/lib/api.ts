@@ -1,4 +1,4 @@
-// API 类型映射：生成别名 41 项；保留手写类型 25 项；字段派生 2 项；ApiError 类保留；明细见 api-types.test.ts。
+// API 类型映射：生成别名 47 项；保留手写类型 25 项；字段派生 2 项；ApiError 类保留；明细见 api-types.test.ts。
 
 import type { Connection } from "./connection";
 import type {
@@ -13,6 +13,10 @@ import type {
   DraftOutput,
   DraftSummary as GeneratedDraftSummary,
   DraftUpdateInput,
+  EngineDiagnosisOutput,
+  EngineImportOutput,
+  EngineSelectInput,
+  EngineStatusOutput,
   ExperimentSubmitInput as GeneratedExperimentSubmitInput,
   FmfFileImportInput as GeneratedFmfFileImportInput,
   ImportedClubOutput,
@@ -38,11 +42,13 @@ import type {
   SaveImportInput,
   SaveListOutput,
   SaveOutput,
+  SaveTacticOutput,
   SaveUpdateInput,
   SettingListOutput,
   SettingOutput,
   SettingPutInput,
   SystemResourcesOutput,
+  TacticsTemplateOutput,
 } from "./api-schema";
 
 // 健康检查响应未纳入 OpenAPI 组件模型，保留手写。
@@ -58,41 +64,75 @@ export class ApiError extends Error {
     message: string,
     readonly status: number,
     readonly code: string,
+    readonly retriable: boolean = true,
   ) {
     super(message);
   }
 }
 
+export const API_TIMEOUT_MS = 30_000;
+
+type ApiRequestInit = RequestInit & { timeoutMs?: number };
+
 export async function apiFetch(
   connection: Connection,
   path: string,
-  init: RequestInit = {},
+  init: ApiRequestInit = {},
 ): Promise<Response> {
-  const headers = new Headers(init.headers);
+  const { timeoutMs = API_TIMEOUT_MS, ...fetchInit } = init;
+  const headers = new Headers(fetchInit.headers);
   headers.set("Authorization", `Bearer ${connection.token}`);
-  if (init.body && !headers.has("Content-Type")) {
+  if (fetchInit.body && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
   }
-  const response = await fetch(`${connection.url}${path}`, { ...init, headers });
-  if (!response.ok) {
-    let message = `请求失败：${response.status}`;
-    let code = "http_error";
-    try {
-      const body = (await response.json()) as { error?: { message?: string; code?: string } };
-      message = body.error?.message ?? message;
-      code = body.error?.code ?? code;
-    } catch {
-      // Keep the status-based fallback when the body is not JSON.
-    }
-    throw new ApiError(message, response.status, code);
+  const controller = new AbortController();
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, timeoutMs);
+  const externalSignal = fetchInit.signal;
+  const abortFromExternal = () => controller.abort();
+  if (externalSignal) {
+    if (externalSignal.aborted) controller.abort();
+    else externalSignal.addEventListener("abort", abortFromExternal);
   }
-  return response;
+  try {
+    const response = await fetch(`${connection.url}${path}`, {
+      ...fetchInit,
+      headers,
+      signal: controller.signal,
+    });
+    if (!response.ok) {
+      let message = `请求失败：${response.status}`;
+      let code = "http_error";
+      let retriable = response.status >= 500 || response.status === 409;
+      try {
+        const body = (await response.json()) as {
+          error?: { message?: string; code?: string; retriable?: boolean };
+        };
+        message = body.error?.message ?? message;
+        code = body.error?.code ?? code;
+        if (typeof body.error?.retriable === "boolean") retriable = body.error.retriable;
+      } catch {
+        // Keep the status-based fallback when the body is not JSON.
+      }
+      throw new ApiError(message, response.status, code, retriable);
+    }
+    return response;
+  } catch (error) {
+    if (timedOut) throw new ApiError("请求超时，请重试", 0, "timeout", true);
+    throw error;
+  } finally {
+    clearTimeout(timer);
+    externalSignal?.removeEventListener("abort", abortFromExternal);
+  }
 }
 
 export async function apiJson<T>(
   connection: Connection,
   path: string,
-  init: RequestInit = {},
+  init: ApiRequestInit = {},
 ): Promise<T> {
   const response = await apiFetch(connection, path, init);
   return (await response.json()) as T;
@@ -302,6 +342,8 @@ export type SaveUpdate = SaveUpdateInput;
 
 export type SaveImport = SaveImportInput;
 
+export type SaveTactic = SaveTacticOutput;
+
 // 存档查询参数未在 OpenAPI 中单独建模，保留手写。
 export type SaveQuery = {
   status?: SaveStatus;
@@ -345,6 +387,30 @@ export function importSave(
     method: "POST",
     body: JSON.stringify(payload),
   });
+}
+
+export async function listSaveTactics(
+  connection: Connection,
+  saveId: string,
+): Promise<SaveTactic[]> {
+  const body = await apiJson<{ items: SaveTactic[] }>(
+    connection,
+    `/api/saves/${encodeURIComponent(saveId)}/tactics`,
+  );
+  return body.items;
+}
+
+export async function importSaveTactic(
+  connection: Connection,
+  saveId: string,
+  tacticIndex: number,
+): Promise<Draft> {
+  const body = await apiJson<{ draft: Draft }>(
+    connection,
+    `/api/saves/${encodeURIComponent(saveId)}/tactics/${tacticIndex}/import`,
+    { method: "POST" },
+  );
+  return body.draft;
 }
 
 export type Draft = DraftOutput;
@@ -406,6 +472,14 @@ export async function deleteDraft(connection: Connection, draftId: string): Prom
   await apiFetch(connection, `/api/drafts/${encodeURIComponent(draftId)}`, { method: "DELETE" });
 }
 
+export async function exportDraftFmf(connection: Connection, draftId: string): Promise<Blob> {
+  const response = await apiFetch(
+    connection,
+    `/api/drafts/${encodeURIComponent(draftId)}/export.fmf`,
+  );
+  return response.blob();
+}
+
 // 属性编辑输入模型仍是 str，页面以字面量联合类型约束，保留手写。
 export type DraftAttributeSide = "home" | "away";
 
@@ -413,8 +487,9 @@ export type DraftAttributeSide = "home" | "away";
 export type DraftAttributeScope = "all" | "starters" | "player" | "squad";
 
 // 属性编辑输入模型仍是 str，页面以字面量联合类型约束，保留手写。
-export type DraftAttributeOperation = "bulk" | "position" | "copy" | "pair_feet" | "undo";
+export type DraftAttributeOperation = "bulk" | "position" | "copy" | "pair_feet" | "cells" | "undo";
 
+// cells 操作的 params.values 形如 {属性索引十进制字符串: 显示值}。
 export type DraftAttributePayload = DraftAttributeInput;
 
 export type DraftAttributeResult = DraftAttributeOutput;
@@ -497,6 +572,15 @@ export async function getCatalog(connection: Connection): Promise<Catalog | null
   }
 }
 
+export type TacticsTemplate = TacticsTemplateOutput;
+
+export async function getTacticsTemplate(
+  connection: Connection,
+): Promise<TacticsTemplate["scenario"]> {
+  const body = await apiJson<TacticsTemplate>(connection, "/api/tactics/template");
+  return body.scenario;
+}
+
 export type Setting = SettingOutput;
 
 export type SettingList = SettingListOutput;
@@ -556,6 +640,43 @@ export function checkConcurrency(
 }
 
 export type HostResources = SystemResourcesOutput;
+
+export type EngineStatus = EngineStatusOutput;
+
+export type EngineDiagnosis = EngineDiagnosisOutput;
+
+export type EngineSelect = EngineSelectInput;
+
+export type EngineImportResult = EngineImportOutput;
+
+export function importEngineResources(
+  connection: Connection,
+  sourcePath: string,
+): Promise<EngineImportResult> {
+  return apiJson<EngineImportResult>(connection, "/api/engine/import", {
+    method: "POST",
+    body: JSON.stringify({ source_path: sourcePath }),
+  });
+}
+
+export function getEngineStatus(connection: Connection): Promise<EngineStatus> {
+  return apiJson<EngineStatus>(connection, "/api/engine");
+}
+
+export function selectEngine(connection: Connection, input: EngineSelect): Promise<EngineStatus> {
+  return apiJson<EngineStatus>(connection, "/api/engine/select", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export function diagnoseEngine(connection: Connection): Promise<EngineDiagnosis> {
+  return apiJson<EngineDiagnosis>(connection, "/api/engine/diagnose", { method: "POST" });
+}
+
+export async function restartSidecar(connection: Connection): Promise<void> {
+  await apiFetch(connection, "/api/system/restart", { method: "POST" });
+}
 
 export type ExperimentSubmitInput = GeneratedExperimentSubmitInput;
 

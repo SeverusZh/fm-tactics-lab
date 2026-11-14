@@ -4,6 +4,7 @@ import {
   Flask,
   GearSix,
   ListChecks,
+  Question,
   SquaresFour,
   UsersThree,
 } from "@phosphor-icons/react";
@@ -19,6 +20,7 @@ const links = [
   { to: "/results", label: "实验结果", icon: ChartBar },
   { to: "/jobs", label: "任务管理", icon: ListChecks },
   { to: "/settings", label: "设置", icon: GearSix },
+  { to: "/help", label: "帮助", icon: Question },
 ];
 
 export function Rail() {

@@ -1,0 +1,106 @@
+.players-advanced {
+  margin-bottom: var(--space-4);
+}
+
+.players-advanced > summary {
+  width: fit-content;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--surface-raised);
+  color: var(--text);
+  font-family: var(--font-body);
+  font-size: var(--type-body-sm);
+  cursor: pointer;
+}
+
+.players-advanced > summary:focus-visible {
+  outline: 2px solid var(--accent-text);
+  outline-offset: 1px;
+}
+
+.players-advanced[open] > summary {
+  margin-bottom: var(--space-3);
+}
+
+.players-advanced .players-bulk {
+  margin-top: 0;
+}
+
+.players-attribute-value {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+}
+
+.players-attribute-input {
+  width: 5.5rem;
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: var(--type-body);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.players-attribute-input:focus-visible {
+  outline: 2px solid var(--accent-text);
+  outline-offset: 1px;
+}
+
+.players-attribute-input[aria-invalid="true"] {
+  border-color: var(--danger);
+}
+
+.players-attribute.is-dirty {
+  background: var(--selected);
+}
+
+.players-attribute.is-dirty .players-attribute-input {
+  border-color: var(--accent-text);
+  font-weight: 600;
+}
+
+.players-attribute-dirty {
+  color: var(--accent-text);
+  font-size: var(--type-caption);
+  white-space: nowrap;
+}
+
+.players-edit-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin: var(--space-3) 0;
+}
+
+.players-dirty-count {
+  color: var(--text-muted);
+  font-size: var(--type-body-sm);
+}
+
+.players-edit-pending {
+  color: var(--text-muted);
+  font-size: var(--type-body-sm);
+}
+
+.players-bulk-hint {
+  margin: var(--space-2) 0 0;
+  color: var(--text-muted);
+  font-size: var(--type-body-sm);
+}
+
+.players-attribute-input:disabled {
+  opacity: 0.6;
+}
+
+@media (max-width: 640px) {
+  .players-attribute-input {
+    width: 4.5rem;
+  }
+}

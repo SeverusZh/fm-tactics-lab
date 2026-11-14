@@ -86,6 +86,25 @@ describe("App shell", () => {
     expect(await screen.findByText("sidecar 正常")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /战术板/ })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /实验结果/ })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "帮助" })).toBeInTheDocument();
+  });
+
+  it("navigates to the help page from navigation", async () => {
+    renderApp();
+    await screen.findByText("sidecar 正常");
+
+    fireEvent.click(screen.getByRole("link", { name: "帮助" }));
+
+    expect(await screen.findByRole("heading", { level: 1, name: "帮助" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "三步上手" })).toBeInTheDocument();
+  });
+
+  it("does not render the run settings footer", async () => {
+    renderApp();
+    await screen.findByText("sidecar 正常");
+
+    expect(screen.queryByLabelText("运行设置")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "运行比赛" })).not.toBeInTheDocument();
   });
 
   it("navigates to the results page", async () => {

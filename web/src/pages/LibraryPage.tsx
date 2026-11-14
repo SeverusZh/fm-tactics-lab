@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Archive, ArrowClockwise, Plus } from "@phosphor-icons/react";
+import { Archive, ArrowClockwise } from "@phosphor-icons/react";
 import { useState, type FormEvent, type ReactNode } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 
 import { useAppContext } from "../app-context";
 import { EmptyState } from "../components/EmptyState";
@@ -9,30 +9,28 @@ import { Panel } from "../components/Panel";
 import {
   ApiError,
   applyRoster,
-  createSave,
   deleteSave,
   getSaveSquad,
   importFmfFile,
-  importSave,
   importSaveFile,
+  importSaveTactic,
   listDrafts,
   listSaves,
+  listSaveTactics,
   undoRoster,
   type FmfFileImportInput,
   type RosterScope,
   type RosterSide,
   type Save,
-  type SaveCreate,
   type SaveFileImportResult,
-  type SaveImport,
   type SaveStatus,
+  type SaveTactic,
 } from "../lib/api";
 import { chooseLocalFile, isDesktopShell } from "../lib/file-dialog";
+import "../styles/library.css";
 
 const PAGE_SIZE = 20;
-const SHA256_PATTERN = /^[0-9a-fA-F]{64}$/;
 const MAX_SOURCE_PATH = 4096;
-const MAX_STAGE = 200;
 
 const STATUS_LABELS: Record<SaveStatus, string> = {
   pending: "待读取",
@@ -75,54 +73,6 @@ function managedClubUids(save: Save | undefined): number[] {
   return value.filter((uid): uid is number => typeof uid === "number");
 }
 
-type MetadataParse = {
-  value?: Record<string, unknown>;
-  error: string | null;
-};
-
-function parseMetadata(text: string): MetadataParse {
-  const trimmed = text.trim();
-  if (trimmed === "") return { error: null };
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(trimmed);
-  } catch {
-    return { error: "元数据必须为合法 JSON 对象" };
-  }
-  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
-    return { error: "元数据必须为合法 JSON 对象" };
-  }
-  return { value: parsed as Record<string, unknown>, error: null };
-}
-
-type ImportParse = {
-  payload?: SaveImport;
-  error: string | null;
-};
-
-function isRecord(value: unknown): value is Record<string, Record<string, unknown>> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-
-function parseImport(text: string): ImportParse {
-  const trimmed = text.trim();
-  if (trimmed === "") return { error: "导入内容不能为空" };
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(trimmed);
-  } catch {
-    return { error: "导入内容必须是合法 JSON" };
-  }
-  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
-    return { error: "导入内容必须是 JSON 对象" };
-  }
-  const record = parsed as Record<string, unknown>;
-  if (!isRecord(record.leagues) || !isRecord(record.clubs)) {
-    return { error: "导入内容需要 leagues 与 clubs 对象" };
-  }
-  return { payload: { leagues: record.leagues, clubs: record.clubs }, error: null };
-}
-
 function SaveStatusFilter({
   value,
   onChange,
@@ -161,26 +111,37 @@ function deriveFmfName(path: string): string {
   return (trimmed === "" ? "导入战术" : trimmed).slice(0, FMF_NAME_MAX_LENGTH);
 }
 
+const MENTALITY_LABELS: Record<number, string> = {
+  1: "极度防守",
+  2: "防守",
+  3: "谨慎",
+  4: "均衡",
+  5: "积极",
+  6: "进攻",
+  7: "全力进攻",
+};
+
+function mentalityLabel(value: number | null): string {
+  if (value === null) return "—";
+  return MENTALITY_LABELS[value] ?? String(value);
+}
+
+function teamSlotLabel(value: number | null): string {
+  if (value === null) return "—";
+  return value === 0 ? "一线队" : `槽位 ${value}`;
+}
+
+function tacticImportBlocker(tactic: SaveTactic): string | null {
+  if (tactic.importable) return null;
+  return tactic.team_slot === 0 ? "需要先配置引擎资源" : "非一线队存储战术";
+}
+
 export function LibraryPage() {
   const { connection } = useAppContext();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const [status, setStatus] = useState<SaveStatus | "">("");
   const [offset, setOffset] = useState(0);
-  const [createOpen, setCreateOpen] = useState(false);
-  const [importTargetId, setImportTargetId] = useState<string | null>(null);
-  const [sourcePath, setSourcePath] = useState("");
-  const [sourceSha, setSourceSha] = useState("");
-  const [stage, setStage] = useState("");
-  const [metadataText, setMetadataText] = useState("");
-  const [touched, setTouched] = useState({
-    path: false,
-    sha: false,
-    stage: false,
-    metadata: false,
-  });
-  const [importText, setImportText] = useState("");
-  const [importError, setImportError] = useState<string | null>(null);
   const [confirmation, setConfirmation] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -199,6 +160,7 @@ export function LibraryPage() {
   const [fmfError, setFmfError] = useState<string | null>(null);
   const [squadSaveId, setSquadSaveId] = useState<string | null>(null);
   const [squadClubUid, setSquadClubUid] = useState<number | null>(null);
+  const [tacticsSaveId, setTacticsSaveId] = useState<string | null>(null);
   const [rosterDraftId, setRosterDraftId] = useState("");
   const [rosterSide, setRosterSide] = useState<RosterSide>("home");
   const [rosterScope, setRosterScope] = useState<RosterScope>("starters");
@@ -222,6 +184,12 @@ export function LibraryPage() {
     enabled: connection !== null && squadSaveId !== null && squadClubUid !== null,
   });
 
+  const saveTactics = useQuery({
+    queryKey: ["save-tactics", connection?.url, tacticsSaveId],
+    queryFn: () => listSaveTactics(connection!, tacticsSaveId!),
+    enabled: connection !== null && tacticsSaveId !== null,
+  });
+
   const drafts = useQuery({
     queryKey: ["drafts", connection?.url],
     queryFn: () => listDrafts(connection!),
@@ -231,21 +199,6 @@ export function LibraryPage() {
   const invalidateSaves = () => {
     void queryClient.invalidateQueries({ queryKey: ["saves"] });
   };
-
-  const pathTrimmed = sourcePath.trim();
-  const shaTrimmed = sourceSha.trim();
-  const stageTrimmed = stage.trim();
-  const metadata = parseMetadata(metadataText);
-  const pathError =
-    pathTrimmed === ""
-      ? "存档路径不能为空"
-      : pathTrimmed.length > MAX_SOURCE_PATH
-        ? `存档路径最多 ${MAX_SOURCE_PATH} 个字符`
-        : null;
-  const shaError = SHA256_PATTERN.test(shaTrimmed) ? null : "SHA-256 需为 64 位十六进制字符串";
-  const stageError =
-    stageTrimmed.length > MAX_STAGE ? `阶段最多 ${MAX_STAGE} 个字符` : null;
-  const formValid = pathError === null && shaError === null && stageError === null && metadata.error === null;
 
   const filePathTrimmed = fileSourcePath.trim();
   const filePathError =
@@ -258,46 +211,6 @@ export function LibraryPage() {
   const fmfPathTrimmed = fmfSourcePath.trim();
   const fmfPathError = fmfPathTrimmed === "" ? "战术文件路径不能为空" : null;
   const fmfNameTrimmed = fmfName.trim();
-
-  const resetForm = () => {
-    setSourcePath("");
-    setSourceSha("");
-    setStage("");
-    setMetadataText("");
-    setTouched({ path: false, sha: false, stage: false, metadata: false });
-  };
-
-  const create = useMutation({
-    mutationFn: (input: SaveCreate) => createSave(connection!, input),
-    onSuccess: () => {
-      setCreateOpen(false);
-      setActionError(null);
-      setNotice("存档已创建");
-      resetForm();
-      invalidateSaves();
-    },
-    onError: (error) => {
-      setNotice(null);
-      setActionError(errorMessage(error));
-    },
-  });
-
-  const importMutation = useMutation({
-    mutationFn: (input: { saveId: string; payload: SaveImport }) =>
-      importSave(connection!, input.saveId, input.payload),
-    onSuccess: () => {
-      setImportTargetId(null);
-      setImportText("");
-      setImportError(null);
-      setActionError(null);
-      setNotice("存档已导入");
-      invalidateSaves();
-    },
-    onError: (error) => {
-      setNotice(null);
-      setActionError(errorMessage(error));
-    },
-  });
 
   const fileImport = useMutation({
     mutationFn: (input: { source_path: string; replace: boolean }) =>
@@ -339,6 +252,16 @@ export function LibraryPage() {
     },
   });
 
+  const importTactic = useMutation({
+    mutationFn: (tacticIndex: number) =>
+      importSaveTactic(connection!, tacticsSaveId!, tacticIndex),
+    retry: false,
+    onSuccess: (draft) => {
+      void queryClient.invalidateQueries({ queryKey: ["drafts", connection?.url] });
+      navigate(`/tactics?draft=${draft.id}`);
+    },
+  });
+
   const remove = useMutation({
     mutationFn: (save: Save) => deleteSave(connection!, save.id),
     onSuccess: (_result, save) => {
@@ -350,6 +273,10 @@ export function LibraryPage() {
         setSquadClubUid(null);
         setRosterError(null);
         setRosterNotice(null);
+      }
+      if (tacticsSaveId === save.id) {
+        setTacticsSaveId(null);
+        importTactic.reset();
       }
       invalidateSaves();
     },
@@ -409,28 +336,8 @@ export function LibraryPage() {
     setNotice(null);
     setSquadSaveId(null);
     setSquadClubUid(null);
-  };
-
-  const openCreate = () => {
-    setCreateOpen((open) => !open);
-    setFmfFormOpen(false);
-    setImportTargetId(null);
-    setImportError(null);
-    setFileFormOpen(false);
-    setActionError(null);
-    setNotice(null);
-  };
-
-  const openImport = (saveId: string) => {
-    setImportTargetId(saveId);
-    setFmfFormOpen(false);
-    setImportText("");
-    setImportError(null);
-    setCreateOpen(false);
-    setFileFormOpen(false);
-    setConfirmation(null);
-    setActionError(null);
-    setNotice(null);
+    setTacticsSaveId(null);
+    importTactic.reset();
   };
 
   const pickSaveFile = async () => {
@@ -454,8 +361,6 @@ export function LibraryPage() {
     setFileConflict(false);
     setFileResult(null);
     setFmfFormOpen(false);
-    setCreateOpen(false);
-    setImportTargetId(null);
     setActionError(null);
     setNotice(null);
     if (!isDesktopShell()) return;
@@ -499,8 +404,6 @@ export function LibraryPage() {
     setFileError(null);
     setFileConflict(false);
     setFileResult(null);
-    setCreateOpen(false);
-    setImportTargetId(null);
     setActionError(null);
     setNotice(null);
     if (!isDesktopShell()) return;
@@ -515,13 +418,13 @@ export function LibraryPage() {
 
   const openSquad = (saveId: string) => {
     setSquadSaveId(saveId);
+    setTacticsSaveId(null);
+    importTactic.reset();
     setFmfFormOpen(false);
     setSquadClubUid(null);
     setRosterError(null);
     setRosterNotice(null);
     setFileFormOpen(false);
-    setCreateOpen(false);
-    setImportTargetId(null);
     setActionError(null);
     setNotice(null);
   };
@@ -531,6 +434,24 @@ export function LibraryPage() {
     setSquadClubUid(null);
     setRosterError(null);
     setRosterNotice(null);
+  };
+
+  const openTactics = (saveId: string) => {
+    setTacticsSaveId(saveId);
+    setSquadSaveId(null);
+    setSquadClubUid(null);
+    setRosterError(null);
+    setRosterNotice(null);
+    setFileFormOpen(false);
+    setFmfFormOpen(false);
+    setActionError(null);
+    setNotice(null);
+    importTactic.reset();
+  };
+
+  const closeTactics = () => {
+    setTacticsSaveId(null);
+    importTactic.reset();
   };
 
   const selectClub = (clubUid: number) => {
@@ -561,33 +482,6 @@ export function LibraryPage() {
     setActionError(null);
     setNotice(null);
     void saves.refetch();
-  };
-
-  const submitCreate = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (connection === null || !formValid || create.isPending) return;
-    setActionError(null);
-    setNotice(null);
-    create.mutate({
-      source_path: pathTrimmed,
-      source_sha256: shaTrimmed.toLowerCase(),
-      ...(stageTrimmed === "" ? {} : { stage: stageTrimmed }),
-      ...(metadata.value === undefined ? {} : { metadata: metadata.value }),
-    });
-  };
-
-  const submitImport = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (connection === null || importTargetId === null || importMutation.isPending) return;
-    const parsed = parseImport(importText);
-    if (parsed.payload === undefined) {
-      setImportError(parsed.error);
-      return;
-    }
-    setImportError(null);
-    setActionError(null);
-    setNotice(null);
-    importMutation.mutate({ saveId: importTargetId, payload: parsed.payload });
   };
 
   const submitFileImport = (event: FormEvent<HTMLFormElement>) => {
@@ -641,7 +535,6 @@ export function LibraryPage() {
 
   const data = saves.data;
   const items = data?.items ?? [];
-  const importTarget = items.find((save) => save.id === importTargetId);
   const pager =
     data === undefined ? null : (
       <div className="jobs-pager">
@@ -651,6 +544,9 @@ export function LibraryPage() {
           type="button"
           onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}
           disabled={offset === 0 || saves.isFetching}
+          title={
+            offset === 0 ? "已是第一页" : saves.isFetching ? "正在刷新存档列表" : undefined
+          }
         >
           上一页
         </button>
@@ -659,6 +555,13 @@ export function LibraryPage() {
           type="button"
           onClick={() => setOffset(data.next_offset ?? offset)}
           disabled={data.next_offset === null || saves.isFetching}
+          title={
+            data.next_offset === null
+              ? "已是最后一页"
+              : saves.isFetching
+                ? "正在刷新存档列表"
+                : undefined
+          }
         >
           下一页
         </button>
@@ -698,7 +601,7 @@ export function LibraryPage() {
           description={
             status === ""
               ? "这是唯一的存档导入入口。导入后可以浏览联赛战术、生成真实 AI 计划、导出 FMF 或加入客队战术池。没有存档也可以导入 FMF 战术文件使用战术板与固定对手实验。"
-              : "当前筛选条件下没有存档，切换状态或新建存档。"
+              : "当前筛选条件下没有存档，切换状态后重试。"
           }
         />
         {data !== undefined && data.total > 0 ? pager : null}
@@ -739,16 +642,16 @@ export function LibraryPage() {
                         <button
                           className="button small"
                           type="button"
-                          onClick={() => openSquad(save.id)}
+                          onClick={() => openTactics(save.id)}
                         >
-                          查看名单
+                          战术库
                         </button>
                         <button
                           className="button small"
                           type="button"
-                          onClick={() => openImport(save.id)}
+                          onClick={() => openSquad(save.id)}
                         >
-                          导入
+                          查看名单
                         </button>
                         {confirming ? (
                           <>
@@ -756,6 +659,7 @@ export function LibraryPage() {
                               className="button small danger"
                               type="button"
                               disabled={remove.isPending}
+                              title={remove.isPending ? "正在删除存档" : undefined}
                               onClick={() => remove.mutate(save)}
                             >
                               确认删除
@@ -815,6 +719,9 @@ export function LibraryPage() {
             value={activeDraftId}
             onChange={(event) => changeRosterDraft(event.target.value)}
             disabled={draftItems.length === 0}
+            aria-describedby={
+              drafts.isSuccess && draftItems.length === 0 ? "saves-roster-hint" : undefined
+            }
           >
             {draftItems.length === 0 ? (
               <option value="">{drafts.isPending ? "正在加载草稿…" : "没有可用草稿"}</option>
@@ -827,6 +734,11 @@ export function LibraryPage() {
             )}
           </select>
         </label>
+        {drafts.isSuccess && draftItems.length === 0 ? (
+          <p className="field-hint" id="saves-roster-hint">
+            先在战术板保存草稿，才能同步阵容
+          </p>
+        ) : null}
         <div className="segmented" role="group" aria-label="阵容同步球队">
           <button
             type="button"
@@ -860,6 +772,10 @@ export function LibraryPage() {
             className="button primary"
             type="submit"
             disabled={activeDraftId === "" || applyRosterMutation.isPending}
+            aria-describedby={
+              drafts.isSuccess && draftItems.length === 0 ? "saves-roster-hint" : undefined
+            }
+            title={applyRosterMutation.isPending ? "正在同步阵容" : undefined}
           >
             同步阵容
           </button>
@@ -867,6 +783,10 @@ export function LibraryPage() {
             className="button"
             type="button"
             disabled={activeDraftId === "" || undoRosterMutation.isPending}
+            aria-describedby={
+              drafts.isSuccess && draftItems.length === 0 ? "saves-roster-hint" : undefined
+            }
+            title={undoRosterMutation.isPending ? "正在撤销同步" : undefined}
             onClick={undoRosterSync}
           >
             撤销同步
@@ -985,17 +905,140 @@ export function LibraryPage() {
       </section>
     );
 
+  const tacticsSave = items.find((save) => save.id === tacticsSaveId);
+  const tactics = saveTactics.data ?? [];
+  const importTacticEngineUnavailable =
+    importTactic.error instanceof ApiError &&
+    (importTactic.error.status === 503 || importTactic.error.code === "engine_unavailable");
+
+  let tacticsPanel: ReactNode = null;
+  if (saveTactics.isPending) {
+    tacticsPanel = (
+      <p className="jobs-loading" role="status">
+        正在加载存档战术…
+      </p>
+    );
+  } else if (saveTactics.isError) {
+    tacticsPanel = (
+      <div className="inline-alert" role="alert">
+        <span>{errorMessage(saveTactics.error)}</span>
+        <button className="button small" type="button" onClick={() => void saveTactics.refetch()}>
+          重试
+        </button>
+      </div>
+    );
+  } else if (saveTactics.isSuccess) {
+    tacticsPanel =
+      tactics.length === 0 ? (
+        <p className="field-hint">该存档没有可用的存储战术</p>
+      ) : (
+        <div className="jobs-table-wrap">
+          <table className="jobs-table saves-tactics-table">
+            <caption className="sr-only">存档存储战术列表</caption>
+            <thead>
+              <tr>
+                <th scope="col">名称</th>
+                <th scope="col">风格</th>
+                <th scope="col">心态</th>
+                <th scope="col">槽位</th>
+                <th scope="col">可导入</th>
+                <th scope="col">操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              {tactics.map((tactic) => {
+                const blocker = tacticImportBlocker(tactic);
+                const importing =
+                  importTactic.isPending && importTactic.variables === tactic.index;
+                return (
+                  <tr key={tactic.index}>
+                    <td>{tactic.name === "" ? "—" : tactic.name}</td>
+                    <td className="jobs-kind">{tactic.style === "" ? "—" : tactic.style}</td>
+                    <td>{mentalityLabel(tactic.mentality)}</td>
+                    <td>
+                      <span
+                        className="saves-tactic-slot"
+                        data-primary={tactic.team_slot === 0 ? "true" : undefined}
+                      >
+                        {teamSlotLabel(tactic.team_slot)}
+                      </span>
+                    </td>
+                    <td>
+                      <span className="badge" data-tone={tactic.importable ? "ok" : "warn"}>
+                        {tactic.importable ? "可导入" : "不可导入"}
+                      </span>
+                    </td>
+                    <td>
+                      <div className="jobs-actions">
+                        <button
+                          className="button small"
+                          type="button"
+                          disabled={!tactic.importable || importTactic.isPending}
+                          title={
+                            blocker ??
+                            (importTactic.isPending ? "正在导入存档战术" : undefined)
+                          }
+                          onClick={() => importTactic.mutate(tactic.index)}
+                        >
+                          {importing ? "导入中…" : "导入到战术板"}
+                        </button>
+                        {blocker === null ? null : (
+                          <span className="field-hint">{blocker}</span>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      );
+  }
+
+  const tacticsSection =
+    tacticsSaveId === null ? null : (
+      <section className="saves-tactics" aria-label="存档存储战术">
+        <div className="saves-tactics-head">
+          <h3>存储战术</h3>
+          <button className="button small" type="button" onClick={closeTactics}>
+            关闭
+          </button>
+        </div>
+        <p className="saves-tactics-target">
+          存档：<span className="data-path">{tacticsSave?.source_path ?? tacticsSaveId}</span>
+        </p>
+        {importTactic.error === null ? null : (
+          <div className="inline-alert" role="alert">
+            <span>{errorMessage(importTactic.error)}</span>
+            {importTacticEngineUnavailable ? (
+              <Link className="saves-settings-link" to="/settings">
+                去设置页
+              </Link>
+            ) : null}
+          </div>
+        )}
+        {tacticsPanel}
+      </section>
+    );
+
   return (
     <Panel
       title="存档战术库"
       action={
         <div className="jobs-toolbar">
           <SaveStatusFilter value={status} onChange={changeStatus} />
+          {saves.isFetching && !saves.isPending ? (
+            <span className="jobs-hint" role="status">
+              正在刷新存档列表
+            </span>
+          ) : null}
           <button
             className="button"
             type="button"
             onClick={refresh}
             disabled={connection === null || saves.isFetching}
+            title={saves.isFetching ? "正在刷新存档列表" : undefined}
           >
             <ArrowClockwise size={16} aria-hidden="true" />
             刷新
@@ -1016,103 +1059,9 @@ export function LibraryPage() {
           >
             导入 FMF 战术文件
           </button>
-          <button
-            className="button primary"
-            type="button"
-            onClick={openCreate}
-            disabled={connection === null}
-          >
-            <Plus size={16} aria-hidden="true" />
-            新建存档
-          </button>
         </div>
       }
     >
-      {createOpen ? (
-        <form className="jobs-create saves-create" aria-label="新建存档" onSubmit={submitCreate}>
-          <div className="field">
-            <label htmlFor="save-path">存档路径</label>
-            <input
-              id="save-path"
-              value={sourcePath}
-              aria-invalid={touched.path && pathError !== null}
-              aria-describedby={touched.path && pathError !== null ? "save-path-error" : undefined}
-              onChange={(event) => {
-                setSourcePath(event.target.value);
-                setTouched((state) => ({ ...state, path: true }));
-              }}
-            />
-            {touched.path && pathError !== null ? (
-              <span id="save-path-error" className="field-error">
-                {pathError}
-              </span>
-            ) : null}
-          </div>
-          <div className="field">
-            <label htmlFor="save-sha">SHA-256</label>
-            <input
-              id="save-sha"
-              value={sourceSha}
-              aria-invalid={touched.sha && shaError !== null}
-              aria-describedby={touched.sha && shaError !== null ? "save-sha-error" : undefined}
-              onChange={(event) => {
-                setSourceSha(event.target.value);
-                setTouched((state) => ({ ...state, sha: true }));
-              }}
-            />
-            {touched.sha && shaError !== null ? (
-              <span id="save-sha-error" className="field-error">
-                {shaError}
-              </span>
-            ) : null}
-          </div>
-          <div className="field">
-            <label htmlFor="save-stage">阶段</label>
-            <input
-              id="save-stage"
-              value={stage}
-              aria-invalid={touched.stage && stageError !== null}
-              aria-describedby={touched.stage && stageError !== null ? "save-stage-error" : undefined}
-              onChange={(event) => {
-                setStage(event.target.value);
-                setTouched((state) => ({ ...state, stage: true }));
-              }}
-            />
-            {touched.stage && stageError !== null ? (
-              <span id="save-stage-error" className="field-error">
-                {stageError}
-              </span>
-            ) : null}
-          </div>
-          <div className="field">
-            <label htmlFor="save-metadata">元数据 JSON</label>
-            <textarea
-              id="save-metadata"
-              value={metadataText}
-              aria-invalid={touched.metadata && metadata.error !== null}
-              aria-describedby={
-                touched.metadata && metadata.error !== null ? "save-metadata-error" : undefined
-              }
-              onChange={(event) => {
-                setMetadataText(event.target.value);
-                setTouched((state) => ({ ...state, metadata: true }));
-              }}
-            />
-            {touched.metadata && metadata.error !== null ? (
-              <span id="save-metadata-error" className="field-error">
-                {metadata.error}
-              </span>
-            ) : null}
-          </div>
-          <button
-            className="button primary"
-            type="submit"
-            disabled={connection === null || !formValid || create.isPending}
-          >
-            创建
-          </button>
-        </form>
-      ) : null}
       {fileFormOpen ? (
         <form
           className="saves-import saves-file-import"
@@ -1139,6 +1088,7 @@ export function LibraryPage() {
                   className="button small"
                   type="button"
                   disabled={fileImport.isPending}
+                  title={fileImport.isPending ? "正在导入存档文件" : undefined}
                   onClick={() => void pickSaveFile()}
                 >
                   浏览…
@@ -1164,6 +1114,7 @@ export function LibraryPage() {
               className="button primary"
               type="submit"
               disabled={connection === null || fileImport.isPending}
+              title={fileImport.isPending ? "正在导入存档文件" : undefined}
             >
               导入文件
             </button>
@@ -1179,6 +1130,7 @@ export function LibraryPage() {
                   className="button small"
                   type="button"
                   disabled={fileImport.isPending}
+                  title={fileImport.isPending ? "正在导入存档文件" : undefined}
                   onClick={overwriteFileImport}
                 >
                   覆盖导入
@@ -1221,6 +1173,7 @@ export function LibraryPage() {
                   className="button small"
                   type="button"
                   disabled={fmfImport.isPending}
+                  title={fmfImport.isPending ? "正在导入战术文件" : undefined}
                   onClick={() => void pickFmfFile()}
                 >
                   浏览…
@@ -1249,6 +1202,7 @@ export function LibraryPage() {
               className="button primary"
               type="submit"
               disabled={connection === null || fmfImport.isPending}
+              title={fmfImport.isPending ? "正在导入战术文件" : undefined}
             >
               {fmfImport.isPending ? "导入中…" : "导入 FMF"}
             </button>
@@ -1299,46 +1253,6 @@ export function LibraryPage() {
           )}
         </section>
       )}
-      {importTarget === undefined ? null : (
-        <form className="saves-import" aria-label="导入存档数据" onSubmit={submitImport}>
-          <p className="saves-import-target">
-            导入到 <span className="data-path">{importTarget.source_path}</span>
-          </p>
-          <div className="field">
-            <label htmlFor="import-json">导入 JSON</label>
-            <textarea
-              id="import-json"
-              value={importText}
-              placeholder={'{"leagues": {}, "clubs": {}}'}
-              onChange={(event) => {
-                setImportText(event.target.value);
-                setImportError(null);
-              }}
-            />
-          </div>
-          {importError === null ? null : (
-            <span className="field-error" role="alert">
-              {importError}
-            </span>
-          )}
-          <div className="saves-import-actions">
-            <button className="button primary" type="submit" disabled={importMutation.isPending}>
-              导入存档
-            </button>
-            <button
-              className="button"
-              type="button"
-              onClick={() => {
-                setImportTargetId(null);
-                setImportText("");
-                setImportError(null);
-              }}
-            >
-              取消
-            </button>
-          </div>
-        </form>
-      )}
       {actionError === null ? null : (
         <div className="inline-alert" role="alert">
           {actionError}
@@ -1351,6 +1265,7 @@ export function LibraryPage() {
       )}
       {body}
       {squadSection}
+      {tacticsSection}
     </Panel>
   );
 }

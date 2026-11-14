@@ -3,11 +3,12 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { App } from "../App";
 import { AppContext } from "../app-context";
 import type {
   ConcurrencyCheck,
+  Draft,
   DraftSummary,
+  ExperimentSubmitInput,
   Health,
   HostResources,
   Job,
@@ -26,7 +27,6 @@ const health: Health = {
 const fetchMock = vi.fn();
 
 type FetchHandler = (url: string, init: RequestInit) => Response | Promise<Response>;
-
 type EventStreamHandler = () => Response | Promise<Response>;
 
 function openEventStream(): Response {
@@ -36,30 +36,6 @@ function openEventStream(): Response {
     },
   });
   return new Response(stream);
-}
-
-type EventStreamControl = {
-  response: Response;
-  send(text: string): void;
-  close(): void;
-};
-
-function controllableEventStream(): EventStreamControl {
-  let controller: ReadableStreamDefaultController<Uint8Array> | null = null;
-  const stream = new ReadableStream<Uint8Array>({
-    start(inner) {
-      controller = inner;
-    },
-  });
-  return {
-    response: new Response(stream),
-    send(text) {
-      controller?.enqueue(new TextEncoder().encode(text));
-    },
-    close() {
-      controller?.close();
-    },
-  };
 }
 
 function stubFetch(handler: FetchHandler, eventsHandler: EventStreamHandler = openEventStream) {
@@ -98,10 +74,6 @@ function allCalls(): { url: string; init: RequestInit }[] {
 
 function fetchCalls() {
   return allCalls().filter((call) => !call.url.endsWith("/api/events"));
-}
-
-function eventsCalls() {
-  return allCalls().filter((call) => call.url.endsWith("/api/events"));
 }
 
 function callsTo(fragment: string) {
@@ -175,6 +147,30 @@ const blockedCheck: ConcurrencyCheck = {
   disk_required_bytes: 10 * GIB,
 };
 
+const poolScenario = {
+  schema: 4,
+  teams: [],
+  away_tactic_pool: {
+    enabled: true,
+    entries: [
+      { name: "长传冲吊", weight: 1 },
+      { name: "边路传中", weight: 1 },
+      { name: "高位压迫", weight: 1 },
+    ],
+  },
+};
+
+function makeDraft(id: string): Draft {
+  return {
+    id,
+    name: id === "draft-alpha" ? "高压逼抢" : "低位防守",
+    source: {},
+    created_at: "2026-11-13T10:00:00+00:00",
+    updated_at: "2026-11-13T10:00:00+00:00",
+    scenario: {},
+  };
+}
+
 function makeJob(overrides: Partial<Job> = {}): Job {
   return {
     id: "job-123",
@@ -195,30 +191,38 @@ function makeJob(overrides: Partial<Job> = {}): Job {
 
 type ScenarioOptions = {
   drafts?: DraftSummary[];
+  draftsResponse?: () => Response;
+  detail?: (draftId: string) => Response;
   resources?: () => Response;
   check?: (url: string) => Response;
-  submit?: (body: unknown) => Response | Promise<Response>;
+  submit?: (body: ExperimentSubmitInput) => Response | Promise<Response>;
   start?: () => Response;
   events?: EventStreamHandler;
 };
 
 function stubScenario(options: ScenarioOptions = {}) {
   const drafts = options.drafts ?? [draftA, draftB, draftC];
+  const draftsResponse = options.draftsResponse;
+  const detail = options.detail ?? ((draftId: string) => jsonResponse(makeDraft(draftId)));
   const resources = options.resources ?? (() => jsonResponse(hostResources));
   const check = options.check ?? (() => jsonResponse(allowedCheck));
-  const submit =
-    options.submit ?? (() => jsonResponse(makeJob(), 201));
+  const submit = options.submit ?? (() => jsonResponse(makeJob(), 201));
   const start =
     options.start ?? (() => jsonResponse({ job: makeJob({ status: "running" }) }));
   stubFetch((url, init) => {
     if (url.endsWith("/api/drafts")) {
+      if (draftsResponse !== undefined) return draftsResponse();
       return jsonResponse({ items: drafts, total: drafts.length, next_offset: null });
+    }
+    if (url.includes("/api/drafts/")) {
+      const draftId = decodeURIComponent(url.slice(url.indexOf("/api/drafts/") + 12));
+      return detail(draftId);
     }
     if (url.endsWith("/api/system/resources")) return resources();
     if (url.includes("/api/concurrency/check")) return check(url);
     if (url.endsWith("/api/experiments/start")) return start();
     if (url.endsWith("/api/experiments") && init.method === "POST") {
-      return submit(JSON.parse(String(init.body)));
+      return submit(JSON.parse(String(init.body)) as ExperimentSubmitInput);
     }
     throw new Error("未预期的请求：" + url);
   }, options.events);
@@ -247,17 +251,29 @@ function renderExperimentsPage(activeConnection: typeof connection | null = conn
 }
 
 function submitButton() {
-  return screen.getByRole("button", { name: "提交实验" });
+  return screen.getByRole("button", { name: /^开始实验/ });
 }
 
-async function waitForFormReady() {
+async function waitForResources() {
+  await waitFor(() => expect(screen.getByLabelText("CPU 核数")).toHaveValue(8));
   await waitFor(() => expect(screen.getByLabelText("并行数")).toHaveValue(6));
-  await waitFor(() => expect(submitButton()).toBeEnabled());
+  await waitFor(() =>
+    expect(screen.getByText("资源预检通过，推荐并行数 6")).toBeInTheDocument(),
+  );
 }
 
-function chooseDraftAndSeeds(seeds: string, draftId = "draft-alpha") {
+async function selectDraft(draftId = "draft-alpha") {
   fireEvent.change(screen.getByLabelText("草案"), { target: { value: draftId } });
-  fireEvent.change(screen.getByLabelText("种子"), { target: { value: seeds } });
+  await waitFor(() =>
+    expect(screen.getByText("固定对手（用于验证对特定打法的稳定性）")).toBeInTheDocument(),
+  );
+}
+
+async function readyWithDraft() {
+  stubScenario();
+  renderExperimentsPage();
+  await waitForResources();
+  await selectDraft();
 }
 
 describe("ExperimentsPage", () => {
@@ -270,939 +286,843 @@ describe("ExperimentsPage", () => {
     vi.unstubAllGlobals();
   });
 
-  it("加载草案与资源后填充并行数与资源摘要", async () => {
+  it("按三段式顺序展示选择战术、对比与场数、资源与提交", () => {
     stubScenario();
     renderExperimentsPage();
 
-    await waitFor(() => expect(screen.getByLabelText("并行数")).toHaveValue(6));
+    const draft = screen.getByRole("heading", { level: 3, name: "选择战术" });
+    const scale = screen.getByRole("heading", { level: 3, name: "对比与场数" });
+    const resources = screen.getByRole("heading", { level: 3, name: "资源与提交" });
 
-    const region = screen.getByRole("region", { name: "主机资源" });
-    expect(within(region).getByText("8")).toBeInTheDocument();
-    expect(within(region).getByText("16.0 GiB")).toBeInTheDocument();
-    expect(within(region).getByText("120.0 GiB")).toBeInTheDocument();
+    expect(draft).toHaveAttribute("id", "experiment-step-draft");
+    expect(scale).toHaveAttribute("id", "experiment-step-scale");
+    expect(resources).toHaveAttribute("id", "experiment-step-resources");
 
-    await waitFor(() => expect(callsTo("/api/concurrency/check")).toHaveLength(1));
-    const [checkCall] = callsTo("/api/concurrency/check");
-    expect(checkCall.url).toBe(
+    const draftSection = draft.closest("section");
+    const scaleSection = scale.closest("section");
+    const resourcesSection = resources.closest("section");
+    expect(draftSection).not.toBeNull();
+    expect(scaleSection).not.toBeNull();
+    expect(resourcesSection).not.toBeNull();
+    expect(draftSection).toHaveAttribute("aria-labelledby", "experiment-step-draft");
+    expect(scaleSection).toHaveAttribute("aria-labelledby", "experiment-step-scale");
+    expect(resourcesSection).toHaveAttribute("aria-labelledby", "experiment-step-resources");
+
+    expect(
+      draft.compareDocumentPosition(scale) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      scale.compareDocumentPosition(resources) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  it("默认场数为 100 并实时展示总场数", () => {
+    stubScenario();
+    renderExperimentsPage();
+
+    expect(screen.getByLabelText("场数")).toHaveValue(100);
+    expect(screen.getByText("总场数 = 100 场")).toBeInTheDocument();
+    expect(submitButton()).toHaveTextContent("开始实验（100 场）");
+  });
+
+  it("快捷按钮把场数切换为 50、100 和 200", async () => {
+    stubScenario();
+    renderExperimentsPage();
+    await waitForResources();
+
+    fireEvent.click(screen.getByRole("button", { name: "50 场" }));
+    expect(screen.getByText("总场数 = 50 场")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "100 场" }));
+    expect(screen.getByText("总场数 = 100 场")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "200 场" }));
+    expect(screen.getByText("总场数 = 200 场")).toBeInTheDocument();
+    expect(submitButton()).toHaveTextContent("开始实验（200 场）");
+  });
+
+  it("选择基线草案后总场数按 A/B 对照翻倍", async () => {
+    await readyWithDraft();
+
+    fireEvent.change(screen.getByLabelText("对比基线草案"), {
+      target: { value: "draft-beta" },
+    });
+
+    expect(screen.getByText("总场数 = 100 × 2 = 200 场（A/B 对照）")).toBeInTheDocument();
+  });
+
+  it("草案选项展示名称与本地更新时间", async () => {
+    stubScenario();
+    renderExperimentsPage();
+
+    const draftSelect = screen.getByLabelText("草案");
+    const option = await within(draftSelect).findByRole("option", { name: /高压逼抢/ });
+    expect(option.textContent).toMatch(/^高压逼抢 · 更新于 \d{4}-\d{2}-\d{2} \d{2}:\d{2}$/);
+    const unnamed = await within(draftSelect).findByRole("option", {
+      name: /draft-gamma/,
+    });
+    expect(unnamed.textContent).toMatch(/^draft-gamma · 更新于 /);
+  });
+
+  it("启用客队战术池的草案展示抽取说明", async () => {
+    stubScenario({ detail: (draftId) => jsonResponse({ ...makeDraft(draftId), scenario: poolScenario }) });
+    renderExperimentsPage();
+    await waitForResources();
+
+    fireEvent.change(screen.getByLabelText("草案"), { target: { value: "draft-alpha" } });
+
+    expect(
+      await screen.findByText("客队战术池：3 套客队战术，每个种子随机抽取（用于检验泛化）"),
+    ).toBeInTheDocument();
+  });
+
+  it("未启用客队战术池时说明为固定对手", async () => {
+    await readyWithDraft();
+
+    expect(
+      screen.getByText("固定对手（用于验证对特定打法的稳定性）"),
+    ).toBeInTheDocument();
+  });
+
+  it("没有草案时提示前往战术板新建", async () => {
+    stubScenario({ drafts: [] });
+    renderExperimentsPage();
+
+    const empty = await screen.findByText("还没有草案。");
+    expect(empty).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "前往战术板新建" })).toHaveAttribute(
+      "href",
+      "/tactics",
+    );
+  });
+
+  it("草案详情读取失败时展示后端信息并可重试", async () => {
+    let detailCalls = 0;
+    stubScenario({
+      detail: (draftId) => {
+        detailCalls += 1;
+        if (detailCalls === 1) {
+          return jsonResponse({ error: { message: "草案文件损坏", code: "internal_error" } }, 500);
+        }
+        return jsonResponse(makeDraft(draftId));
+      },
+    });
+    renderExperimentsPage();
+    await waitForResources();
+
+    fireEvent.change(screen.getByLabelText("草案"), { target: { value: "draft-alpha" } });
+
+    const alert = await screen.findByRole("alert");
+    expect(within(alert).getByText("草案文件损坏")).toBeInTheDocument();
+    fireEvent.click(within(alert).getByRole("button", { name: "重试" }));
+
+    expect(
+      await screen.findByText("固定对手（用于验证对特定打法的稳定性）"),
+    ).toBeInTheDocument();
+    expect(detailCalls).toBe(2);
+  });
+
+  it("自动读取本机资源并预填 CPU、内存、磁盘与并行数", async () => {
+    stubScenario();
+    renderExperimentsPage();
+    await waitForResources();
+
+    expect(screen.getByLabelText("CPU 核数")).toHaveValue(8);
+    expect(screen.getByLabelText("可用内存（GiB）")).toHaveValue(16);
+    expect(screen.getByLabelText("空闲磁盘（GiB）")).toHaveValue(120);
+    expect(screen.getByLabelText("并行数")).toHaveValue(6);
+    expect(screen.getByText("已自动读取本机资源，可手动修改。")).toBeInTheDocument();
+
+    const checkCalls = callsTo("/api/concurrency/check");
+    expect(checkCalls).toHaveLength(1);
+    expect(checkCalls[0].url).toBe(
       "http://127.0.0.1:43210/api/concurrency/check?workers=6&cpu_count=8&available_memory_bytes=17179869184&free_disk_bytes=128849018880&allow_oversubscription=false",
     );
   });
 
-  it("手动设置的并行数在资源重新解析后保持不变", async () => {
-    let resourceCalls = 0;
-    const refreshedResources: HostResources = {
-      ...hostResources,
-      available_memory_bytes: 32 * GIB,
-      recommended_workers: 2,
-    };
-    stubScenario({
-      resources: () => {
-        resourceCalls += 1;
-        return jsonResponse(resourceCalls === 1 ? hostResources : refreshedResources);
-      },
-    });
-    const { client } = renderExperimentsPage();
-    await waitForFormReady();
-
-    fireEvent.change(screen.getByLabelText("并行数"), { target: { value: "3" } });
-    expect(screen.getByLabelText("并行数")).toHaveValue(3);
-
-    await client.invalidateQueries({ queryKey: ["experiments-resources", connection.url] });
-
-    const region = screen.getByRole("region", { name: "主机资源" });
-    expect(await within(region).findByText("32.0 GiB")).toBeInTheDocument();
-    expect(resourceCalls).toBe(2);
-    expect(screen.getByLabelText("并行数")).toHaveValue(3);
-  });
-
-  it("修改并行数会重新触发资源预检", async () => {
-    const checkSpy = vi.fn((_url: string) => jsonResponse(allowedCheck));
-    stubScenario({ check: checkSpy });
+  it("资源预检通过时展示推荐并行数并可一键采用", async () => {
+    stubScenario({ check: () => jsonResponse({ ...allowedCheck, recommended_workers: 4 }) });
     renderExperimentsPage();
-    await waitForFormReady();
-
-    expect(checkSpy).toHaveBeenCalledTimes(1);
-    expect(checkSpy.mock.calls[0]?.[0]).toContain("workers=6");
-
-    fireEvent.change(screen.getByLabelText("并行数"), { target: { value: "3" } });
-
-    await waitFor(() => expect(checkSpy).toHaveBeenCalledTimes(2));
-    expect(checkSpy.mock.calls[1]?.[0]).toContain("workers=3");
-  });
-
-  it("主机资源数值变化会重新触发资源预检", async () => {
-    let resourceCalls = 0;
-    const changedResources: HostResources = {
-      cpu_count: 16,
-      available_memory_bytes: 32 * GIB,
-      free_disk_bytes: 200 * GIB,
-      recommended_workers: 6,
-    };
-    const checkSpy = vi.fn((_url: string) => jsonResponse(allowedCheck));
-    stubScenario({
-      resources: () => {
-        resourceCalls += 1;
-        return jsonResponse(resourceCalls === 1 ? hostResources : changedResources);
-      },
-      check: checkSpy,
-    });
-    const { client } = renderExperimentsPage();
-    await waitForFormReady();
-
-    expect(checkSpy).toHaveBeenCalledTimes(1);
-
-    await client.invalidateQueries({ queryKey: ["experiments-resources", connection.url] });
-
-    await waitFor(() => expect(checkSpy).toHaveBeenCalledTimes(2));
-    expect(checkSpy.mock.calls[1]?.[0]).toContain("cpu_count=16");
-    expect(checkSpy.mock.calls[1]?.[0]).toContain("available_memory_bytes=34359738368");
-  });
-
-  it("仅空闲磁盘变化时重新触发资源预检", async () => {
-    let resourceCalls = 0;
-    const moreDisk: HostResources = { ...hostResources, free_disk_bytes: 200 * GIB };
-    const checkSpy = vi.fn((_url: string) => jsonResponse(allowedCheck));
-    stubScenario({
-      resources: () => {
-        resourceCalls += 1;
-        return jsonResponse(resourceCalls === 1 ? hostResources : moreDisk);
-      },
-      check: checkSpy,
-    });
-    const { client } = renderExperimentsPage();
-    await waitForFormReady();
-
-    expect(checkSpy).toHaveBeenCalledTimes(1);
-    expect(checkSpy.mock.calls[0]?.[0]).toContain("free_disk_bytes=128849018880");
-
-    await client.invalidateQueries({ queryKey: ["experiments-resources", connection.url] });
-
-    await waitFor(() => expect(checkSpy).toHaveBeenCalledTimes(2));
-    expect(checkSpy.mock.calls[1]?.[0]).toContain("free_disk_bytes=214748364800");
-    expect(checkSpy.mock.calls[1]?.[0]).toContain("cpu_count=8");
-    expect(checkSpy.mock.calls[1]?.[0]).toContain("available_memory_bytes=17179869184");
-
-    const region = screen.getByRole("region", { name: "主机资源" });
-    expect(await within(region).findByText("200.0 GiB")).toBeInTheDocument();
-  });
-
-  it.each([
-    {
-      label: "仅 CPU 数量变化",
-      changed: { cpu_count: 16 } satisfies Partial<HostResources>,
-      original: "cpu_count=8",
-      expected: [
-        "cpu_count=16",
-        "available_memory_bytes=17179869184",
-        "free_disk_bytes=128849018880",
-      ],
-    },
-    {
-      label: "仅可用内存变化",
-      changed: { available_memory_bytes: 32 * GIB } satisfies Partial<HostResources>,
-      original: "available_memory_bytes=17179869184",
-      expected: [
-        "cpu_count=8",
-        "available_memory_bytes=34359738368",
-        "free_disk_bytes=128849018880",
-      ],
-    },
-  ])("$label时重新触发资源预检", async ({ changed, original, expected }) => {
-    let resourceCalls = 0;
-    const changedResources: HostResources = { ...hostResources, ...changed };
-    const checkSpy = vi.fn((_url: string) => jsonResponse(allowedCheck));
-    stubScenario({
-      resources: () => {
-        resourceCalls += 1;
-        return jsonResponse(resourceCalls === 1 ? hostResources : changedResources);
-      },
-      check: checkSpy,
-    });
-    const { client } = renderExperimentsPage();
-    await waitForFormReady();
-
-    expect(checkSpy).toHaveBeenCalledTimes(1);
-    expect(checkSpy.mock.calls[0]?.[0]).toContain(original);
-
-    await client.invalidateQueries({ queryKey: ["experiments-resources", connection.url] });
-
-    await waitFor(() => expect(checkSpy).toHaveBeenCalledTimes(2));
-    const secondUrl = checkSpy.mock.calls[1]?.[0];
-    expect(secondUrl).toContain(expected[0]);
-    expect(secondUrl).toContain(expected[1]);
-    expect(secondUrl).toContain(expected[2]);
-  });
-
-  it("草案选项展示名称与标识，空名回退到标识", async () => {
-    stubScenario({ drafts: [draftA, draftB, draftC] });
-    renderExperimentsPage();
-
-    const select = screen.getByLabelText("草案");
-    await waitFor(() => expect(within(select).getAllByRole("option")).toHaveLength(4));
-
-    const labels = within(select)
-      .getAllByRole("option")
-      .map((option) => option.textContent);
-    expect(labels).toEqual(["请选择草案", "高压逼抢 · draft-alpha", "低位防守 · draft-beta", "draft-gamma"]);
-  });
-
-  it("种子支持换行、空格与中英文逗号混用", async () => {
-    stubScenario();
-    renderExperimentsPage();
-    await waitForFormReady();
-
-    fireEvent.change(screen.getByLabelText("种子"), {
-      target: { value: "101\n202 303，404,505" },
-    });
-
-    expect(await screen.findByText("共 5 场")).toBeInTheDocument();
-    expect(screen.queryByText(/必须为 0 到 4294967295 的整数/)).not.toBeInTheDocument();
-  });
-
-  it("重复种子报错且不静默去重", async () => {
-    stubScenario();
-    renderExperimentsPage();
-    await waitForFormReady();
-
-    fireEvent.change(screen.getByLabelText("种子"), { target: { value: "7 8 7" } });
-
-    expect(await screen.findByText("种子 7 重复")).toBeInTheDocument();
-    fireEvent.click(submitButton());
-    expect(submitCalls()).toHaveLength(0);
-  });
-
-  it.each(["1.5", "-1", "4294967296", "abc"])("非法种子 %s 报错", async (token) => {
-    stubScenario();
-    renderExperimentsPage();
-    await waitForFormReady();
-
-    fireEvent.change(screen.getByLabelText("种子"), { target: { value: token } });
 
     expect(
-      await screen.findByText(/必须为 0 到 4294967295 的整数/),
+      await screen.findByText("资源预检通过，推荐并行数 4"),
     ).toBeInTheDocument();
-    expect(screen.getByLabelText("种子")).toHaveAttribute("aria-invalid", "true");
+    fireEvent.click(screen.getByRole("button", { name: "采用推荐并行数 4" }));
+
+    expect(screen.getByLabelText("并行数")).toHaveValue(4);
   });
 
-  it("最大种子 4294967295 合法而 4294967296 非法", async () => {
-    stubScenario();
+  it("资源预检未通过时禁用提交并给出原因", async () => {
+    stubScenario({ check: () => jsonResponse(blockedCheck) });
     renderExperimentsPage();
-    await waitForFormReady();
+    await waitFor(() => expect(screen.getByLabelText("并行数")).toHaveValue(6));
+    await selectDraft();
 
-    const seeds = screen.getByLabelText("种子");
-    fireEvent.change(seeds, { target: { value: "4294967295" } });
+    const reason = "资源预检未通过：可用内存不足，建议并行数不超过 2";
+    expect((await screen.findAllByText(reason)).length).toBeGreaterThanOrEqual(2);
+    expect(submitButton()).toBeDisabled();
+  });
 
-    expect(await screen.findByText("共 1 场")).toBeInTheDocument();
-    expect(screen.queryByText(/必须为 0 到 4294967295 的整数/)).not.toBeInTheDocument();
+  it("固定种子包含非法字符时阻止提交并说明原因", async () => {
+    await readyWithDraft();
 
-    fireEvent.change(seeds, { target: { value: "4294967296" } });
+    fireEvent.change(screen.getByLabelText("固定种子"), { target: { value: "abc" } });
 
     expect(
-      await screen.findByText("种子 4294967296 必须为 0 到 4294967295 的整数"),
+      (await screen.findAllByText("种子 abc 必须为 0 到 4294967295 的整数"))[0],
     ).toBeInTheDocument();
-    expect(seeds).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByLabelText("场数")).toBeDisabled();
+    expect(submitButton()).toBeDisabled();
   });
 
-  it("种子为空时提交报错且不发请求", async () => {
-    stubScenario();
-    renderExperimentsPage();
-    await waitForFormReady();
+  it("固定种子超出上限时阻止提交", async () => {
+    await readyWithDraft();
 
-    fireEvent.change(screen.getByLabelText("草案"), { target: { value: "draft-alpha" } });
+    fireEvent.change(screen.getByLabelText("固定种子"), {
+      target: { value: "4294967296" },
+    });
+
+    expect(
+      (await screen.findAllByText("种子 4294967296 必须为 0 到 4294967295 的整数"))[0],
+    ).toBeInTheDocument();
+    expect(submitButton()).toBeDisabled();
+  });
+
+  it("固定种子重复时阻止提交", async () => {
+    await readyWithDraft();
+
+    fireEvent.change(screen.getByLabelText("固定种子"), { target: { value: "5,5" } });
+
+    expect((await screen.findAllByText("种子 5 重复"))[0]).toBeInTheDocument();
+    expect(submitButton()).toBeDisabled();
+  });
+
+  it("固定种子数量超过 10000 时阻止提交并说明限制", async () => {
+    await readyWithDraft();
+
+    const seeds = Array.from({ length: 10001 }, (_, index) => String(index)).join(",");
+    fireEvent.change(screen.getByLabelText("固定种子"), { target: { value: seeds } });
+
+    expect((await screen.findAllByText("固定种子最多 10000 个"))[0]).toBeInTheDocument();
+    expect(screen.getByLabelText("场数")).toBeDisabled();
+    expect(submitButton()).toBeDisabled();
+  });
+
+  it("固定种子数量达到上限 10000 时仍可提交", async () => {
+    await readyWithDraft();
+
+    const seeds = Array.from({ length: 10000 }, (_, index) => String(index)).join(",");
+    fireEvent.change(screen.getByLabelText("固定种子"), { target: { value: seeds } });
+
+    expect(screen.getByText("按固定种子共 10000 场")).toBeInTheDocument();
+    expect(submitButton()).toBeEnabled();
+  });
+
+  it("固定种子生效后场数输入禁用并按种子数量计算总场数", async () => {
+    await readyWithDraft();
+
+    fireEvent.change(screen.getByLabelText("固定种子"), { target: { value: "5,9,13" } });
+
+    expect(screen.getByText("按固定种子共 3 场")).toBeInTheDocument();
+    expect(screen.getByLabelText("场数")).toBeDisabled();
+    expect(submitButton()).toHaveTextContent("开始实验（3 场）");
+    expect(submitButton()).toBeEnabled();
+  });
+
+  it("提交实验时先提交任务再启动，并展示成功提示与任务链接", async () => {
+    stubScenario({ start: () => jsonResponse({ job: makeJob({ status: "running", total: 100 }) }) });
+    renderExperimentsPage();
+    await waitForResources();
+    await selectDraft();
+
     fireEvent.click(submitButton());
 
-    expect(await screen.findByText("请填写至少一个种子")).toBeInTheDocument();
-    expect(submitCalls()).toHaveLength(0);
-  });
+    expect(await screen.findByText("实验已启动：种子扫描")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "查看任务" })).toHaveAttribute("href", "/jobs");
 
-  it("设置基线草案后总场数翻倍", async () => {
-    stubScenario();
-    renderExperimentsPage();
-    await waitForFormReady();
-
-    chooseDraftAndSeeds("1 2 3");
-    fireEvent.change(screen.getByLabelText("基线草案"), { target: { value: "draft-beta" } });
-
-    expect(await screen.findByText("共 6 场")).toBeInTheDocument();
-  });
-
-  it("主草案切换到与基线相同的草案时清空基线", async () => {
-    stubScenario();
-    renderExperimentsPage();
-    await waitForFormReady();
-
-    fireEvent.change(screen.getByLabelText("基线草案"), { target: { value: "draft-alpha" } });
-    expect(screen.getByLabelText("基线草案")).toHaveValue("draft-alpha");
-
-    fireEvent.change(screen.getByLabelText("草案"), { target: { value: "draft-alpha" } });
-    fireEvent.change(screen.getByLabelText("种子"), { target: { value: "1" } });
-
-    expect(await screen.findByText("共 1 场")).toBeInTheDocument();
-    expect(screen.getByLabelText("基线草案")).toHaveValue("");
-  });
-
-  it("总场数超过上限时报错并禁用提交", async () => {
-    stubScenario();
-    renderExperimentsPage();
-    await waitForFormReady();
-
-    chooseDraftAndSeeds(
-      Array.from({ length: 5001 }, (_, index) => String(index)).join(" "),
+    const calls = fetchCalls();
+    const submitIndex = calls.findIndex(
+      (call) => call.url.endsWith("/api/experiments") && call.init.method === "POST",
     );
-    fireEvent.change(screen.getByLabelText("基线草案"), { target: { value: "draft-beta" } });
+    const startIndex = calls.findIndex((call) =>
+      call.url.endsWith("/api/experiments/start"),
+    );
+    expect(submitIndex).toBeGreaterThanOrEqual(0);
+    expect(startIndex).toBeGreaterThan(submitIndex);
 
-    expect(await screen.findByText(/总场数 10002 超过上限 10000/)).toBeInTheDocument();
-    expect(submitButton()).toBeDisabled();
+    const body = JSON.parse(String(submitCalls()[0].init.body)) as ExperimentSubmitInput;
+    expect(body.draft_id).toBe("draft-alpha");
+    expect(body.baseline_draft_id).toBeNull();
+    expect(body.name).toBeNull();
+    expect(body.workers).toBe(6);
+    expect(body.cpu_count).toBe(8);
+    expect(body.available_memory_bytes).toBe(16 * GIB);
+    expect(body.free_disk_bytes).toBe(120 * GIB);
+    expect(body.allow_oversubscription).toBe(false);
+    expect(body.seeds).toHaveLength(100);
+    for (const seed of body.seeds) {
+      expect(Number.isInteger(seed)).toBe(true);
+      expect(seed).toBeGreaterThanOrEqual(0);
+      expect(seed).toBeLessThanOrEqual(4294967295);
+    }
   });
 
-  it("实验名称超过 100 个字符时禁用提交并报错", async () => {
-    stubScenario();
+  it("提交请求未返回前不会启动任务", async () => {
+    const pending = deferred<Response>();
+    stubScenario({ submit: () => pending.promise });
     renderExperimentsPage();
-    await waitForFormReady();
+    await waitForResources();
+    await selectDraft();
 
-    chooseDraftAndSeeds("1");
-    await waitFor(() => expect(submitButton()).toBeEnabled());
+    fireEvent.click(submitButton());
 
-    const nameInput = screen.getByLabelText("实验名称");
-    fireEvent.change(nameInput, { target: { value: "名".repeat(101) } });
-
-    expect(await screen.findByText("实验名称最多 100 个字符")).toBeInTheDocument();
-    expect(nameInput).toHaveAttribute("aria-invalid", "true");
+    await waitFor(() => expect(submitCalls()).toHaveLength(1));
+    expect(startCalls()).toHaveLength(0);
     expect(submitButton()).toBeDisabled();
+    expect(screen.getByText("正在提交实验…")).toBeInTheDocument();
 
-    fireEvent.change(nameInput, { target: { value: "名".repeat(100) } });
-
-    expect(screen.queryByText("实验名称最多 100 个字符")).not.toBeInTheDocument();
-    await waitFor(() => expect(submitButton()).toBeEnabled());
+    pending.resolve(jsonResponse(makeJob(), 201));
+    await waitFor(() => expect(startCalls()).toHaveLength(1));
   });
 
-  it("预检阻塞时禁用提交，允许超分配后恢复并传入提交体", async () => {
-    let submitted: unknown = null;
+  it("提交返回引擎校验错误时引导前往设置页", async () => {
     stubScenario({
-      check: (url) =>
-        jsonResponse(url.includes("allow_oversubscription=true") ? allowedCheck : blockedCheck),
-      submit: (body) => {
-        submitted = body;
+      submit: () =>
+        jsonResponse(
+          {
+            error: {
+              message: "FM27 引擎不可用：未配置游戏根目录",
+              code: "validation_failed",
+            },
+          },
+          400,
+        ),
+    });
+    renderExperimentsPage();
+    await waitForResources();
+    await selectDraft();
+
+    fireEvent.click(submitButton());
+
+    const alert = await screen.findByRole("alert");
+    expect(within(alert).getByText("FM27 引擎不可用：未配置游戏根目录")).toBeInTheDocument();
+    expect(within(alert).getByRole("link", { name: "前往设置页配置引擎" })).toHaveAttribute(
+      "href",
+      "/settings",
+    );
+    expect(startCalls()).toHaveLength(0);
+  });
+
+  it("启动返回引擎不可用时引导前往设置页", async () => {
+    stubScenario({
+      start: () =>
+        jsonResponse(
+          { error: { message: "引擎不可用，请先完成配置", code: "engine_unavailable" } },
+          503,
+        ),
+    });
+    renderExperimentsPage();
+    await waitForResources();
+    await selectDraft();
+
+    fireEvent.click(submitButton());
+
+    const alert = await screen.findByRole("alert");
+    expect(within(alert).getByText("引擎不可用，请先完成配置")).toBeInTheDocument();
+    expect(within(alert).getByRole("link", { name: "前往设置页配置引擎" })).toHaveAttribute(
+      "href",
+      "/settings",
+    );
+  });
+
+  it("没有待运行任务时说明任务为空", async () => {
+    stubScenario({ start: () => noContentResponse() });
+    renderExperimentsPage();
+    await waitForResources();
+    await selectDraft();
+
+    fireEvent.click(submitButton());
+
+    expect(await screen.findByText("没有待运行任务")).toBeInTheDocument();
+  });
+
+  it("资源阻塞错误提示降低并行数或减少场数", async () => {
+    stubScenario({
+      submit: () =>
+        jsonResponse(
+          { error: { message: "可用内存不足", code: "insufficient_memory" } },
+          409,
+        ),
+    });
+    renderExperimentsPage();
+    await waitForResources();
+    await selectDraft();
+
+    fireEvent.click(submitButton());
+
+    const alert = await screen.findByRole("alert");
+    expect(within(alert).getByText("可用内存不足")).toBeInTheDocument();
+    expect(
+      within(alert).getByText("请降低并行数或减少场数后重试。"),
+    ).toBeInTheDocument();
+  });
+
+  it("普通提交失败后可以重试", async () => {
+    let attempts = 0;
+    stubScenario({
+      submit: () => {
+        attempts += 1;
+        if (attempts === 1) {
+          return jsonResponse({ error: { message: "内部错误", code: "internal_error" } }, 500);
+        }
         return jsonResponse(makeJob(), 201);
       },
     });
     renderExperimentsPage();
+    await waitForResources();
+    await selectDraft();
 
-    const region = await screen.findByRole("region", { name: "资源预检" });
-    await waitFor(() => expect(within(region).getByText("阻止提交")).toBeInTheDocument());
-    expect(within(region).getByText("可用内存不足，建议并行数不超过 2")).toBeInTheDocument();
+    fireEvent.click(submitButton());
+
+    const alert = await screen.findByRole("alert");
+    expect(within(alert).getByText("内部错误")).toBeInTheDocument();
+    fireEvent.click(within(alert).getByRole("button", { name: "重试" }));
+
+    expect(await screen.findByText("实验已启动：种子扫描")).toBeInTheDocument();
+    expect(submitCalls()).toHaveLength(2);
+  });
+
+  it("未选择草案时禁用提交并提示选择草案", async () => {
+    stubScenario();
+    renderExperimentsPage();
+    await waitForResources();
+
+    expect(screen.getByText("请先选择草案")).toBeInTheDocument();
     expect(submitButton()).toBeDisabled();
+  });
 
+  it("实验名称与超分配选项会进入请求体", async () => {
+    stubScenario();
+    renderExperimentsPage();
+    await waitForResources();
+    await selectDraft();
+
+    fireEvent.change(screen.getByLabelText("实验名称（可选）"), {
+      target: { value: "晚间扫描" },
+    });
     fireEvent.click(screen.getByLabelText("允许超分配"));
+    await waitFor(() =>
+      expect(screen.getByText("资源预检通过，推荐并行数 6")).toBeInTheDocument(),
+    );
+    fireEvent.click(submitButton());
 
-    await waitFor(() => expect(within(region).getByText("通过")).toBeInTheDocument());
-    await waitFor(() => expect(submitButton()).toBeEnabled());
+    await waitFor(() => expect(submitCalls()).toHaveLength(1));
+    const body = JSON.parse(String(submitCalls()[0].init.body)) as ExperimentSubmitInput;
+    expect(body.name).toBe("晚间扫描");
+    expect(body.allow_oversubscription).toBe(true);
     expect(
       callsTo("/api/concurrency/check").some((call) =>
         call.url.includes("allow_oversubscription=true"),
       ),
     ).toBe(true);
+  });
 
-    chooseDraftAndSeeds("21");
+  it("固定种子与基线草案一起进入请求体", async () => {
+    stubScenario();
+    renderExperimentsPage();
+    await waitForResources();
+    await selectDraft();
+    fireEvent.change(screen.getByLabelText("对比基线草案"), {
+      target: { value: "draft-beta" },
+    });
+    fireEvent.change(screen.getByLabelText("固定种子"), { target: { value: "5,9,13" } });
+
+    expect(screen.getByText("按固定种子共 6 场（A/B 对照）")).toBeInTheDocument();
     fireEvent.click(submitButton());
 
-    await waitFor(() => expect(submitted).not.toBeNull());
-    expect(submitted).toMatchObject({ allow_oversubscription: true, seeds: [21] });
+    await waitFor(() => expect(submitCalls()).toHaveLength(1));
+    const body = JSON.parse(String(submitCalls()[0].init.body)) as ExperimentSubmitInput;
+    expect(body.seeds).toEqual([5, 9, 13]);
+    expect(body.baseline_draft_id).toBe("draft-beta");
   });
 
-  it("预检通过时仍展示警告", async () => {
-    const allowedWithWarnings: ConcurrencyCheck = {
-      ...allowedCheck,
-      warnings: ["并行数高于推荐值，已按显式覆盖运行"],
-    };
-    stubScenario({ check: () => jsonResponse(allowedWithWarnings) });
+  it("场数非法时禁用提交并说明范围", async () => {
+    stubScenario();
     renderExperimentsPage();
+    await waitForResources();
 
-    const region = await screen.findByRole("region", { name: "资源预检" });
-    expect(await within(region).findByText("通过")).toBeInTheDocument();
-    expect(
-      within(region).getByText("并行数高于推荐值，已按显式覆盖运行"),
-    ).toBeInTheDocument();
-    expect(submitButton()).toBeEnabled();
+    fireEvent.change(screen.getByLabelText("场数"), { target: { value: "0" } });
+
+    expect(screen.getAllByText("场数需为 1 到 10000 的整数")).toHaveLength(2);
+    expect(screen.getByText("总场数 = —")).toBeInTheDocument();
+    expect(submitButton()).toBeDisabled();
   });
 
-  it("预检请求失败时展示错误并禁用提交", async () => {
+  it("A/B 对照总场数超过上限时禁用提交", async () => {
+    await readyWithDraft();
+
+    fireEvent.change(screen.getByLabelText("场数"), { target: { value: "6000" } });
+    fireEvent.change(screen.getByLabelText("对比基线草案"), {
+      target: { value: "draft-beta" },
+    });
+
+    expect(screen.getAllByText("总场数 12000 超过上限 10000")[0]).toBeInTheDocument();
+    expect(submitButton()).toBeDisabled();
+  });
+
+  it("并行数非法时禁用提交并说明范围", async () => {
+    stubScenario();
+    renderExperimentsPage();
+    await waitForResources();
+
+    fireEvent.change(screen.getByLabelText("并行数"), { target: { value: "0" } });
+
+    expect(screen.getAllByText("并行数需为 1 到 256 的整数")).toHaveLength(2);
+    expect(submitButton()).toBeDisabled();
+  });
+
+  it("切换草案时清除与其相同的基线草案", async () => {
+    await readyWithDraft();
+
+    fireEvent.change(screen.getByLabelText("对比基线草案"), {
+      target: { value: "draft-beta" },
+    });
+    expect(screen.getByLabelText("对比基线草案")).toHaveValue("draft-beta");
+
+    fireEvent.change(screen.getByLabelText("草案"), { target: { value: "draft-beta" } });
+
+    expect(screen.getByLabelText("对比基线草案")).toHaveValue("");
+
+    await waitFor(() => expect(submitButton()).toBeEnabled());
+    fireEvent.click(submitButton());
+    await waitFor(() => expect(submitCalls()).toHaveLength(1));
+    const body = JSON.parse(String(submitCalls()[0].init.body)) as ExperimentSubmitInput;
+    expect(body.draft_id).toBe("draft-beta");
+    expect(body.baseline_draft_id).toBeNull();
+  });
+
+  it("实验名称超过 100 个字符时禁用提交并说明限制", async () => {
+    await readyWithDraft();
+
+    fireEvent.change(screen.getByLabelText("实验名称（可选）"), {
+      target: { value: "名".repeat(101) },
+    });
+
+    expect(screen.getByText("实验名称最多 100 个字符")).toBeInTheDocument();
+    expect(submitButton()).toBeDisabled();
+  });
+
+  it("CPU 核数超过 256 时仍可提交并进入请求体", async () => {
+    await readyWithDraft();
+
+    fireEvent.change(screen.getByLabelText("CPU 核数"), { target: { value: "512" } });
+    await waitFor(() =>
+      expect(
+        callsTo("/api/concurrency/check").some((call) => call.url.includes("cpu_count=512")),
+      ).toBe(true),
+    );
+    await waitFor(() => expect(submitButton()).toBeEnabled());
+    expect(screen.queryByText("CPU 核数需为大于等于 1 的整数")).toBeNull();
+
+    fireEvent.click(submitButton());
+    await waitFor(() => expect(submitCalls()).toHaveLength(1));
+    const body = JSON.parse(String(submitCalls()[0].init.body)) as ExperimentSubmitInput;
+    expect(body.cpu_count).toBe(512);
+  });
+
+  it("资源预检自带失败后缀时不会重复展示", async () => {
     stubScenario({
       check: () =>
-        jsonResponse({ error: { code: "engine_unavailable", message: "引擎不可用" } }, 503),
+        jsonResponse({ ...blockedCheck, warnings: ["可用内存不足，资源预检未通过"] }),
     });
     renderExperimentsPage();
+    await waitFor(() => expect(screen.getByLabelText("并行数")).toHaveValue(6));
+    await selectDraft();
 
-    const region = await screen.findByRole("region", { name: "资源预检" });
-    expect(await within(region).findByRole("alert")).toHaveTextContent("引擎不可用");
-    expect(submitButton()).toBeDisabled();
+    expect((await screen.findAllByText("资源预检未通过：可用内存不足")).length).toBeGreaterThanOrEqual(
+      2,
+    );
+    expect(screen.queryByText(/资源预检未通过：可用内存不足，资源预检未通过/)).toBeNull();
   });
 
-  it("资源探测失败时展示错误并可重试", async () => {
+  it("启动阶段普通失败后可重试启动且不会重复提交任务", async () => {
     let attempts = 0;
     stubScenario({
-      resources: () => {
+      start: () => {
         attempts += 1;
         if (attempts === 1) {
-          return jsonResponse(
-            { error: { code: "engine_unavailable", message: "资源探测失败" } },
-            503,
-          );
+          return jsonResponse({ error: { message: "启动失败", code: "internal_error" } }, 500);
         }
-        return jsonResponse(hostResources);
+        return jsonResponse({ job: makeJob({ status: "running" }) });
       },
     });
     renderExperimentsPage();
+    await waitForResources();
+    await selectDraft();
 
-    const region = await screen.findByRole("region", { name: "主机资源" });
-    expect(await within(region).findByRole("alert")).toHaveTextContent("资源探测失败");
+    fireEvent.click(submitButton());
+
+    const alert = await screen.findByRole("alert");
+    expect(within(alert).getByText("启动失败")).toBeInTheDocument();
+    expect(screen.getByText("实验已提交，请先处理下方提示。")).toBeInTheDocument();
     expect(submitButton()).toBeDisabled();
 
-    fireEvent.click(within(region).getByRole("button", { name: "重试" }));
+    fireEvent.click(within(alert).getByRole("button", { name: "重试启动" }));
 
-    expect(await within(region).findByText("16.0 GiB")).toBeInTheDocument();
-    await waitFor(() => expect(submitButton()).toBeEnabled());
-    expect(attempts).toBe(2);
+    expect(await screen.findByText("实验已启动：种子扫描")).toBeInTheDocument();
+    expect(submitCalls()).toHaveLength(1);
+    expect(startCalls()).toHaveLength(2);
   });
 
-  it("错误与提示文本通过 aria-describedby 关联到输入控件", async () => {
-    stubScenario();
-    renderExperimentsPage();
-    await waitForFormReady();
-
-    const nameInput = screen.getByLabelText("实验名称");
-    fireEvent.change(nameInput, { target: { value: "名".repeat(101) } });
-    expect(await screen.findByText("实验名称最多 100 个字符")).toHaveAttribute(
-      "id",
-      "experiment-name-error",
-    );
-    expect(nameInput).toHaveAttribute("aria-describedby", "experiment-name-error");
-
-    const seedsInput = screen.getByLabelText("种子");
-    fireEvent.change(seedsInput, { target: { value: "1 2" } });
-    expect(screen.getByText("共 2 场")).toHaveAttribute("id", "experiment-seeds-hint");
-    expect(seedsInput).toHaveAttribute("aria-describedby", "experiment-seeds-hint");
-
-    fireEvent.change(seedsInput, { target: { value: "1 1" } });
-    expect(await screen.findByText("种子 1 重复")).toHaveAttribute(
-      "id",
-      "experiment-seeds-error",
-    );
-    expect(seedsInput).toHaveAttribute("aria-describedby", "experiment-seeds-error");
-
-    const workersInput = screen.getByLabelText("并行数");
-    fireEvent.change(workersInput, { target: { value: "0" } });
-    expect(await screen.findByText("并行数需为 1 到 256 的整数")).toHaveAttribute(
-      "id",
-      "experiment-workers-error",
-    );
-    expect(workersInput).toHaveAttribute("aria-describedby", "experiment-workers-error");
-
-    fireEvent.change(nameInput, { target: { value: "" } });
-    fireEvent.change(workersInput, { target: { value: "6" } });
-    await waitFor(() => expect(submitButton()).toBeEnabled());
-
-    chooseDraftAndSeeds(
-      Array.from({ length: 5001 }, (_, index) => String(index)).join(" "),
-    );
-    fireEvent.change(screen.getByLabelText("基线草案"), { target: { value: "draft-beta" } });
-
-    expect(await screen.findByText(/总场数 10002 超过上限 10000/)).toHaveAttribute(
-      "id",
-      "experiment-total-error",
-    );
-    expect(seedsInput).toHaveAttribute(
-      "aria-describedby",
-      "experiment-seeds-hint experiment-total-error",
-    );
-  });
-
-  it("草案选择框仅在缺少草案时关联错误说明", async () => {
-    stubScenario();
-    renderExperimentsPage();
-    await waitForFormReady();
-
-    const draftSelect = screen.getByLabelText("草案");
-    expect(draftSelect).toHaveAttribute("aria-invalid", "false");
-    expect(draftSelect).not.toHaveAttribute("aria-describedby");
-
-    fireEvent.change(screen.getByLabelText("种子"), { target: { value: "1" } });
-    fireEvent.click(submitButton());
-
-    expect(screen.getByText("请选择草案", { selector: ".field-error" })).toHaveAttribute(
-      "id",
-      "experiment-draft-error",
-    );
-    expect(draftSelect).toHaveAttribute("aria-describedby", "experiment-draft-error");
-    expect(draftSelect).toHaveAttribute("aria-invalid", "true");
-    expect(submitCalls()).toHaveLength(0);
-
-    fireEvent.change(draftSelect, { target: { value: "draft-alpha" } });
-
-    expect(
-      screen.queryByText("请选择草案", { selector: ".field-error" }),
-    ).not.toBeInTheDocument();
-    expect(draftSelect).not.toHaveAttribute("aria-describedby");
-    expect(draftSelect).toHaveAttribute("aria-invalid", "false");
-  });
-
-  it("草案为空时展示空态并禁用提交", async () => {
-    stubScenario({ drafts: [] });
-    renderExperimentsPage();
-
-    expect(await screen.findByText("尚无草案")).toBeInTheDocument();
-    expect(screen.getByText("先到战术板保存草案，再提交实验。")).toBeInTheDocument();
-    expect(screen.getByLabelText("草案")).toBeDisabled();
-    expect(submitButton()).toBeDisabled();
-  });
-
-  it("允许超分配复选框不嵌套在字段容器内", async () => {
-    stubScenario();
-    renderExperimentsPage();
-    await waitForFormReady();
-
-    const checkbox = screen.getByLabelText("允许超分配");
-    expect(checkbox.closest(".field")).toBeNull();
-    expect(checkbox.parentElement).toHaveClass("field-inline");
-  });
-
-  it("提交实验发送完整请求并展示结果区", async () => {
-    let submitted: unknown = null;
-    const job = makeJob();
-    stubScenario({
-      submit: (body) => {
-        submitted = body;
-        return jsonResponse(job, 201);
-      },
-    });
-    const { client } = renderExperimentsPage();
-    const invalidateSpy = vi.spyOn(client, "invalidateQueries");
-    await waitForFormReady();
-
-    chooseDraftAndSeeds("11 12");
-    fireEvent.click(submitButton());
-
-    await waitFor(() => expect(submitted).not.toBeNull());
-    const [call] = submitCalls();
-    expect(call.url).toBe("http://127.0.0.1:43210/api/experiments");
-    expect(call.init.method).toBe("POST");
-    expect(new Headers(call.init.headers).get("Authorization")).toBe("Bearer test-token");
-    expect(new Headers(call.init.headers).get("Content-Type")).toBe("application/json");
-    expect(submitted).toEqual({
-      name: null,
-      seeds: [11, 12],
-      draft_id: "draft-alpha",
-      baseline_draft_id: null,
-      workers: 6,
-      cpu_count: 8,
-      available_memory_bytes: 16 * GIB,
-      free_disk_bytes: 120 * GIB,
-      allow_oversubscription: false,
-    });
-
-    const result = await screen.findByRole("region", { name: "实验任务" });
-    expect(within(result).getByText("种子扫描")).toBeInTheDocument();
-    expect(within(result).getByText("job-123")).toBeInTheDocument();
-    expect(within(result).getByText("排队中")).toBeInTheDocument();
-    expect(within(result).getByText("总场数 2")).toBeInTheDocument();
-    expect(within(result).getByRole("button", { name: "启动实验" })).toBeInTheDocument();
-    expect(within(result).getByRole("link", { name: "查看任务" })).toHaveAttribute(
-      "href",
-      "/jobs",
-    );
-    expect(await screen.findByText("实验已提交")).toBeInTheDocument();
-    await waitFor(() =>
-      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["jobs"] }),
-    );
-  });
-
-  it("提交失败时展示中文错误并保留表单", async () => {
-    stubScenario({
-      submit: () =>
-        jsonResponse({ error: { code: "validation_failed", message: "草案不存在" } }, 400),
-    });
-    renderExperimentsPage();
-    await waitForFormReady();
-
-    chooseDraftAndSeeds("31");
-    fireEvent.click(submitButton());
-
-    expect(await screen.findByRole("alert")).toHaveTextContent("草案不存在");
-    expect(screen.getByLabelText("草案")).toHaveValue("draft-alpha");
-    expect(screen.getByLabelText("种子")).toHaveValue("31");
-  });
-
-  it("启动实验展示运行状态与结果链接", async () => {
-    stubScenario({
-      start: () => jsonResponse({ job: makeJob({ id: "job-456", status: "running" }) }),
-    });
-    renderExperimentsPage();
-    await waitForFormReady();
-
-    chooseDraftAndSeeds("11 12");
-    fireEvent.click(submitButton());
-    await screen.findByRole("region", { name: "实验任务" });
-
-    fireEvent.click(screen.getByRole("button", { name: "启动实验" }));
-
-    const started = await screen.findByRole("region", { name: "启动结果" });
-    expect(within(started).getByText("运行中")).toBeInTheDocument();
-    expect(within(started).getByRole("link", { name: "查看结果" })).toHaveAttribute(
-      "href",
-      "/results",
-    );
-    const [startCall] = startCalls();
-    expect(startCall.url).toBe("http://127.0.0.1:43210/api/experiments/start");
-    expect(startCall.init.method).toBe("POST");
-  });
-
-  it("启动队列中更早的任务时展示其名称与总场数", async () => {
-    stubScenario({
-      start: () =>
-        jsonResponse({
-          job: makeJob({ id: "job-older", name: "队列早期任务", total: 7, status: "running" }),
-        }),
-    });
-    renderExperimentsPage();
-    await waitForFormReady();
-
-    chooseDraftAndSeeds("11 12");
-    fireEvent.click(submitButton());
-    const submitted = await screen.findByRole("region", { name: "实验任务" });
-
-    fireEvent.click(within(submitted).getByRole("button", { name: "启动实验" }));
-
-    const started = await screen.findByRole("region", { name: "启动结果" });
-    expect(within(started).getByRole("heading", { name: "已启动任务" })).toBeInTheDocument();
-    expect(within(started).getByText("队列早期任务")).toBeInTheDocument();
-    expect(within(started).getByText("job-older")).toBeInTheDocument();
-    expect(within(started).getByText("总场数 7")).toBeInTheDocument();
-    expect(within(started).getByText("运行中")).toBeInTheDocument();
-    expect(within(started).getByText(/更早的任务/)).toBeInTheDocument();
-
-    expect(within(submitted).getByText("排队中")).toBeInTheDocument();
-    expect(within(submitted).getByText("总场数 2")).toBeInTheDocument();
-  });
-
-  it("启动更早任务时锁定完整提示文案", async () => {
-    stubScenario({
-      start: () =>
-        jsonResponse({
-          job: makeJob({ id: "job-earlier", name: "队列早期任务", total: 7, status: "running" }),
-        }),
-    });
-    renderExperimentsPage();
-    await waitForFormReady();
-
-    chooseDraftAndSeeds("11 12");
-    fireEvent.click(submitButton());
-    const submitted = await screen.findByRole("region", { name: "实验任务" });
-
-    fireEvent.click(within(submitted).getByRole("button", { name: "启动实验" }));
-
-    const started = await screen.findByRole("region", { name: "启动结果" });
-    expect(
-      within(started).getByText("已启动队列中更早的任务，而不是本次提交的任务"),
-    ).toHaveClass("experiments-start-note");
-  });
-
-  it("启动结果名称缺失时回退到任务标识", async () => {
-    stubScenario({
-      start: () => jsonResponse({ job: makeJob({ id: "job-123", name: null, status: "running" }) }),
-    });
-    renderExperimentsPage();
-    await waitForFormReady();
-
-    chooseDraftAndSeeds("11 12");
-    fireEvent.click(submitButton());
-    const submitted = await screen.findByRole("region", { name: "实验任务" });
-
-    fireEvent.click(within(submitted).getByRole("button", { name: "启动实验" }));
-
-    const started = await screen.findByRole("region", { name: "启动结果" });
-    expect(
-      within(started).getByText("job-123", { selector: ".experiments-result-name" }),
-    ).toBeInTheDocument();
-    expect(
-      within(started).getByText("job-123", { selector: ".experiments-result-id" }),
-    ).toBeInTheDocument();
-    expect(within(started).queryByText(/更早的任务/)).not.toBeInTheDocument();
-  });
-
-  it("启动任务与本次提交一致时不提示更早任务", async () => {
-    stubScenario();
-    renderExperimentsPage();
-    await waitForFormReady();
-
-    chooseDraftAndSeeds("11 12");
-    fireEvent.click(submitButton());
-    const submitted = await screen.findByRole("region", { name: "实验任务" });
-
-    fireEvent.click(within(submitted).getByRole("button", { name: "启动实验" }));
-
-    const started = await screen.findByRole("region", { name: "启动结果" });
-    expect(within(started).getByText("已启动任务")).toBeInTheDocument();
-    expect(within(started).queryByText(/更早的任务/)).not.toBeInTheDocument();
-  });
-
-  it("启动结果区与实验任务区为同级且不互相嵌套", async () => {
-    stubScenario({
-      start: () => jsonResponse({ job: makeJob({ id: "job-456", status: "running" }) }),
-    });
-    renderExperimentsPage();
-    await waitForFormReady();
-
-    chooseDraftAndSeeds("11 12");
-    fireEvent.click(submitButton());
-    const submitted = await screen.findByRole("region", { name: "实验任务" });
-
-    fireEvent.click(within(submitted).getByRole("button", { name: "启动实验" }));
-
-    const started = await screen.findByRole("region", { name: "启动结果" });
-
-    expect(submitted.contains(started)).toBe(false);
-    expect(started.contains(submitted)).toBe(false);
-    expect(within(submitted).queryByRole("region", { name: "启动结果" })).not.toBeInTheDocument();
-    expect(started.parentElement).not.toBeNull();
-    expect(started.parentElement).toBe(submitted.parentElement);
-    expect(started.previousElementSibling).toBe(submitted);
-  });
-
-  it("启动时没有待运行任务展示通知", async () => {
-    stubScenario({ start: () => noContentResponse() });
-    renderExperimentsPage();
-    await waitForFormReady();
-
-    chooseDraftAndSeeds("11 12");
-    fireEvent.click(submitButton());
-    await screen.findByRole("region", { name: "实验任务" });
-
-    fireEvent.click(screen.getByRole("button", { name: "启动实验" }));
-
-    expect(await screen.findByText("没有待运行任务")).toBeInTheDocument();
-    expect(screen.queryByRole("region", { name: "启动结果" })).not.toBeInTheDocument();
-  });
-
-  it("启动失败展示错误并可重试", async () => {
+  it("启动遇到已有任务运行时引导到任务页并可重新填写", async () => {
     let attempts = 0;
     stubScenario({
       start: () => {
         attempts += 1;
         if (attempts === 1) {
           return jsonResponse(
-            { error: { code: "engine_unavailable", message: "引擎不可用" } },
-            503,
+            {
+              error: {
+                message: "已有任务在运行",
+                code: "invalid_transition",
+                retriable: false,
+              },
+            },
+            409,
           );
         }
         return jsonResponse({ job: makeJob({ status: "running" }) });
       },
     });
     renderExperimentsPage();
-    await waitForFormReady();
+    await waitForResources();
+    await selectDraft();
 
-    chooseDraftAndSeeds("11 12");
     fireEvent.click(submitButton());
-    const result = await screen.findByRole("region", { name: "实验任务" });
 
-    fireEvent.click(within(result).getByRole("button", { name: "启动实验" }));
+    const alert = await screen.findByRole("alert");
+    expect(within(alert).getByText("已有任务在运行")).toBeInTheDocument();
+    expect(
+      within(alert).getByText("已有任务在运行，请等待其结束后再试。"),
+    ).toBeInTheDocument();
+    expect(within(alert).getByRole("link", { name: "查看任务" })).toHaveAttribute(
+      "href",
+      "/jobs",
+    );
+    expect(within(alert).queryByRole("button", { name: "重试启动" })).toBeNull();
+    expect(screen.getByText("实验已提交，请先处理下方提示。")).toBeInTheDocument();
+    expect(submitButton()).toBeDisabled();
+    expect(submitCalls()).toHaveLength(1);
+    expect(startCalls()).toHaveLength(1);
 
-    expect(await within(result).findByRole("alert")).toHaveTextContent("引擎不可用");
+    fireEvent.click(within(alert).getByRole("button", { name: "重新填写" }));
 
-    fireEvent.click(within(result).getByRole("button", { name: "启动实验" }));
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.queryByText("实验已提交，请先处理下方提示。")).toBeNull();
+    expect(screen.getByLabelText("草案")).toBeEnabled();
+    await waitFor(() => expect(submitButton()).toBeEnabled());
 
-    expect(await screen.findByText("运行中")).toBeInTheDocument();
+    fireEvent.click(submitButton());
+
+    expect(await screen.findByText("实验已启动：种子扫描")).toBeInTheDocument();
+    expect(submitCalls()).toHaveLength(2);
     expect(startCalls()).toHaveLength(2);
   });
 
-  it("提交进行中禁止重复提交", async () => {
-    const pending = deferred<Response>();
-    let attempts = 0;
+  it("提交返回不可重试的校验失败时提示修正输入", async () => {
     stubScenario({
-      submit: () => {
-        attempts += 1;
-        return pending.promise;
-      },
+      submit: () =>
+        jsonResponse(
+          {
+            error: {
+              message: "输入校验失败",
+              code: "validation_failed",
+              retriable: false,
+            },
+          },
+          400,
+        ),
     });
     renderExperimentsPage();
-    await waitForFormReady();
+    await waitForResources();
+    await selectDraft();
 
-    chooseDraftAndSeeds("11 12");
     fireEvent.click(submitButton());
 
-    await waitFor(() => expect(attempts).toBe(1));
+    const alert = await screen.findByRole("alert");
+    expect(within(alert).getByText("输入校验失败")).toBeInTheDocument();
+    expect(within(alert).getByText("请修正输入后重新提交。")).toBeInTheDocument();
+    expect(submitButton()).toBeEnabled();
+    expect(submitCalls()).toHaveLength(1);
+
+    fireEvent.click(within(alert).getByRole("button", { name: "重新填写" }));
+
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(submitButton()).toBeEnabled();
+    expect(submitCalls()).toHaveLength(1);
+  });
+
+  it("启动成功后锁定表单并阻止重复提交", async () => {
+    stubScenario();
+    renderExperimentsPage();
+    await waitForResources();
+    await selectDraft();
+
+    fireEvent.click(submitButton());
+    expect(await screen.findByText("实验已启动：种子扫描")).toBeInTheDocument();
+
+    expect(screen.getByText("实验已启动，等待运行结束后才能再次提交。")).toBeInTheDocument();
+    expect(screen.getByLabelText("草案")).toBeDisabled();
+    expect(screen.getByLabelText("场数")).toBeDisabled();
+    expect(screen.getByLabelText("实验名称（可选）")).toBeDisabled();
     expect(submitButton()).toBeDisabled();
-    expect(submitButton()).toHaveAttribute("aria-busy", "true");
 
-    fireEvent.click(submitButton());
-    expect(attempts).toBe(1);
+    fireEvent.submit(screen.getByRole("form", { name: "实验提交" }));
+    await new Promise((resolve) => setTimeout(resolve, 50));
 
-    pending.resolve(jsonResponse(makeJob(), 201));
-    expect(await screen.findByRole("region", { name: "实验任务" })).toBeInTheDocument();
+    expect(submitCalls()).toHaveLength(1);
+    expect(startCalls()).toHaveLength(1);
   });
 
-  it("再次提交后结果区被新结果替换", async () => {
-    const bodies: unknown[] = [];
+  it("点击重新填写后可再次提交实验", async () => {
+    stubScenario();
+    renderExperimentsPage();
+    await waitForResources();
+    await selectDraft();
+
+    fireEvent.click(submitButton());
+    expect(await screen.findByText("实验已启动：种子扫描")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "重新填写" }));
+
+    expect(screen.queryByText("实验已启动，等待运行结束后才能再次提交。")).toBeNull();
+    await waitFor(() => expect(submitButton()).toBeEnabled());
+
+    fireEvent.click(submitButton());
+    await waitFor(() => expect(submitCalls()).toHaveLength(2));
+    expect(startCalls()).toHaveLength(2);
+  });
+
+  it("sidecar 未连接时展示空状态而不渲染表单", () => {
+    stubScenario();
+    renderExperimentsPage(null);
+
+    expect(screen.getByText("sidecar 未连接")).toBeInTheDocument();
+    expect(screen.getByText("连接 sidecar 后可以开始实验。")).toBeInTheDocument();
+    expect(screen.queryByRole("form")).toBeNull();
+  });
+
+  it("草案列表读取失败时可重试并恢复", async () => {
     let attempts = 0;
     stubScenario({
-      submit: (body) => {
-        bodies.push(body);
+      draftsResponse: () => {
         attempts += 1;
-        const job =
-          attempts === 1
-            ? makeJob({ id: "job-one", name: "第一组" })
-            : makeJob({ id: "job-two", name: "第二组" });
-        return jsonResponse(job, 201);
+        if (attempts === 1) {
+          return jsonResponse(
+            { error: { message: "草案服务不可用", code: "internal_error" } },
+            500,
+          );
+        }
+        return jsonResponse({ items: [draftA, draftB], total: 2, next_offset: null });
       },
     });
     renderExperimentsPage();
-    await waitForFormReady();
+    await waitForResources();
 
-    fireEvent.change(screen.getByLabelText("实验名称"), { target: { value: "第一组" } });
-    chooseDraftAndSeeds("1");
-    fireEvent.click(submitButton());
+    const alert = await screen.findByRole("alert");
+    expect(within(alert).getByText("草案服务不可用")).toBeInTheDocument();
+    fireEvent.click(within(alert).getByRole("button", { name: "重试" }));
 
-    expect(await screen.findByText("第一组")).toBeInTheDocument();
-
-    fireEvent.change(screen.getByLabelText("实验名称"), { target: { value: "第二组" } });
-    fireEvent.change(screen.getByLabelText("种子"), { target: { value: "2" } });
-    fireEvent.click(submitButton());
-
-    expect(await screen.findByText("第二组")).toBeInTheDocument();
-    expect(screen.queryByText("第一组")).not.toBeInTheDocument();
-    expect(bodies[0]).toMatchObject({ name: "第一组", seeds: [1] });
-    expect(bodies[1]).toMatchObject({ name: "第二组", seeds: [2] });
+    expect(
+      await within(screen.getByLabelText("草案")).findByRole("option", { name: /高压逼抢/ }),
+    ).toBeInTheDocument();
+    expect(attempts).toBe(2);
   });
 
-  it("重新提交实验后清空上次启动结果", async () => {
+  it("本机资源读取失败时可重试并预填", async () => {
+    let attempts = 0;
+    stubScenario({
+      resources: () => {
+        attempts += 1;
+        if (attempts === 1) {
+          return jsonResponse({ error: { message: "资源读取失败", code: "internal_error" } }, 500);
+        }
+        return jsonResponse(hostResources);
+      },
+    });
+    renderExperimentsPage();
+
+    const alert = await screen.findByRole("alert");
+    expect(within(alert).getByText("资源读取失败")).toBeInTheDocument();
+    fireEvent.click(within(alert).getByRole("button", { name: "重试" }));
+
+    await waitForResources();
+    expect(attempts).toBe(2);
+  });
+
+  it("磁盘不足时提示空闲磁盘不足", async () => {
+    stubScenario({
+      submit: () =>
+        jsonResponse(
+          { error: { message: "空闲磁盘不足", code: "insufficient_disk", retriable: true } },
+          409,
+        ),
+    });
+    renderExperimentsPage();
+    await waitForResources();
+    await selectDraft();
+
+    fireEvent.click(submitButton());
+
+    const alert = await screen.findByRole("alert");
+    expect(within(alert).getByText("空闲磁盘不足")).toBeInTheDocument();
+    expect(within(alert).getByText("请降低并行数或减少场数后重试。")).toBeInTheDocument();
+    expect(within(alert).queryByRole("button")).toBeNull();
+  });
+
+  it("提交失败后重试使用当前表单值而不是旧快照", async () => {
     let attempts = 0;
     stubScenario({
       submit: () => {
         attempts += 1;
-        return jsonResponse(
-          makeJob({
-            id: attempts === 1 ? "job-first" : "job-second",
-            name: attempts === 1 ? "第一轮" : "第二轮",
-          }),
-          201,
-        );
-      },
-      start: () => jsonResponse({ job: makeJob({ id: "job-first", status: "running" }) }),
-    });
-    renderExperimentsPage();
-    await waitForFormReady();
-
-    chooseDraftAndSeeds("11 12");
-    fireEvent.click(submitButton());
-    const firstSubmitted = await screen.findByRole("region", { name: "实验任务" });
-
-    fireEvent.click(within(firstSubmitted).getByRole("button", { name: "启动实验" }));
-    const started = await screen.findByRole("region", { name: "启动结果" });
-    expect(within(started).getByText("运行中")).toBeInTheDocument();
-
-    fireEvent.change(screen.getByLabelText("种子"), { target: { value: "21" } });
-    fireEvent.click(submitButton());
-
-    expect(await screen.findByText("job-second")).toBeInTheDocument();
-    expect(screen.queryByRole("region", { name: "启动结果" })).not.toBeInTheDocument();
-  });
-
-  it("基线草案选择影响提交体", async () => {
-    const bodies: any[] = [];
-    stubScenario({
-      submit: (body) => {
-        bodies.push(body);
+        if (attempts === 1) {
+          return jsonResponse({ error: { message: "内部错误", code: "internal_error" } }, 500);
+        }
         return jsonResponse(makeJob(), 201);
       },
     });
     renderExperimentsPage();
-    await waitForFormReady();
+    await waitForResources();
+    await selectDraft();
 
-    chooseDraftAndSeeds("1 2");
     fireEvent.click(submitButton());
-    await waitFor(() => expect(bodies).toHaveLength(1));
+    const alert = await screen.findByRole("alert");
+    expect(within(alert).getByText("内部错误")).toBeInTheDocument();
 
-    fireEvent.change(screen.getByLabelText("基线草案"), { target: { value: "draft-beta" } });
-    fireEvent.click(submitButton());
-    await waitFor(() => expect(bodies).toHaveLength(2));
-
-    expect(bodies[0].baseline_draft_id).toBeNull();
-    expect(bodies[1].baseline_draft_id).toBe("draft-beta");
-    expect(bodies[1].seeds).toEqual([1, 2]);
-  });
-
-  it("通过 /experiments 渲染实验页并出现在主导航", async () => {
-    stubFetch((url) => {
-      if (url.endsWith("/api/health")) return jsonResponse(health);
-      if (url.endsWith("/api/drafts")) {
-        return jsonResponse({ items: [draftA], total: 1, next_offset: null });
-      }
-      if (url.endsWith("/api/system/resources")) return jsonResponse(hostResources);
-      if (url.includes("/api/concurrency/check")) return jsonResponse(allowedCheck);
-      throw new Error("未预期的请求：" + url);
+    fireEvent.change(screen.getByLabelText("实验名称（可选）"), {
+      target: { value: "改后名称" },
     });
-    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    render(
-      <QueryClientProvider client={client}>
-        <MemoryRouter initialEntries={["/experiments"]}>
-          <App />
-        </MemoryRouter>
-      </QueryClientProvider>,
-    );
+    fireEvent.click(screen.getByRole("button", { name: "重试" }));
 
-    expect(await screen.findByRole("heading", { name: "实验", level: 1 })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "实验" })).toHaveAttribute("href", "/experiments");
-    expect(await screen.findByRole("heading", { name: "实验", level: 2 })).toBeInTheDocument();
-    expect(await screen.findByLabelText("草案")).toBeInTheDocument();
-  });
-});
-
-describe("ExperimentsPage 实时事件", () => {
-  beforeEach(() => {
-    fetchMock.mockReset();
-    vi.stubGlobal("fetch", fetchMock);
+    await waitFor(() => expect(submitCalls()).toHaveLength(2));
+    const body = JSON.parse(String(submitCalls()[1].init.body)) as ExperimentSubmitInput;
+    expect(body.name).toBe("改后名称");
+    expect(await screen.findByText("实验已启动：种子扫描")).toBeInTheDocument();
   });
 
-  afterEach(() => {
-    vi.unstubAllGlobals();
-  });
+  it("同时存在多个阻塞原因时全部展示", async () => {
+    stubScenario();
+    renderExperimentsPage();
+    await waitForResources();
 
-  it("实验事件使任务列表失效", async () => {
-    const stream = controllableEventStream();
-    stubScenario({ events: () => stream.response });
-    const { client } = renderExperimentsPage();
-    await screen.findByLabelText("草案");
-    const invalidate = vi.spyOn(client, "invalidateQueries");
+    fireEvent.change(screen.getByLabelText("场数"), { target: { value: "0" } });
+    fireEvent.change(screen.getByLabelText("实验名称（可选）"), {
+      target: { value: "名".repeat(101) },
+    });
 
-    stream.send(
-      'event: experiment.progress\ndata: {"id":"job-123","status":"running","completed":1,"total":2}\n\n',
-    );
-
-    await waitFor(() => expect(invalidate).toHaveBeenCalledWith({ queryKey: ["jobs"] }));
-  });
-
-  it("任务事件使任务列表失效", async () => {
-    const stream = controllableEventStream();
-    stubScenario({ events: () => stream.response });
-    const { client } = renderExperimentsPage();
-    await screen.findByLabelText("草案");
-    const invalidate = vi.spyOn(client, "invalidateQueries");
-
-    stream.send('event: job.created\ndata: {"id":"job-456","status":"queued"}\n\n');
-
-    await waitFor(() => expect(invalidate).toHaveBeenCalledWith({ queryKey: ["jobs"] }));
-  });
-
-  it("卸载时中止事件流连接", async () => {
-    const stream = controllableEventStream();
-    stubScenario({ events: () => stream.response });
-    const view = renderExperimentsPage();
-    await screen.findByLabelText("草案");
-    await waitFor(() => expect(eventsCalls()).toHaveLength(1));
-    const signal = eventsCalls()[0].init.signal;
-    expect(signal?.aborted).toBe(false);
-
-    view.unmount();
-
-    expect(signal?.aborted).toBe(true);
+    const list = screen.getByRole("list", { name: "阻塞原因" });
+    expect(within(list).getByText("请先选择草案")).toBeInTheDocument();
+    expect(within(list).getByText("场数需为 1 到 10000 的整数")).toBeInTheDocument();
+    expect(within(list).getByText("实验名称最多 100 个字符")).toBeInTheDocument();
+    expect(within(list).getAllByRole("listitem")).toHaveLength(3);
   });
 });

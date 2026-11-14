@@ -1,19 +1,17 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowClockwise, ListChecks, Plus } from "@phosphor-icons/react";
-import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { ArrowClockwise, ListChecks } from "@phosphor-icons/react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import { useAppContext } from "../app-context";
 import { EmptyState } from "../components/EmptyState";
 import { Panel } from "../components/Panel";
 import {
   cancelJob,
-  createJob,
   deleteJob,
   deleteJobsBatch,
   listJobs,
   type Job,
   type JobBatchDeleteResult,
-  type JobCreate,
   type JobStatus,
 } from "../lib/api";
 import type { EventStatus } from "../lib/events";
@@ -47,12 +45,6 @@ const dateFormat = new Intl.DateTimeFormat("zh-CN", { dateStyle: "short", timeSt
 function formatTime(value: string): string {
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? value : dateFormat.format(date);
-}
-
-function integerBetween(value: string, minimum: number, maximum: number): boolean {
-  if (value.trim() === "") return false;
-  const number = Number(value);
-  return Number.isInteger(number) && number >= minimum && number <= maximum;
 }
 
 function errorMessage(error: unknown): string {
@@ -110,11 +102,6 @@ export function JobsPage() {
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set<string>());
   const [batchConfirmOpen, setBatchConfirmOpen] = useState(false);
   const [batchResult, setBatchResult] = useState<JobBatchDeleteResult | null>(null);
-  const [formOpen, setFormOpen] = useState(false);
-  const [kind, setKind] = useState("experiment");
-  const [name, setName] = useState("");
-  const [workers, setWorkers] = useState("4");
-  const [total, setTotal] = useState("100");
   const batchTriggerRef = useRef<HTMLButtonElement>(null);
   const batchCancelRef = useRef<HTMLButtonElement>(null);
   const batchResultRef = useRef<HTMLDivElement>(null);
@@ -248,43 +235,6 @@ export function JobsPage() {
     },
   });
 
-  const kindValid = kind.trim().length >= 1 && kind.trim().length <= 64;
-  const nameValid = name.trim().length <= 100;
-  const workersValid = integerBetween(workers, 1, 256);
-  const totalValid = integerBetween(total, 0, Number.MAX_SAFE_INTEGER);
-  const formValid = kindValid && nameValid && workersValid && totalValid;
-  const formHint = !kindValid
-    ? "任务类型需为 1–64 个字符"
-    : !nameValid
-      ? "任务名称最多 100 个字符"
-      : !workersValid
-        ? "并行数需为 1–256 的整数"
-        : !totalValid
-          ? "总场数需为非负整数"
-          : null;
-
-  const create = useMutation({
-    mutationFn: (input: JobCreate) => createJob(connection!, input),
-    onSuccess: () => {
-      setActionError(null);
-      setBatchResult(null);
-      setNotice("任务已创建");
-      setFormOpen(false);
-      setKind("experiment");
-      setName("");
-      setWorkers("4");
-      setTotal("100");
-      setStatus("");
-      setOffset(0);
-      clearSelection();
-      invalidateJobs();
-    },
-    onError: (error) => {
-      setNotice(null);
-      setActionError(errorMessage(error));
-    },
-  });
-
   const changeStatus = (next: JobStatus | "") => {
     setStatus(next);
     setOffset(0);
@@ -344,17 +294,6 @@ export function JobsPage() {
     batchRemove.mutate(selectedIds);
   };
 
-  const submitCreate = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (connection === null || !formValid || create.isPending) return;
-    create.mutate({
-      kind: kind.trim(),
-      name: name.trim() === "" ? null : name.trim(),
-      workers: Number(workers),
-      total: Number(total),
-    });
-  };
-
   const pager =
     data === undefined ? null : (
       <div className="jobs-pager">
@@ -364,6 +303,9 @@ export function JobsPage() {
           type="button"
           onClick={() => changePage(Math.max(0, offset - PAGE_SIZE))}
           disabled={offset === 0 || jobs.isFetching}
+          title={
+            offset === 0 ? "已是第一页" : jobs.isFetching ? "正在刷新任务列表" : undefined
+          }
         >
           上一页
         </button>
@@ -372,6 +314,13 @@ export function JobsPage() {
           type="button"
           onClick={() => changePage(data.next_offset ?? offset)}
           disabled={data.next_offset === null || jobs.isFetching}
+          title={
+            data.next_offset === null
+              ? "已是最后一页"
+              : jobs.isFetching
+                ? "正在刷新任务列表"
+                : undefined
+          }
         >
           下一页
         </button>
@@ -384,7 +333,7 @@ export function JobsPage() {
       <EmptyState
         icon={ListChecks}
         title="sidecar 未连接"
-        description="连接 sidecar 后可以创建、筛选与管理任务。"
+        description="连接 sidecar 后可以筛选与管理任务。"
       />
     );
   } else if (jobs.isPending) {
@@ -410,8 +359,8 @@ export function JobsPage() {
           title={status === "" ? "尚无任务" : "没有符合条件的任务"}
           description={
             status === ""
-              ? "创建任务后，这里会显示运行状态、进度与取消入口。"
-              : "当前筛选条件下没有任务，切换状态或创建新任务。"
+              ? "任务由实验页提交批次后产生，运行状态、进度与取消入口会显示在这里。"
+              : "当前筛选条件下没有任务，切换状态后重试。"
           }
         />
         {data !== undefined && data.total > 0 ? pager : null}
@@ -432,6 +381,7 @@ export function JobsPage() {
                     aria-checked={allSelected ? "true" : someSelected ? "mixed" : "false"}
                     checked={allSelected}
                     disabled={deletableIds.length === 0}
+                    title={deletableIds.length === 0 ? "当前页没有可删除的任务" : undefined}
                     ref={(element) => {
                       if (element !== null) element.indeterminate = someSelected;
                     }}
@@ -490,6 +440,7 @@ export function JobsPage() {
                                 className="button small danger"
                                 type="button"
                                 disabled={cancel.isPending}
+                                title={cancel.isPending ? "正在取消任务" : undefined}
                                 onClick={() => cancel.mutate(job)}
                               >
                                 确认取消
@@ -521,6 +472,7 @@ export function JobsPage() {
                               className="button small danger"
                               type="button"
                               disabled={remove.isPending}
+                              title={remove.isPending ? "正在删除任务" : undefined}
                               onClick={() => remove.mutate(job)}
                             >
                               确认删除
@@ -569,82 +521,24 @@ export function JobsPage() {
               实时连接中断，正在重连
             </span>
           ) : null}
+          {jobs.isFetching && !jobs.isPending ? (
+            <span className="jobs-hint" role="status">
+              正在刷新任务列表
+            </span>
+          ) : null}
           <button
             className="button"
             type="button"
             onClick={refresh}
             disabled={connection === null || jobs.isFetching}
+            title={jobs.isFetching ? "正在刷新任务列表" : undefined}
           >
             <ArrowClockwise size={16} aria-hidden="true" />
             刷新
           </button>
-          <button
-            className="button primary"
-            type="button"
-            onClick={() => setFormOpen((open) => !open)}
-            disabled={connection === null}
-          >
-            <Plus size={16} aria-hidden="true" />
-            新建任务
-          </button>
         </div>
       }
     >
-      {formOpen ? (
-        <form className="jobs-create" aria-label="新建任务" onSubmit={submitCreate}>
-          <label className="field">
-            任务类型
-            <input
-              value={kind}
-              maxLength={64}
-              onChange={(event) => setKind(event.target.value)}
-            />
-          </label>
-          <label className="field">
-            任务名称
-            <input
-              value={name}
-              maxLength={100}
-              onChange={(event) => setName(event.target.value)}
-            />
-          </label>
-          <label className="field">
-            并行数
-            <input
-              type="number"
-              inputMode="numeric"
-              min={1}
-              max={256}
-              value={workers}
-              aria-invalid={!workersValid}
-              onChange={(event) => setWorkers(event.target.value)}
-            />
-          </label>
-          <label className="field">
-            总场数
-            <input
-              type="number"
-              inputMode="numeric"
-              min={0}
-              value={total}
-              aria-invalid={!totalValid}
-              onChange={(event) => setTotal(event.target.value)}
-            />
-          </label>
-          {formHint === null ? null : (
-            <span className="jobs-hint" role="status">
-              {formHint}
-            </span>
-          )}
-          <button
-            className="button primary"
-            type="submit"
-            disabled={connection === null || !formValid || create.isPending}
-          >
-            创建
-          </button>
-        </form>
-      ) : null}
       {actionError === null ? null : (
         <div className="inline-alert" role="alert">
           {actionError}
@@ -660,11 +554,19 @@ export function JobsPage() {
           <span className="jobs-bulk-count" aria-live="polite">
             已选 {selectedCount} 个任务
           </span>
+          <span className="jobs-hint" id="jobs-bulk-hint">
+            勾选可删除的任务后可批量删除
+          </span>
+          {deletableIds.length === 0 ? (
+            <span className="jobs-hint">当前页任务均在运行中或排队中，暂不可删除</span>
+          ) : null}
           <button
             ref={batchTriggerRef}
             className="button small danger"
             type="button"
             disabled={selectedCount === 0 || batchRemove.isPending}
+            aria-describedby="jobs-bulk-hint"
+            title={batchRemove.isPending ? "正在删除所选任务" : undefined}
             onClick={openBatchConfirm}
           >
             删除所选
@@ -691,6 +593,7 @@ export function JobsPage() {
               className="button small danger"
               type="button"
               disabled={batchRemove.isPending || selectedJobs.length === 0}
+              title={batchRemove.isPending ? "正在删除所选任务" : undefined}
               onClick={confirmBatchDelete}
             >
               确认删除

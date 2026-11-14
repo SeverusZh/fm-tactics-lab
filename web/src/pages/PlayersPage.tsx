@@ -1,6 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { UsersThree } from "@phosphor-icons/react";
-import { useState, type FormEvent, type ReactNode } from "react";
+import {
+  useEffect,
+  useState,
+  type ChangeEvent,
+  type FormEvent,
+  type ReactNode,
+} from "react";
 
 import { useAppContext } from "../app-context";
 import { EmptyState } from "../components/EmptyState";
@@ -13,6 +19,7 @@ import {
   type DraftAttributePayload,
   type DraftAttributeScope,
 } from "../lib/api";
+import "../styles/players.css";
 
 const POSITION_CODES = [
   "GK",
@@ -342,6 +349,57 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+const POSITION_ATTRIBUTE_COUNT = 15;
+
+function bulkValueMessage(raw: string): string | null {
+  const trimmed = raw.trim();
+  if (trimmed === "") return "请输入要应用的显示值";
+  const value = Number(trimmed);
+  if (!Number.isFinite(value) || value < 1 || value > 20) {
+    return "显示值需为 1–20 且按 0.2 步进";
+  }
+  const scaled = value * 5;
+  if (Math.abs(scaled - Math.round(scaled)) > 1e-6) {
+    return "显示值需为 1–20 且按 0.2 步进";
+  }
+  return null;
+}
+
+function positionValueMessage(raw: string): string | null {
+  const trimmed = raw.trim();
+  if (trimmed === "") return "请输入要应用的位置熟练度";
+  const value = Number(trimmed);
+  if (!Number.isInteger(value) || value < 0 || value > 20) {
+    return "位置熟练度需为 0–20 的整数";
+  }
+  return null;
+}
+
+function validateCellValue(index: number, raw: string): string | null {
+  const label = ATTRIBUTE_LABELS[index];
+  const trimmed = raw.trim();
+  if (trimmed === "") return `属性“${label}”不能为空`;
+  const value = Number(trimmed);
+  if (!Number.isFinite(value)) return `属性“${label}”必须是数字`;
+  if (index < POSITION_ATTRIBUTE_COUNT) {
+    if (!Number.isInteger(value) || value < 0 || value > 20) {
+      return `属性“${label}”必须是 0–20 的整数`;
+    }
+    return null;
+  }
+  if (value < 1 || value > 20) return `属性“${label}”必须是 1–20 之间的显示值`;
+  const scaled = value * 5;
+  if (Math.abs(scaled - Math.round(scaled)) > 1e-6) {
+    return `属性“${label}”必须以 0.2 为步进`;
+  }
+  return null;
+}
+
+function cellValuesCount(payload: DraftAttributePayload): number {
+  const values = payload.params.values;
+  return isRecord(values) ? Object.keys(values).length : 0;
+}
+
 export function PlayersPage() {
   const { connection } = useAppContext();
   const [selectedDraftId, setSelectedDraftId] = useState<string | null>(null);
@@ -350,16 +408,20 @@ export function PlayersPage() {
   const [showHidden, setShowHidden] = useState(false);
   const [operation, setOperation] = useState<DraftAttributeOperation>("bulk");
   const [scope, setScope] = useState<EditableScope>("all");
-  const [bulkValue, setBulkValue] = useState("10");
+  const [bulkValue, setBulkValue] = useState("");
   const [bulkGroups, setBulkGroups] = useState<BulkGroup[]>(defaultBulkGroups);
   const [includePersonality, setIncludePersonality] = useState(false);
   const [positionCode, setPositionCode] = useState("ST");
-  const [positionValue, setPositionValue] = useState("10");
+  const [positionValue, setPositionValue] = useState("");
   const [copySourceIndex, setCopySourceIndex] = useState(0);
   const [copyGroups, setCopyGroups] = useState<BulkGroup[]>(defaultBulkGroups);
   const [copyPersonality, setCopyPersonality] = useState(true);
   const [attributeError, setAttributeError] = useState<string | null>(null);
   const [attributeNotice, setAttributeNotice] = useState<string | null>(null);
+  const [cellEdits, setCellEdits] = useState<Record<string, string>>({});
+  const [cellError, setCellError] = useState<string | null>(null);
+  const [cellErrorIndex, setCellErrorIndex] = useState<number | null>(null);
+  const [cellNotice, setCellNotice] = useState<string | null>(null);
 
   const drafts = useQuery({
     queryKey: ["drafts", connection?.url],
@@ -385,6 +447,9 @@ export function PlayersPage() {
     onSuccess: async (result) => {
       setAttributeError(null);
       setAttributeNotice(`已更新 ${result.changed_players} 名球员`);
+      setCellEdits({});
+      setCellError(null);
+      setCellErrorIndex(null);
       await queryClient.invalidateQueries({
         queryKey: ["draft", connection?.url, activeDraftId],
       });
@@ -395,18 +460,149 @@ export function PlayersPage() {
     },
   });
 
-  const changeDraft = (draftId: string) => {
+  const saveCells = useMutation({
+    mutationFn: (payload: DraftAttributePayload) =>
+      applyDraftAttributes(connection!, activeDraftId!, payload),
+    onSuccess: async (_result, payload) => {
+      setCellError(null);
+      setCellErrorIndex(null);
+      setCellNotice(`已更新 ${cellValuesCount(payload)} 项属性`);
+      setCellEdits((previous) => {
+        const submitted = payload.params.values;
+        if (!isRecord(submitted)) return {};
+        const next = { ...previous };
+        for (const key of Object.keys(submitted)) delete next[key];
+        return next;
+      });
+      await queryClient.invalidateQueries({
+        queryKey: ["draft", connection?.url, activeDraftId],
+      });
+    },
+    onError: (error) => {
+      setCellNotice(null);
+      setCellErrorIndex(null);
+      setCellError(errorMessage(error));
+    },
+  });
+
+  const dirtyCount = Object.keys(cellEdits).length;
+
+  useEffect(() => {
+    if (dirtyCount === 0) return;
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [dirtyCount]);
+
+  const confirmDiscardCellsForBulk = (): boolean => {
+    const count = Object.keys(cellEdits).length;
+    if (count === 0) return true;
+    return window.confirm(
+      `有 ${count} 项单项属性修改尚未保存，继续该操作将放弃这些修改，确定继续吗？`,
+    );
+  };
+
+  const confirmDiscardEdits = (): boolean => {
+    const count = Object.keys(cellEdits).length;
+    if (count === 0) return true;
+    return window.confirm(`有 ${count} 项属性修改尚未保存，确定放弃吗？`);
+  };
+
+  const resetCellEdits = () => {
+    setCellEdits({});
+    setCellError(null);
+    setCellErrorIndex(null);
+  };
+
+  const updateCell = (index: number, raw: string, original: string) => {
+    setCellError(null);
+    setCellErrorIndex(null);
+    setCellNotice(null);
+    setCellEdits((previous) => {
+      const next = { ...previous };
+      const trimmed = raw.trim();
+      const unchanged =
+        trimmed === original ||
+        (trimmed !== "" && Number(trimmed) === Number(original));
+      if (unchanged) delete next[String(index)];
+      else next[String(index)] = raw;
+      return next;
+    });
+  };
+
+  const discardCellEdits = () => {
+    resetCellEdits();
+    setCellNotice(null);
+  };
+
+  const saveCellEdits = () => {
+    if (connection === null || activeDraftId === null) return;
+    const indexes = Object.keys(cellEdits)
+      .map((key) => Number(key))
+      .sort((left, right) => left - right);
+    if (indexes.length === 0) return;
+    const values: Record<string, number> = {};
+    for (const index of indexes) {
+      const raw = cellEdits[String(index)] ?? "";
+      const message = validateCellValue(index, raw);
+      if (message !== null) {
+        setCellError(message);
+        setCellErrorIndex(index);
+        setCellNotice(null);
+        return;
+      }
+      values[String(index)] = Number(raw.trim());
+    }
+    setCellError(null);
+    setCellErrorIndex(null);
+    saveCells.mutate({
+      side: side === 0 ? "home" : "away",
+      scope: "player",
+      player_index: playerIndex,
+      operation: "cells",
+      params: { values },
+    });
+  };
+
+  const changeDraft = (event: ChangeEvent<HTMLSelectElement>) => {
+    const draftId = event.target.value;
+    if (draftId === activeDraftId) return;
+    if (!confirmDiscardEdits()) {
+      event.target.value = activeDraftId ?? "";
+      return;
+    }
     setSelectedDraftId(draftId);
     setSelectedPlayer(0);
     setAttributeError(null);
     setAttributeNotice(null);
+    setCellError(null);
+    setCellErrorIndex(null);
+    setCellNotice(null);
+    setCellEdits({});
   };
 
   const changeSide = (next: 0 | 1) => {
+    if (next === side) return;
+    if (!confirmDiscardEdits()) return;
     setSide(next);
     setSelectedPlayer(0);
     setAttributeError(null);
     setAttributeNotice(null);
+    setCellError(null);
+    setCellErrorIndex(null);
+    setCellNotice(null);
+    setCellEdits({});
+  };
+
+  const selectPlayer = (index: number) => {
+    if (index === playerIndex) return;
+    if (!confirmDiscardEdits()) return;
+    setSelectedPlayer(index);
+    resetCellEdits();
+    setCellNotice(null);
   };
 
   const scenario = detail.data === undefined ? null : parseScenario(detail.data.scenario);
@@ -423,6 +619,19 @@ export function PlayersPage() {
   const missingGroups =
     (operation === "bulk" && bulkGroups.length === 0) ||
     (operation === "copy" && copyGroups.length === 0);
+  const valueHint =
+    operation === "bulk"
+      ? bulkValueMessage(bulkValue)
+      : operation === "position"
+        ? positionValueMessage(positionValue)
+        : null;
+  const groupsHint = missingGroups ? "请至少选择一个分组" : null;
+  const blockedReason =
+    valueHint === null
+      ? groupsHint
+      : groupsHint === null
+        ? valueHint
+        : `${valueHint}；${groupsHint}`;
 
   const submitAttributes = (event: FormEvent) => {
     event.preventDefault();
@@ -435,13 +644,25 @@ export function PlayersPage() {
     };
     if (scope === "player") payload.player_index = playerIndex;
     if (operation === "bulk") {
+      const message = bulkValueMessage(bulkValue);
+      if (message !== null) {
+        setAttributeNotice(null);
+        setAttributeError(message);
+        return;
+      }
       payload.params = {
-        value: Number(bulkValue),
+        value: Number(bulkValue.trim()),
         groups: orderedGroups(bulkGroups),
         include_personality: includePersonality,
       };
     } else if (operation === "position") {
-      payload.params = { position: positionCode, value: Number(positionValue) };
+      const message = positionValueMessage(positionValue);
+      if (message !== null) {
+        setAttributeNotice(null);
+        setAttributeError(message);
+        return;
+      }
+      payload.params = { position: positionCode, value: Number(positionValue.trim()) };
     } else if (operation === "copy") {
       payload.params = {
         source_uid: players[referenceIndex].sourceUid,
@@ -449,11 +670,13 @@ export function PlayersPage() {
         copy_personality: copyPersonality,
       };
     }
+    if (!confirmDiscardCellsForBulk()) return;
     applyAttributes.mutate(payload);
   };
 
   const undoAttributes = () => {
     if (connection === null || activeDraftId === null) return;
+    if (!confirmDiscardCellsForBulk()) return;
     applyAttributes.mutate({
       side: side === 0 ? "home" : "away",
       scope: "all",
@@ -468,7 +691,9 @@ export function PlayersPage() {
     scenario === null ||
     team === null ||
     player === undefined ? null : (
-      <section className="players-bulk" aria-label="批量属性编辑">
+      <details className="players-advanced">
+        <summary>高级批量工具</summary>
+        <section className="players-bulk" aria-label="批量属性编辑">
         <form
           className="players-bulk-form"
           aria-label="批量属性编辑表单"
@@ -513,6 +738,7 @@ export function PlayersPage() {
                   min={1}
                   max={20}
                   step={0.2}
+                  placeholder="如 12"
                   value={bulkValue}
                   onChange={(event) => setBulkValue(event.target.value)}
                 />
@@ -552,6 +778,7 @@ export function PlayersPage() {
                   min={0}
                   max={20}
                   step={1}
+                  placeholder="如 10"
                   value={positionValue}
                   onChange={(event) => setPositionValue(event.target.value)}
                 />
@@ -589,7 +816,7 @@ export function PlayersPage() {
             <button
               className="button primary"
               type="submit"
-              disabled={applyAttributes.isPending || missingGroups}
+              disabled={applyAttributes.isPending || blockedReason !== null}
             >
               应用
             </button>
@@ -603,6 +830,11 @@ export function PlayersPage() {
             </button>
           </div>
         </form>
+        {blockedReason === null ? null : (
+          <p className="players-bulk-hint" role="status" aria-live="polite">
+            {blockedReason}
+          </p>
+        )}
         {attributeError === null ? null : (
           <div className="inline-alert" role="alert">
             {attributeError}
@@ -613,7 +845,8 @@ export function PlayersPage() {
             {attributeNotice}
           </p>
         )}
-      </section>
+        </section>
+      </details>
     );
 
   let body: ReactNode;
@@ -691,7 +924,7 @@ export function PlayersPage() {
                     className="players-row"
                     type="button"
                     aria-pressed={index === playerIndex}
-                    onClick={() => setSelectedPlayer(index)}
+                    onClick={() => selectPlayer(index)}
                   >
                     <span className="players-row-name">
                       <span className="players-row-label">{item.name}</span>
@@ -722,6 +955,44 @@ export function PlayersPage() {
               </span>
               {team.name === null ? null : <span className="players-team">{team.name}</span>}
             </div>
+            {dirtyCount === 0 ? null : (
+              <div className="players-edit-actions">
+                <span className="players-dirty-count" aria-live="polite">
+                  已修改 {dirtyCount} 项
+                </span>
+                {saveCells.isPending ? (
+                  <span className="players-edit-pending" role="status" aria-live="polite">
+                    正在保存…
+                  </span>
+                ) : null}
+                <button
+                  className="button primary"
+                  type="button"
+                  disabled={saveCells.isPending}
+                  onClick={saveCellEdits}
+                >
+                  保存修改（{dirtyCount}）
+                </button>
+                <button
+                  className="button"
+                  type="button"
+                  disabled={saveCells.isPending}
+                  onClick={discardCellEdits}
+                >
+                  放弃
+                </button>
+              </div>
+            )}
+            {cellError === null ? null : (
+              <div className="inline-alert" role="alert" id="players-cell-error">
+                {cellError}
+              </div>
+            )}
+            {cellNotice === null ? null : (
+              <p className="jobs-notice" role="status" aria-live="polite">
+                {cellNotice}
+              </p>
+            )}
             <div className="players-groups">
               {visibleGroups.map((group) => (
                 <section
@@ -731,12 +1002,37 @@ export function PlayersPage() {
                 >
                   <h3 id={`players-group-${group.id}`}>{group.title}</h3>
                   <dl className="players-attributes">
-                    {group.indices.map((index) => (
-                      <div className="players-attribute" key={index}>
-                        <dt>{ATTRIBUTE_LABELS[index]}</dt>
-                        <dd>{displayValue(group.id, selected.attributes[index])}</dd>
-                      </div>
-                    ))}
+                    {group.indices.map((index) => {
+                      const original = displayValue(group.id, selected.attributes[index]);
+                      const edited = cellEdits[String(index)];
+                      const dirty = edited !== undefined;
+                      return (
+                        <div
+                          className={dirty ? "players-attribute is-dirty" : "players-attribute"}
+                          key={index}
+                        >
+                          <dt>{ATTRIBUTE_LABELS[index]}</dt>
+                          <dd className="players-attribute-value">
+                            <input
+                              className="players-attribute-input"
+                              type="number"
+                              aria-label={ATTRIBUTE_LABELS[index]}
+                              aria-invalid={cellErrorIndex === index ? true : undefined}
+                              aria-describedby={
+                                cellErrorIndex === index ? "players-cell-error" : undefined
+                              }
+                              min={group.id === "position" ? 0 : 1}
+                              max={20}
+                              step={group.id === "position" ? 1 : 0.2}
+                              value={edited ?? original}
+                              disabled={saveCells.isPending}
+                              onChange={(event) => updateCell(index, event.target.value, original)}
+                            />
+                            {dirty ? <span className="players-attribute-dirty">已修改</span> : null}
+                          </dd>
+                        </div>
+                      );
+                    })}
                   </dl>
                 </section>
               ))}
@@ -753,7 +1049,7 @@ export function PlayersPage() {
             <select
               aria-label="选择草稿"
               value={activeDraftId ?? ""}
-              onChange={(event) => changeDraft(event.target.value)}
+              onChange={changeDraft}
             >
               {draftItems.map((item) => (
                 <option key={item.id} value={item.id}>

@@ -1,0 +1,188 @@
+.settings-engine {
+  display: grid;
+  gap: var(--space-5);
+}
+
+.settings-engine-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: var(--space-4);
+}
+
+.settings-path-row {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.settings-path-row input {
+  flex: 1;
+  min-width: 0;
+}
+
+.settings-path-row .button {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.settings-availability {
+  display: grid;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+.settings-availability-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.settings-missing {
+  margin: 0;
+  padding-left: var(--space-4);
+  color: var(--danger);
+  font-size: var(--type-caption);
+}
+
+.settings-missing code {
+  font-family: var(--font-mono);
+}
+
+.settings-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.settings-disabled-hint {
+  color: var(--text-subtle);
+  font-size: var(--type-caption);
+}
+
+.settings-diagnose,
+.settings-restart {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.settings-diagnosis {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--surface-raised);
+}
+
+.settings-diagnosis-badges {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.settings-diagnosis-reason {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--type-body-sm);
+}
+
+.settings-diagnosis-raw {
+  margin: 0;
+  color: var(--text-subtle);
+  font-size: var(--type-caption);
+  overflow-wrap: anywhere;
+}
+
+.settings-diagnosis-meta {
+  display: grid;
+  grid-template-columns: 120px minmax(0, 1fr);
+  gap: var(--space-1) var(--space-3);
+  margin: 0;
+  font-size: var(--type-body-sm);
+}
+
+.settings-diagnosis-meta dt {
+  color: var(--text-subtle);
+}
+
+.settings-diagnosis-meta dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.settings-confirm {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--surface-raised);
+}
+
+.settings-confirm p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--type-body-sm);
+}
+
+.settings-warning {
+  margin: 0;
+  color: var(--amber);
+  font-size: var(--type-caption);
+}
+
+.settings-advanced {
+  display: block;
+}
+
+.settings-advanced > summary {
+  padding: var(--space-4) var(--space-5);
+  cursor: pointer;
+  font-size: var(--type-h2);
+  font-weight: 600;
+}
+
+.settings-advanced[open] > summary {
+  border-bottom: 1px solid var(--border);
+}
+
+.settings-advanced > .panel-body {
+  padding-top: var(--space-5);
+}
+
+.settings-advanced-toolbar {
+  justify-content: flex-end;
+  margin-bottom: var(--space-4);
+}
+
+.settings-import-form {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.settings-import-result {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--surface-raised);
+}
+
+.settings-import-meta {
+  display: grid;
+  grid-template-columns: 120px minmax(0, 1fr);
+  gap: var(--space-1) var(--space-3);
+  margin: 0;
+  font-size: var(--type-body-sm);
+}
+
+.settings-import-meta dt {
+  color: var(--text-subtle);
+}
+
+.settings-import-meta dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}

@@ -14,13 +14,20 @@ import { useAppContext } from "../app-context";
 import { EmptyState } from "../components/EmptyState";
 import { Panel } from "../components/Panel";
 import {
+  API_TIMEOUT_MS,
+  ApiError,
+  createDraft,
+  deleteDraft,
+  exportDraftFmf,
   getCatalog,
   getDraft,
+  getTacticsTemplate,
   listDrafts,
   updateDraft,
   type Catalog,
   type CatalogTeamInstruction,
 } from "../lib/api";
+import "../styles/tactics.css";
 
 const SLOT_COUNT = 11;
 const MAX_INSTRUCTION_ROWS = 8;
@@ -265,6 +272,44 @@ function cloneScenario(scenario: Record<string, unknown>): Record<string, unknow
   return isRecord(copy) ? copy : null;
 }
 
+const MAX_DRAFT_NAME = 80;
+const DOWNLOAD_URL_REVOKE_DELAY_MS = 1000;
+const FMF_FILENAME_ILLEGAL = new Set('\\/:*?"<>|');
+const FMF_FILENAME_TRIM = /^[ .]+|[ .]+$/g;
+
+type DraftDialog =
+  | { kind: "create" }
+  | { kind: "rename" }
+  | { kind: "delete" }
+  | { kind: "abandon" }
+  | { kind: "switch"; draftId: string };
+
+function fmfFilename(name: string | null): string {
+  const cleaned = Array.from(name ?? "")
+    .filter(
+      (char) =>
+        !FMF_FILENAME_ILLEGAL.has(char) && (char === " " || !/[\p{C}\p{Z}]/u.test(char)),
+    )
+    .join("")
+    .replace(FMF_FILENAME_TRIM, "");
+  return `${cleaned === "" ? "draft" : cleaned}.fmf`;
+}
+
+function draftCopyName(name: string): string {
+  const suffix = " 副本";
+  const budget = MAX_DRAFT_NAME - Array.from(suffix).length;
+  return `${Array.from(name).slice(0, budget).join("")}${suffix}`;
+}
+
+function downloadBlob(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(url), DOWNLOAD_URL_REVOKE_DELAY_MS);
+}
+
 function rawTeam(scenario: Record<string, unknown>, side: 0 | 1): Record<string, unknown> | null {
   const teams = scenario.teams;
   if (!Array.isArray(teams)) return null;
@@ -282,14 +327,27 @@ function recordCells(value: unknown): Record<string, unknown>[] | null {
   return cells;
 }
 
+function isLegacyTeam(team: Record<string, unknown>): boolean {
+  return Array.isArray(team.phase_plans) && team.phase_plans.length === 2;
+}
+
+function legacyPhasePlan(
+  team: Record<string, unknown>,
+  phase: 0 | 1,
+): Record<string, unknown> | null {
+  if (!isLegacyTeam(team) || !Array.isArray(team.phase_plans)) return null;
+  const wanted = phase === 0 ? "in_possession" : "out_of_possession";
+  const plan = team.phase_plans.find((entry) => isRecord(entry) && entry.phase === wanted);
+  return isRecord(plan) ? plan : null;
+}
+
 function rawPhaseCells(
   team: Record<string, unknown>,
   phase: 0 | 1,
 ): Record<string, unknown>[] | null {
-  if (Array.isArray(team.phase_plans) && team.phase_plans.length === 2) {
-    const wanted = phase === 0 ? "in_possession" : "out_of_possession";
-    const plan = team.phase_plans.find((entry) => isRecord(entry) && entry.phase === wanted);
-    return isRecord(plan) ? recordCells(plan.assignments) : null;
+  if (isLegacyTeam(team)) {
+    const plan = legacyPhasePlan(team, phase);
+    return plan === null ? null : recordCells(plan.assignments);
   }
   if (Array.isArray(team.phases) && team.phases.length === 2) {
     return recordCells(team.phases[phase]);
@@ -310,6 +368,45 @@ function updatePhaseCells(
   const cells = rawPhaseCells(team, phase);
   if (cells === null) return null;
   update(cells);
+  return next;
+}
+
+function updateTeamMentality(
+  scenario: Record<string, unknown>,
+  side: 0 | 1,
+  value: string,
+): Record<string, unknown> | null {
+  const mentality = Number(value);
+  if (value.trim() === "" || !Number.isInteger(mentality)) return null;
+  const next = cloneScenario(scenario);
+  if (next === null) return null;
+  const team = rawTeam(next, side);
+  if (team === null) return null;
+  team.mentality = mentality;
+  return next;
+}
+
+function updateTeamInstructions(
+  scenario: Record<string, unknown>,
+  side: 0 | 1,
+  phase: 0 | 1,
+  groupId: string,
+  value: string,
+): Record<string, unknown> | null {
+  const optionId = Number(value);
+  if (value.trim() === "" || !Number.isInteger(optionId)) return null;
+  const next = cloneScenario(scenario);
+  if (next === null) return null;
+  const team = rawTeam(next, side);
+  if (team === null) return null;
+  if (isLegacyTeam(team)) {
+    const plan = legacyPhasePlan(team, phase);
+    if (plan === null || !isRecord(plan.team_instructions)) return null;
+    plan.team_instructions[groupId] = optionId;
+    return next;
+  }
+  if (!isRecord(team.instructions)) return null;
+  team.instructions[groupId] = optionId;
   return next;
 }
 
@@ -464,12 +561,22 @@ export function TacticsPage() {
   const [dirty, setDirty] = useState(false);
   const [saveNotice, setSaveNotice] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<{ message: string; settings: boolean } | null>(
+    null,
+  );
+  const [draftDialog, setDraftDialog] = useState<DraftDialog | null>(null);
+  const [dialogName, setDialogName] = useState("");
+  const [dialogError, setDialogError] = useState<string | null>(null);
+  const [templateScenario, setTemplateScenario] = useState<Record<string, unknown> | null>(null);
+  const [templateError, setTemplateError] = useState<string | null>(null);
   const [focusedSlot, setFocusedSlot] = useState(0);
   const [pickedSlot, setPickedSlot] = useState<number | null>(null);
   const [announcement, setAnnouncement] = useState("");
   const [dragFrom, setDragFrom] = useState<number | null>(null);
   const [dragOver, setDragOver] = useState<number | null>(null);
   const slotRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const dialogRef = useRef<HTMLDivElement | null>(null);
+  const dialogTriggerRef = useRef<HTMLElement | null>(null);
   const appliedDraftParam = useRef<string | null>(draftParam);
 
   const drafts = useQuery({
@@ -489,6 +596,7 @@ export function TacticsPage() {
   const activeDraftId = draftItems.some((item) => item.id === selectedDraftId)
     ? selectedDraftId
     : (draftItems[0]?.id ?? null);
+  const activeDraft = draftItems.find((item) => item.id === activeDraftId) ?? null;
 
   const detail = useQuery({
     queryKey: ["draft", connection?.url, activeDraftId],
@@ -498,6 +606,10 @@ export function TacticsPage() {
 
   const serverScenario =
     detail.data === undefined || !isRecord(detail.data.scenario) ? null : detail.data.scenario;
+  const duplicateScenario =
+    detail.data === undefined || !isRecord(detail.data.scenario)
+      ? null
+      : cloneScenario(detail.data.scenario);
   const shownScenario = editing && workingScenario !== null ? workingScenario : serverScenario;
   const scenario = shownScenario === null ? null : parseScenario(shownScenario);
   const team = scenario === null ? null : scenario.teams[side];
@@ -537,7 +649,135 @@ export function TacticsPage() {
       setSaveError(errorMessage(error));
     },
   });
-  const saving = saveMutation.isPending;
+  const templateMutation = useMutation({
+    mutationFn: () => getTacticsTemplate(connection!),
+    onSuccess: (scenario) => {
+      setTemplateScenario(scenario);
+      setTemplateError(null);
+      openDraftDialog({ kind: "create" }, "新战术");
+    },
+    onError: (error) => {
+      setTemplateScenario(null);
+      setTemplateError(errorMessage(error));
+    },
+  });
+  const createMutation = useMutation({
+    mutationFn: (input: { name: string }) => {
+      if (templateScenario === null) {
+        throw new Error("默认阵型尚未就绪，请重新新建战术");
+      }
+      return createDraft(connection!, { name: input.name, scenario: templateScenario });
+    },
+    onSuccess: (created) => {
+      setDraftDialog(null);
+      setDialogName("");
+      setDialogError(null);
+      setActionError(null);
+      setTemplateScenario(null);
+      applyDraftParam(created.id);
+      void queryClient.invalidateQueries({ queryKey: ["drafts", connection?.url] });
+    },
+    onError: (error) => {
+      setDialogError(errorMessage(error));
+    },
+  });
+
+  const renameMutation = useMutation({
+    mutationFn: (input: { draftId: string; name: string }) =>
+      updateDraft(connection!, input.draftId, { name: input.name }),
+    onSuccess: (_draft, variables) => {
+      setDraftDialog(null);
+      setDialogName("");
+      setDialogError(null);
+      void queryClient.invalidateQueries({ queryKey: ["drafts", connection?.url] });
+      void queryClient.invalidateQueries({
+        queryKey: ["draft", connection?.url, variables.draftId],
+      });
+    },
+    onError: (error) => {
+      setDialogError(errorMessage(error));
+    },
+  });
+
+  const duplicateMutation = useMutation({
+    mutationFn: (input: { name: string; scenario: Record<string, unknown> }) =>
+      createDraft(connection!, input),
+    onSuccess: (created) => {
+      setActionError(null);
+      applyDraftParam(created.id);
+      void queryClient.invalidateQueries({ queryKey: ["drafts", connection?.url] });
+    },
+    onError: (error) => {
+      setActionError({ message: `复制失败：${errorMessage(error)}`, settings: false });
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (input: { draftId: string; adjacentId: string | null }) =>
+      deleteDraft(connection!, input.draftId),
+    onSuccess: (_result, variables) => {
+      setDraftDialog(null);
+      setDialogName("");
+      setDialogError(null);
+      setSelectedDraftId(variables.adjacentId);
+      setEditing(false);
+      setBaselineScenario(null);
+      setWorkingScenario(null);
+      setDirty(false);
+      setSaveError(null);
+      setSaveNotice(null);
+      setPickedSlot(null);
+      setAnnouncement("");
+      setDragFrom(null);
+      setDragOver(null);
+      queryClient.removeQueries({
+        queryKey: ["draft", connection?.url, variables.draftId],
+      });
+      void queryClient.invalidateQueries({ queryKey: ["drafts", connection?.url] });
+    },
+    onError: (error) => {
+      setDialogError(errorMessage(error));
+    },
+  });
+
+  const exportMutation = useMutation({
+    mutationFn: (draftId: string) => exportDraftFmf(connection!, draftId),
+    onMutate: () => {
+      setActionError(null);
+    },
+    onSuccess: (blob, draftId) => {
+      const name = draftItems.find((item) => item.id === draftId)?.name ?? null;
+      downloadBlob(blob, fmfFilename(name));
+    },
+    onError: (error) => {
+      setActionError({
+        message: `导出失败：${errorMessage(error)}`,
+        settings: error instanceof ApiError && error.code === "engine_unavailable",
+      });
+    },
+  });
+
+  const busyReason = templateMutation.isPending
+    ? "正在准备默认阵型，请稍候"
+    : saveMutation.isPending
+      ? "正在保存，请稍候"
+      : createMutation.isPending
+        ? "正在创建草案，请稍候"
+        : renameMutation.isPending
+          ? "正在保存名称，请稍候"
+          : deleteMutation.isPending
+            ? "正在删除草案，请稍候"
+            : duplicateMutation.isPending
+              ? "正在复制草案，请稍候"
+              : exportMutation.isPending
+                ? "正在导出草案，请稍候"
+                : null;
+  const busy = busyReason !== null;
+  const dialogPending =
+    draftDialog !== null &&
+    ((draftDialog.kind === "create" && createMutation.isPending) ||
+      (draftDialog.kind === "rename" && renameMutation.isPending) ||
+      (draftDialog.kind === "delete" && deleteMutation.isPending));
 
   const resetInteraction = () => {
     setPickedSlot(null);
@@ -561,14 +801,120 @@ export function TacticsPage() {
     resetInteraction();
   };
 
-  const handleAbandon = () => {
-    if (saving) return;
+  const performAbandon = () => {
+    if (busy) return;
     setWorkingScenario(baselineScenario === null ? null : cloneScenario(baselineScenario));
     setBaselineScenario(null);
     setEditing(false);
     setDirty(false);
     setSaveError(null);
     resetInteraction();
+  };
+
+  const rememberDialogTrigger = () => {
+    const active = document.activeElement;
+    dialogTriggerRef.current = active instanceof HTMLElement ? active : null;
+  };
+
+  const openDraftDialog = (dialog: DraftDialog, name = "") => {
+    setDraftDialog(dialog);
+    setDialogName(name);
+    setDialogError(null);
+    setActionError(null);
+  };
+
+  const closeDraftDialog = () => {
+    setDraftDialog(null);
+    setDialogName("");
+    setDialogError(null);
+    setTemplateScenario(null);
+  };
+
+  const requestAbandon = () => {
+    if (busy) return;
+    if (dirty) {
+      rememberDialogTrigger();
+      openDraftDialog({ kind: "abandon" });
+      return;
+    }
+    performAbandon();
+  };
+
+  const requestDraftSwitch = (draftId: string) => {
+    if (draftId === activeDraftId) return;
+    if (dirty) {
+      rememberDialogTrigger();
+      openDraftDialog({ kind: "switch", draftId });
+      return;
+    }
+    applyDraftParam(draftId);
+  };
+
+  const handleNewDraft = () => {
+    if (busy || editing) return;
+    rememberDialogTrigger();
+    setTemplateError(null);
+    templateMutation.mutate();
+  };
+
+  const handleRename = () => {
+    if (busy || activeDraft === null) return;
+    rememberDialogTrigger();
+    openDraftDialog({ kind: "rename" }, activeDraft.name);
+  };
+
+  const handleDuplicate = () => {
+    if (busy || editing || activeDraft === null || duplicateScenario === null) return;
+    duplicateMutation.mutate({
+      name: draftCopyName(activeDraft.name),
+      scenario: duplicateScenario,
+    });
+  };
+
+  const handleDelete = () => {
+    if (busy || editing || activeDraftId === null) return;
+    rememberDialogTrigger();
+    openDraftDialog({ kind: "delete" });
+  };
+
+  const handleExport = () => {
+    if (busy || activeDraftId === null) return;
+    exportMutation.mutate(activeDraftId);
+  };
+
+  const handleConfirmDelete = () => {
+    if (activeDraftId === null) return;
+    const index = draftItems.findIndex((item) => item.id === activeDraftId);
+    const adjacentId = draftItems[index + 1]?.id ?? draftItems[index - 1]?.id ?? null;
+    deleteMutation.mutate({ draftId: activeDraftId, adjacentId });
+  };
+
+  const handleDialogConfirm = () => {
+    if (draftDialog === null || dialogPending) return;
+    if (draftDialog.kind === "create") {
+      const name = dialogName.trim();
+      if (name === "") return;
+      createMutation.mutate({ name });
+      return;
+    }
+    if (draftDialog.kind === "rename") {
+      if (activeDraftId === null) return;
+      const name = dialogName.trim();
+      if (name === "") return;
+      renameMutation.mutate({ draftId: activeDraftId, name });
+      return;
+    }
+    if (draftDialog.kind === "delete") {
+      handleConfirmDelete();
+      return;
+    }
+    if (draftDialog.kind === "abandon") {
+      closeDraftDialog();
+      performAbandon();
+      return;
+    }
+    closeDraftDialog();
+    applyDraftParam(draftDialog.draftId);
   };
 
   const applyEditedScenario = (next: Record<string, unknown> | null) => {
@@ -579,7 +925,7 @@ export function TacticsPage() {
   };
 
   const handleSave = () => {
-    if (saving || !editing || workingScenario === null || activeDraftId === null) return;
+    if (busy || !editing || workingScenario === null || activeDraftId === null) return;
     saveMutation.mutate({ draftId: activeDraftId, scenario: workingScenario });
   };
 
@@ -643,6 +989,16 @@ export function TacticsPage() {
     );
   };
 
+  const handleMentalityChange = (value: string) => {
+    if (workingScenario === null) return;
+    applyEditedScenario(updateTeamMentality(workingScenario, side, value));
+  };
+
+  const handleInstructionChange = (groupId: string, value: string) => {
+    if (workingScenario === null) return;
+    applyEditedScenario(updateTeamInstructions(workingScenario, side, phase, groupId, value));
+  };
+
   const handleDragStart = (event: DragEvent<HTMLLIElement>, index: number) => {
     if (!editing) return;
     setDragFrom(index);
@@ -704,16 +1060,203 @@ export function TacticsPage() {
     applyDraftParam(draftParam);
   }, [draftParam, dirty]);
 
+  useEffect(() => {
+    if (!dirty) return;
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => {
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+    };
+  }, [dirty]);
+
+  useEffect(() => {
+    if (draftDialog === null) return;
+    const handleKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key !== "Escape" || dialogPending) return;
+      closeDraftDialog();
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [draftDialog, dialogPending]);
+
+  useEffect(() => {
+    if (draftDialog !== null) return;
+    const trigger = dialogTriggerRef.current;
+    dialogTriggerRef.current = null;
+    if (trigger === null || !trigger.isConnected || trigger.hasAttribute("disabled")) return;
+    trigger.focus();
+  }, [draftDialog]);
+
+  useEffect(() => {
+    if (draftDialog === null) return;
+    const dialog = dialogRef.current;
+    if (dialog === null) return;
+    const focusable = () =>
+      Array.from(
+        dialog.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href]',
+        ),
+      );
+    focusable()[0]?.focus();
+    const handleKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key !== "Tab") return;
+      const items = focusable();
+      if (items.length === 0) return;
+      const first = items[0];
+      const last = items[items.length - 1];
+      const active = document.activeElement;
+      const outside = active === null || !dialog.contains(active);
+      if (event.shiftKey && (outside || active === first)) {
+        event.preventDefault();
+        last.focus();
+        return;
+      }
+      if (!event.shiftKey && (outside || active === last)) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    dialog.addEventListener("keydown", handleKeyDown);
+    return () => {
+      dialog.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [draftDialog]);
+
+  const dialogTitle =
+    draftDialog === null
+      ? ""
+      : draftDialog.kind === "create"
+        ? "新建战术"
+        : draftDialog.kind === "rename"
+          ? "重命名草案"
+          : draftDialog.kind === "delete"
+            ? "删除草案"
+            : draftDialog.kind === "abandon"
+              ? "放弃修改"
+              : "切换草案";
+
+  const confirmLabel =
+    draftDialog === null
+      ? ""
+      : draftDialog.kind === "create"
+        ? "创建"
+        : draftDialog.kind === "rename"
+          ? "保存名称"
+          : draftDialog.kind === "delete"
+            ? "确认删除"
+            : draftDialog.kind === "abandon"
+              ? "确认放弃"
+              : "确认切换";
+
+  const dialogNeedsName =
+    draftDialog !== null && (draftDialog.kind === "create" || draftDialog.kind === "rename");
+  const dialogDescription =
+    draftDialog === null
+      ? ""
+      : draftDialog.kind === "delete"
+        ? `删除《${activeDraft?.name ?? ""}》后无法恢复。`
+        : draftDialog.kind === "abandon"
+          ? "放弃修改会丢失当前编辑内容。"
+          : "切换草案会丢失未保存的修改。";
+  const confirmBlocked = dialogPending || (dialogNeedsName && dialogName.trim() === "");
+  const confirmTitle = dialogPending
+    ? (busyReason ?? undefined)
+    : dialogNeedsName && dialogName.trim() === ""
+      ? "请输入草案名称"
+      : undefined;
+
+  const dialogNode =
+    draftDialog === null ? null : (
+      <div className="tactics-dialog-backdrop">
+        <div
+          ref={dialogRef}
+          className="tactics-dialog"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="tactics-dialog-title"
+        >
+          <h2 id="tactics-dialog-title">{dialogTitle}</h2>
+          {dialogNeedsName ? (
+            <label className="field">
+              草案名称
+              <input
+                maxLength={MAX_DRAFT_NAME}
+                value={dialogName}
+                autoFocus
+                onChange={(event) => setDialogName(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") handleDialogConfirm();
+                }}
+              />
+            </label>
+          ) : (
+            <p>{dialogDescription}</p>
+          )}
+          {dialogPending ? (
+            <p className="tactics-note tactics-dialog-pending" role="status">
+              请求处理中，最多等待 {API_TIMEOUT_MS / 1000} 秒，请勿关闭窗口
+            </p>
+          ) : null}
+          {dialogError === null ? null : (
+            <p className="inline-alert" role="alert">
+              {dialogError}
+            </p>
+          )}
+          <div className="tactics-dialog-actions">
+            <button
+              className="button small"
+              type="button"
+              disabled={dialogPending}
+              title={dialogPending ? (busyReason ?? undefined) : undefined}
+              onClick={closeDraftDialog}
+            >
+              取消
+            </button>
+            <button
+              className="button small"
+              type="button"
+              disabled={confirmBlocked}
+              title={confirmTitle}
+              onClick={handleDialogConfirm}
+            >
+              {confirmLabel}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+
+  const templateAlert =
+    templateError === null ? null : (
+      <div className="inline-alert" role="alert">
+        <span>{templateError}</span>
+        <Link className="tactics-settings-link" to="/settings">
+          去设置页
+        </Link>
+      </div>
+    );
+
   const toolbar =
     draftItems.length === 0 ? null : (
-      <div className="tactics-toolbar" aria-busy={saving ? true : undefined}>
+      <div
+        className="tactics-toolbar"
+        role="toolbar"
+        aria-label="草稿工具栏"
+        aria-busy={busy ? true : undefined}
+      >
         <label className="field tactics-draft">
           草稿
           <select
             aria-label="选择草稿"
             value={activeDraftId ?? ""}
-            disabled={dirty}
-            onChange={(event) => applyDraftParam(event.target.value)}
+            disabled={busy}
+            title={busyReason ?? undefined}
+            onChange={(event) => requestDraftSwitch(event.target.value)}
           >
             {draftItems.map((item) => (
               <option key={item.id} value={item.id}>
@@ -722,33 +1265,118 @@ export function TacticsPage() {
             ))}
           </select>
         </label>
+        <div className="tactics-draft-tools" role="group" aria-label="草稿操作">
+          <button
+            className="button small"
+            type="button"
+            disabled={busy || editing}
+            title={busyReason ?? (editing ? "编辑中，请先保存或放弃" : undefined)}
+            onClick={handleNewDraft}
+          >
+            新建战术
+          </button>
+          <button
+            className="button small"
+            type="button"
+            disabled={busy}
+            title={busyReason ?? undefined}
+            onClick={handleRename}
+          >
+            重命名
+          </button>
+          <button
+            className="button small"
+            type="button"
+            disabled={busy || editing || duplicateScenario === null}
+            title={
+              busyReason ??
+              (editing
+                ? "编辑中，请先保存或放弃"
+                : duplicateScenario === null
+                  ? "草案场景加载中，暂不可复制"
+                  : undefined)
+            }
+            onClick={handleDuplicate}
+          >
+            复制
+          </button>
+          <button
+            className="button small danger"
+            type="button"
+            disabled={busy || editing}
+            title={busyReason ?? (editing ? "编辑中，请先保存或放弃" : undefined)}
+            onClick={handleDelete}
+          >
+            删除
+          </button>
+          <button
+            className="button small"
+            type="button"
+            disabled={busy}
+            title={busyReason ?? undefined}
+            onClick={handleExport}
+          >
+            导出 FMF
+          </button>
+        </div>
         <div className="segmented" role="group" aria-label="球队">
-          <button type="button" aria-pressed={side === 0} onClick={() => setSide(0)}>
+          <button
+            type="button"
+            aria-pressed={side === 0}
+            disabled={busy}
+            title={busyReason ?? undefined}
+            onClick={() => setSide(0)}
+          >
             主队
           </button>
-          <button type="button" aria-pressed={side === 1} onClick={() => setSide(1)}>
+          <button
+            type="button"
+            aria-pressed={side === 1}
+            disabled={busy}
+            title={busyReason ?? undefined}
+            onClick={() => setSide(1)}
+          >
             客队
           </button>
         </div>
         <div className="segmented" role="group" aria-label="阶段">
-          <button type="button" aria-pressed={phase === 0} onClick={() => setPhase(0)}>
+          <button
+            type="button"
+            aria-pressed={phase === 0}
+            disabled={busy}
+            title={busyReason ?? undefined}
+            onClick={() => setPhase(0)}
+          >
             有球
           </button>
-          <button type="button" aria-pressed={phase === 1} onClick={() => setPhase(1)}>
+          <button
+            type="button"
+            aria-pressed={phase === 1}
+            disabled={busy}
+            title={busyReason ?? undefined}
+            onClick={() => setPhase(1)}
+          >
             无球
           </button>
         </div>
         <div className="tactics-actions">
           {editing ? (
             <>
-              <button className="button small" type="button" disabled={saving} onClick={handleSave}>
+              <button
+                className="button small"
+                type="button"
+                disabled={busy}
+                title={busyReason ?? undefined}
+                onClick={handleSave}
+              >
                 保存
               </button>
               <button
                 className="button small danger"
                 type="button"
-                disabled={saving}
-                onClick={handleAbandon}
+                disabled={busy}
+                title={busyReason ?? undefined}
+                onClick={requestAbandon}
               >
                 放弃
               </button>
@@ -757,7 +1385,10 @@ export function TacticsPage() {
             <button
               className="button small"
               type="button"
-              disabled={serverScenario === null}
+              disabled={busy || serverScenario === null}
+              title={
+                busyReason ?? (serverScenario === null ? "战术场景加载中，暂不可编辑" : undefined)
+              }
               onClick={handleStartEditing}
             >
               编辑阵型
@@ -805,14 +1436,27 @@ export function TacticsPage() {
   if (draftItems.length === 0) {
     return (
       <Panel title="双阶段战术板">
+        {dialogNode}
+        {templateAlert}
         <EmptyState
           icon={SquaresFour}
           title="暂无草稿"
-          description="创建场景草案后，这里会显示两套阶段阵型与球队指令。"
+          description="新建战术会从引擎资源生成默认阵型，也可前往存档库导入 FMF 后开始编排。"
           action={
-            <Link className="button tactics-library-link" to="/library">
-              前往战术库
-            </Link>
+            <div className="tactics-empty-actions">
+              <button
+                className="button small"
+                type="button"
+                disabled={busy}
+                title={busyReason ?? undefined}
+                onClick={handleNewDraft}
+              >
+                新建战术
+              </button>
+              <Link className="button tactics-library-link" to="/library">
+                前往存档库导入 FMF
+              </Link>
+            </div>
           }
         />
       </Panel>
@@ -822,6 +1466,18 @@ export function TacticsPage() {
   const boardPanel = (content: ReactNode) => (
     <Panel title="双阶段战术板" className="span-7 tactics-board">
       {toolbar}
+      {dialogNode}
+      {actionError === null ? null : (
+        <div className="inline-alert" role="alert">
+          <span>{actionError.message}</span>
+          {actionError.settings ? (
+            <Link className="tactics-settings-link" to="/settings">
+              去设置页
+            </Link>
+          ) : null}
+        </div>
+      )}
+      {templateAlert}
       {content}
     </Panel>
   );
@@ -843,6 +1499,7 @@ export function TacticsPage() {
     return (
       <Panel title="双阶段战术板">
         {toolbar}
+        {dialogNode}
         <div className="inline-alert" role="alert">
           <span>{errorMessage(detail.error)}</span>
           <button className="button small" type="button" onClick={() => void detail.refetch()}>
@@ -857,6 +1514,7 @@ export function TacticsPage() {
     return (
       <Panel title="双阶段战术板">
         {toolbar}
+        {dialogNode}
         <div className="inline-alert" role="alert">
           场景数据无效：需要两支球队与两套各 11 个位置的阶段。
         </div>
@@ -866,8 +1524,16 @@ export function TacticsPage() {
 
   const plan = activePlan;
   const rows = instructionRows(plan, phase, lookup);
-  const visibleRows = rows.slice(0, MAX_INSTRUCTION_ROWS);
+  const visibleRows = editing ? rows : rows.slice(0, MAX_INSTRUCTION_ROWS);
   const hiddenRows = rows.length - visibleRows.length;
+  const shownTeam = shownScenario === null ? null : rawTeam(shownScenario, side);
+  const legacyPlanShape = shownTeam !== null && isLegacyTeam(shownTeam);
+  const mentalityValue = team.mentality === null ? "" : String(team.mentality);
+  const mentalityOptions = lookup === null ? [] : Array.from(lookup.mentalityLabels.entries());
+  const mentalityFallback =
+    mentalityValue !== "" && !mentalityOptions.some(([value]) => value === mentalityValue)
+      ? mentalityLabel(team.mentality, lookup)
+      : null;
 
   return (
     <div className="page-grid">
@@ -885,14 +1551,14 @@ export function TacticsPage() {
           )}
           {editing ? (
             <p className="tactics-note tactics-dirty-note">
-              {dirty ? "有未保存修改，保存或放弃后可切换草稿" : "编辑阵型中，修改后请保存或放弃"}
+              {dirty ? "有未保存修改，切换或放弃前需要确认" : "编辑阵型中，修改后请保存或放弃"}
             </p>
           ) : null}
           <div
             className="tactics-pitch"
             role="group"
             aria-label={`${PHASE_LABELS[phase]}战术板`}
-            aria-busy={saving ? true : undefined}
+            aria-busy={busy ? true : undefined}
           >
             <div className="tactics-pitch-lines" aria-hidden="true">
               <span className="tactics-pitch-halfway" />
@@ -942,7 +1608,7 @@ export function TacticsPage() {
                           slotRefs.current[index] = node;
                         }}
                         tabIndex={focusedSlot === index ? 0 : -1}
-                        aria-label={`槽位 ${slotCode(index)}，${cell.position}，${role}`}
+                        aria-label={`槽位 ${slotCode(index)}，${name}，${cell.position}，${role}`}
                         onClick={() => setFocusedSlot(index)}
                         onFocus={() => setFocusedSlot(index)}
                         onKeyDown={(event) => handleSlotKeyDown(event, index)}
@@ -971,6 +1637,9 @@ export function TacticsPage() {
                   aria-label="角色"
                   value={focusedCell.role}
                   disabled={lookup === null}
+                  title={
+                    lookup === null ? "运行时目录不可用，无法编辑角色" : undefined
+                  }
                   onChange={(event) => handleRoleChange(event.target.value)}
                 >
                   {phaseRoleOptions.map((option) => (
@@ -998,23 +1667,80 @@ export function TacticsPage() {
         className="span-5"
         action={team.name === null ? undefined : <span className="badge">{team.name}</span>}
       >
+        {editing ? (
+          <p className="tactics-note tactics-instruction-scope">
+            {legacyPlanShape
+              ? "该草案为旧版格式，两阶段各自保存球队指令；保存后升级为当前格式"
+              : "球队指令对两个阶段共用"}
+          </p>
+        ) : null}
         {catalogMissing ? (
           <p className="tactics-note tactics-catalog-note">{CATALOG_MISSING_NOTE}</p>
         ) : null}
         <div className="tactics-mentality">
           <span className="tactics-mentality-label">心态</span>
-          <span className="tactics-mentality-value">{mentalityLabel(team.mentality, lookup)}</span>
+          {editing ? (
+            <select
+              className="tactics-mentality-select"
+              aria-label="心态"
+              value={mentalityValue}
+              disabled={lookup === null}
+              title={lookup === null ? "运行时目录不可用，无法编辑心态" : undefined}
+              onChange={(event) => handleMentalityChange(event.target.value)}
+            >
+              {mentalityValue === "" ? <option value="">—</option> : null}
+              {mentalityOptions.map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+              {mentalityFallback === null ? null : (
+                <option value={mentalityValue}>{mentalityFallback}</option>
+              )}
+            </select>
+          ) : (
+            <span className="tactics-mentality-value">{mentalityLabel(team.mentality, lookup)}</span>
+          )}
         </div>
         {visibleRows.length === 0 ? (
           <p className="tactics-note">该阶段没有可读的球队指令。</p>
         ) : (
           <dl className="tactics-instructions">
-            {visibleRows.map((row) => (
-              <div className="tactics-instruction" key={row.key}>
-                <dt>{row.label}</dt>
-                <dd>{row.value}</dd>
-              </div>
-            ))}
+            {visibleRows.map((row) => {
+              const group = lookup === null ? undefined : lookup.groups.get(row.key);
+              const rawValue = plan.instructions[row.key];
+              const selectValue =
+                typeof rawValue === "number" || typeof rawValue === "string" ? String(rawValue) : "";
+              return (
+                <div className="tactics-instruction" key={row.key}>
+                  <dt>{row.label}</dt>
+                  {editing && group !== undefined && group.options.size > 0 ? (
+                    <dd>
+                      <select
+                        className="tactics-instruction-select"
+                        aria-label={`球队指令：${row.label}`}
+                        value={selectValue}
+                        onChange={(event) => handleInstructionChange(row.key, event.target.value)}
+                      >
+                        {selectValue === "" ? <option value="">—</option> : null}
+                        {Array.from(group.options.entries()).map(([optionId, label]) => (
+                          <option key={optionId} value={optionId}>
+                            {label}
+                          </option>
+                        ))}
+                        {selectValue !== "" && !group.options.has(selectValue) ? (
+                          <option value={selectValue}>
+                            {instructionValueLabel(rawValue, group)}
+                          </option>
+                        ) : null}
+                      </select>
+                    </dd>
+                  ) : (
+                    <dd>{row.value}</dd>
+                  )}
+                </div>
+              );
+            })}
           </dl>
         )}
         {hiddenRows > 0 ? <p className="tactics-note">另有 {hiddenRows} 项未显示</p> : null}

@@ -30,6 +30,7 @@ const ALIASES: AliasCase[] = [
   { name: "SaveCreate", generated: "SaveCreateInput" },
   { name: "SaveUpdate", generated: "SaveUpdateInput" },
   { name: "SaveImport", generated: "SaveImportInput" },
+  { name: "SaveTactic", generated: "SaveTacticOutput" },
   { name: "Draft", generated: "DraftOutput" },
   { name: "DraftSummary", generated: "DraftSummary", importAs: "GeneratedDraftSummary" },
   { name: "DraftList", generated: "DraftListOutput" },
@@ -42,6 +43,10 @@ const ALIASES: AliasCase[] = [
   { name: "SettingInput", generated: "SettingPutInput" },
   { name: "ConcurrencyCheck", generated: "ConcurrencyCheckOutput" },
   { name: "HostResources", generated: "SystemResourcesOutput" },
+  { name: "EngineStatus", generated: "EngineStatusOutput" },
+  { name: "EngineDiagnosis", generated: "EngineDiagnosisOutput" },
+  { name: "EngineImportResult", generated: "EngineImportOutput" },
+  { name: "EngineSelect", generated: "EngineSelectInput" },
   {
     name: "ExperimentSubmitInput",
     generated: "ExperimentSubmitInput",
@@ -59,6 +64,7 @@ const ALIASES: AliasCase[] = [
   { name: "RosterApplyResult", generated: "RosterApplyOutput" },
   { name: "RosterUndoResult", generated: "RosterUndoOutput" },
   { name: "RosterApplied", generated: "RosterAppliedOutput" },
+  { name: "TacticsTemplate", generated: "TacticsTemplateOutput" },
 ];
 
 const RETAINED: { name: string; declaration: string }[] = [
@@ -91,7 +97,7 @@ const RETAINED: { name: string; declaration: string }[] = [
   {
     name: "DraftAttributeOperation",
     declaration:
-      'export type DraftAttributeOperation = "bulk" | "position" | "copy" | "pair_feet" | "undo";',
+      'export type DraftAttributeOperation = "bulk" | "position" | "copy" | "pair_feet" | "cells" | "undo";',
   },
   { name: "RosterSide", declaration: 'export type RosterSide = "home" | "away";' },
   { name: "RosterScope", declaration: 'export type RosterScope = "starters" | "bench" | "both";' },
@@ -147,9 +153,9 @@ describe("api.ts 类型映射", () => {
   it("顶部摘要与映射表计数一致", () => {
     const summary = `// API 类型映射：生成别名 ${ALIASES.length} 项；保留手写类型 ${RETAINED.length} 项；字段派生 ${DERIVED.length} 项；ApiError 类保留；明细见 api-types.test.ts。`;
     expect(apiSource.split("\n")[0]).toBe(summary);
-    expect(mappedNames()).toHaveLength(68);
-    expect(new Set(mappedNames()).size).toBe(68);
-    expect(ALIASES).toHaveLength(41);
+    expect(mappedNames()).toHaveLength(74);
+    expect(new Set(mappedNames()).size).toBe(74);
+    expect(ALIASES).toHaveLength(47);
     expect(RETAINED).toHaveLength(25);
     expect(DERIVED).toHaveLength(2);
   });
@@ -190,6 +196,8 @@ describe("api.ts 类型映射", () => {
       );
     }
     expect(apiSource).toContain(RETAINED_CLASS.declaration);
+    const apiErrorBlock = apiSource.slice(apiSource.indexOf(RETAINED_CLASS.declaration));
+    expect(apiErrorBlock).toContain("readonly retriable: boolean");
   });
 
   it("状态类型从响应类型派生", () => {

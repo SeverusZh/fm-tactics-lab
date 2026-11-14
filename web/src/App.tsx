@@ -1,19 +1,20 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { invoke, isTauri } from "@tauri-apps/api/core";
+import { invoke } from "@tauri-apps/api/core";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import { listen } from "@tauri-apps/api/event";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 
 import { AppContext } from "./app-context";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { Rail } from "./components/Rail";
-import { RunBar } from "./components/RunBar";
 import { TopBar } from "./components/TopBar";
 import { apiJson, type Health } from "./lib/api";
 import type { Connection } from "./lib/connection";
 import { loadConnection } from "./lib/connection";
+import { isDesktopShell } from "./lib/file-dialog";
 import { ExperimentsPage } from "./pages/ExperimentsPage";
+import { HelpPage } from "./pages/HelpPage";
 import { JobsPage } from "./pages/JobsPage";
 import { LibraryPage } from "./pages/LibraryPage";
 import { PlayersPage } from "./pages/PlayersPage";
@@ -29,6 +30,7 @@ const titles: Record<string, string> = {
   "/results": "实验结果",
   "/jobs": "任务管理",
   "/settings": "设置",
+  "/help": "帮助",
 };
 
 function titleFor(pathname: string): string {
@@ -40,6 +42,7 @@ export function App() {
   const queryClient = useQueryClient();
   const [lifecycleError, setLifecycleError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const refreshingRef = useRef(false);
   const connection = useQuery({
     queryKey: ["connection"],
     queryFn: loadConnection,
@@ -54,7 +57,7 @@ export function App() {
   });
 
   useEffect(() => {
-    if (!isTauri()) return;
+    if (!isDesktopShell()) return;
     let disposed = false;
     const unlisteners: UnlistenFn[] = [];
     const subscribe = async () => {
@@ -101,11 +104,13 @@ export function App() {
       : health.error instanceof Error
         ? health.error.message
         : null);
-  const refresh = async () => {
-    if (refreshing) return;
+  const refresh = useCallback(async () => {
+    if (refreshingRef.current) return;
+    refreshingRef.current = true;
     setRefreshing(true);
     try {
-      if (connection.data == null && isTauri()) {
+      const current = queryClient.getQueryData<Connection | null>(["connection"]);
+      if ((current ?? null) === null && isDesktopShell()) {
         await invoke("restart_sidecar");
       }
       await queryClient.invalidateQueries({ queryKey: ["connection"] });
@@ -113,9 +118,10 @@ export function App() {
     } catch (error) {
       setLifecycleError(String(error));
     } finally {
+      refreshingRef.current = false;
       setRefreshing(false);
     }
-  };
+  }, [queryClient]);
 
   return (
     <AppContext.Provider
@@ -124,9 +130,7 @@ export function App() {
         health: health.data ?? null,
         connectionError,
         refreshing,
-        refresh: () => {
-          void refresh();
-        },
+        refresh,
       }}
     >
       <div className="app-shell">
@@ -149,11 +153,11 @@ export function App() {
                 <Route path="/results" element={<ResultsPage />} />
                 <Route path="/jobs" element={<JobsPage />} />
                 <Route path="/settings" element={<SettingsPage />} />
+                <Route path="/help" element={<HelpPage />} />
                 <Route path="*" element={<Navigate to="/tactics" replace />} />
               </Routes>
             </ErrorBoundary>
           </main>
-          <RunBar />
         </div>
       </div>
     </AppContext.Provider>

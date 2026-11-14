@@ -13,11 +13,14 @@ import {
   getSaveSquad,
   importSave,
   importSaveFile,
+  importSaveTactic,
   listSaves,
+  listSaveTactics,
   undoRoster,
   updateSave,
   type Health,
   type Save,
+  type SaveTactic,
 } from "../lib/api";
 import { LibraryPage } from "./LibraryPage";
 
@@ -153,6 +156,33 @@ function rowFor(text: string): HTMLElement {
   return row;
 }
 
+function disabledControls(): Array<HTMLButtonElement | HTMLInputElement | HTMLSelectElement> {
+  const controls = [
+    ...screen.queryAllByRole("button"),
+    ...screen.queryAllByRole("checkbox"),
+    ...screen.queryAllByRole("combobox"),
+  ];
+  return controls
+    .filter(
+      (control): control is HTMLButtonElement | HTMLInputElement | HTMLSelectElement =>
+        control instanceof HTMLButtonElement ||
+        control instanceof HTMLInputElement ||
+        control instanceof HTMLSelectElement,
+    )
+    .filter((control) => control.disabled);
+}
+
+function expectDisabledControlsExplained() {
+  const controls = disabledControls();
+  expect(controls.length).toBeGreaterThan(0);
+  for (const control of controls) {
+    const descriptionId = control.getAttribute("aria-describedby");
+    const described = descriptionId === null ? null : document.getElementById(descriptionId);
+    const explanation = control.getAttribute("title") ?? described?.textContent ?? "";
+    expect(explanation.trim()).not.toBe("");
+  }
+}
+
 describe("LibraryPage", () => {
   beforeEach(() => {
     fetchMock.mockReset();
@@ -228,127 +258,6 @@ describe("LibraryPage", () => {
     expect(screen.getByRole("button", { name: "上一页" })).toBeEnabled();
   });
 
-  it("创建存档提交表单并刷新列表", async () => {
-    let posted: unknown = null;
-    stubFetch((_url, init) => {
-      if (init.method === "POST") {
-        posted = JSON.parse(String(init.body));
-        return jsonResponse(makeSave({ source_path: "/saves/new.fm" }), 201);
-      }
-      return jsonResponse(makeList([]));
-    });
-    renderLibraryPage();
-    await screen.findByText("尚未导入存档");
-
-    fireEvent.click(screen.getByRole("button", { name: "新建存档" }));
-    fireEvent.change(screen.getByLabelText("存档路径"), {
-      target: { value: "/saves/new.fm" },
-    });
-    fireEvent.change(screen.getByLabelText("SHA-256"), { target: { value: SHA } });
-    fireEvent.change(screen.getByLabelText("阶段"), { target: { value: "leagues" } });
-    fireEvent.change(screen.getByLabelText("元数据 JSON"), {
-      target: { value: '{"联赛":"英超"}' },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "创建" }));
-
-    await waitFor(() => expect(posted).not.toBeNull());
-    expect(posted).toEqual({
-      source_path: "/saves/new.fm",
-      source_sha256: SHA,
-      stage: "leagues",
-      metadata: { 联赛: "英超" },
-    });
-    expect(await screen.findByText("存档已创建")).toBeInTheDocument();
-    await waitFor(() => expect(callsTo("/api/saves?").length).toBe(2));
-  });
-
-  it("创建表单校验错误就地显示并阻止提交", async () => {
-    stubFetch((_url, init) => {
-      if (init.method === "POST") return jsonResponse(makeSave(), 201);
-      return jsonResponse(makeList([]));
-    });
-    renderLibraryPage();
-    await screen.findByText("尚未导入存档");
-
-    fireEvent.click(screen.getByRole("button", { name: "新建存档" }));
-    expect(screen.getByRole("button", { name: "创建" })).toBeDisabled();
-
-    fireEvent.change(screen.getByLabelText("SHA-256"), { target: { value: "abc" } });
-    expect(
-      screen.getByText("SHA-256 需为 64 位十六进制字符串"),
-    ).toBeInTheDocument();
-    expect(screen.getByLabelText("SHA-256")).toHaveAttribute("aria-invalid", "true");
-
-    fireEvent.change(screen.getByLabelText("元数据 JSON"), { target: { value: "{" } });
-    expect(screen.getByText("元数据必须为合法 JSON 对象")).toBeInTheDocument();
-
-    fireEvent.change(screen.getByLabelText("阶段"), { target: { value: "x".repeat(201) } });
-    expect(screen.getByText("阶段最多 200 个字符")).toBeInTheDocument();
-
-    fireEvent.change(screen.getByLabelText("存档路径"), { target: { value: "/saves/a.fm" } });
-    fireEvent.change(screen.getByLabelText("SHA-256"), { target: { value: SHA } });
-    fireEvent.change(screen.getByLabelText("元数据 JSON"), { target: { value: "" } });
-    fireEvent.change(screen.getByLabelText("阶段"), { target: { value: "" } });
-    expect(screen.getByRole("button", { name: "创建" })).toBeEnabled();
-    expect(fetchCalls().some((call) => call.init.method === "POST")).toBe(false);
-  });
-
-  it("导入 JSON 调用 import 接口并刷新列表", async () => {
-    let posted: unknown = null;
-    let imported = false;
-    stubFetch((url, init) => {
-      if (init.method === "POST" && url.includes("/import")) {
-        posted = JSON.parse(String(init.body));
-        imported = true;
-        return jsonResponse(makeSave({ status: "ready" }));
-      }
-      return jsonResponse(
-        imported ? makeList([makeSave({ status: "ready" })]) : makeList([makeSave({ status: "reading" })]),
-      );
-    });
-    renderLibraryPage();
-    await screen.findByText("/saves/season-1.fm");
-
-    fireEvent.click(within(rowFor("/saves/season-1.fm")).getByRole("button", { name: "导入" }));
-    fireEvent.change(screen.getByLabelText("导入 JSON"), {
-      target: {
-        value: '{"leagues":{"premier":{"clubs":[1]}},"clubs":{"10":{"name":"甲"}}}',
-      },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "导入存档" }));
-
-    await waitFor(() => expect(posted).not.toBeNull());
-    expect(callsTo("/api/saves/save-1/import")[0].url).toBe(
-      "http://127.0.0.1:43210/api/saves/save-1/import",
-    );
-    expect(posted).toEqual({
-      leagues: { premier: { clubs: [1] } },
-      clubs: { "10": { name: "甲" } },
-    });
-    expect(await screen.findByText("存档已导入")).toBeInTheDocument();
-    await waitFor(() => expect(callsTo("/api/saves?").length).toBe(2));
-  });
-
-  it("导入 JSON 校验失败就地显示且不发起请求", async () => {
-    stubFetch(() => jsonResponse(makeList([makeSave({ status: "reading" })])));
-    renderLibraryPage();
-    await screen.findByText("/saves/season-1.fm");
-
-    fireEvent.click(within(rowFor("/saves/season-1.fm")).getByRole("button", { name: "导入" }));
-    fireEvent.click(screen.getByRole("button", { name: "导入存档" }));
-    expect(screen.getByText("导入内容不能为空")).toBeInTheDocument();
-
-    fireEvent.change(screen.getByLabelText("导入 JSON"), { target: { value: "不是 JSON" } });
-    fireEvent.click(screen.getByRole("button", { name: "导入存档" }));
-    expect(screen.getByText("导入内容必须是合法 JSON")).toBeInTheDocument();
-
-    fireEvent.change(screen.getByLabelText("导入 JSON"), { target: { value: '{"leagues":{}}' } });
-    fireEvent.click(screen.getByRole("button", { name: "导入存档" }));
-    expect(screen.getByText("导入内容需要 leagues 与 clubs 对象")).toBeInTheDocument();
-
-    expect(callsTo("/import")).toHaveLength(0);
-  });
-
   it("删除存档需要二次确认，成功后调用 DELETE 并刷新列表", async () => {
     let deleted = false;
     stubFetch((_url, init) => {
@@ -393,26 +302,6 @@ describe("LibraryPage", () => {
 
     expect(await screen.findByText("尚未导入存档")).toBeInTheDocument();
     expect(attempts).toBe(2);
-  });
-
-  it("创建存档冲突时展示后端错误", async () => {
-    stubFetch((_url, init) => {
-      if (init.method === "POST") {
-        return jsonResponse({ error: { code: "conflict", message: "存档内容重复" } }, 409);
-      }
-      return jsonResponse(makeList([]));
-    });
-    renderLibraryPage();
-    await screen.findByText("尚未导入存档");
-
-    fireEvent.click(screen.getByRole("button", { name: "新建存档" }));
-    fireEvent.change(screen.getByLabelText("存档路径"), {
-      target: { value: "/saves/new.fm" },
-    });
-    fireEvent.change(screen.getByLabelText("SHA-256"), { target: { value: SHA } });
-    fireEvent.click(screen.getByRole("button", { name: "创建" }));
-
-    expect(await screen.findByRole("alert")).toHaveTextContent("存档内容重复");
   });
 
   it("sidecar 未连接时显示空态", async () => {
@@ -1408,7 +1297,7 @@ describe("FMF 战术文件导入", () => {
     expect(chooseLocalFileMock).not.toHaveBeenCalled();
   });
 
-  it("工具栏按钮顺序为导入存档文件、导入 FMF 战术文件、新建存档", async () => {
+  it("工具栏按刷新、导入存档文件、导入 FMF 战术文件排列", async () => {
     stubFetch(() => jsonResponse(makeList([])));
     renderLibraryPage();
     await screen.findByText("尚未导入存档");
@@ -1420,7 +1309,7 @@ describe("FMF 战术文件导入", () => {
       .getAllByRole("button")
       .map((button) => button.textContent?.trim());
 
-    expect(labels).toEqual(["刷新", "导入存档文件", "导入 FMF 战术文件", "新建存档"]);
+    expect(labels).toEqual(["刷新", "导入存档文件", "导入 FMF 战术文件"]);
   });
 
   it("路径不含文件名时名称兜底为导入战术", async () => {
@@ -1520,5 +1409,339 @@ describe("FMF 战术文件导入", () => {
 
     pending.resolve(jsonResponse(fmfDraft(), 201));
     expect(await screen.findByTestId("tactics-placeholder")).toBeInTheDocument();
+  });
+});
+
+describe("LibraryPage 清理后的入口与禁用说明", () => {
+  beforeEach(() => {
+    fetchMock.mockReset();
+    vi.stubGlobal("fetch", fetchMock);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it("不提供新建存档与 JSON 导入入口", async () => {
+    stubFetch(() => jsonResponse(makeList([makeSave()])));
+    renderLibraryPage();
+    await screen.findByText("/saves/season-1.fm");
+
+    expect(screen.queryByRole("button", { name: "新建存档" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("form", { name: "新建存档" })).not.toBeInTheDocument();
+    expect(
+      within(rowFor("/saves/season-1.fm")).queryByRole("button", { name: "导入" }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("form", { name: "导入存档数据" })).not.toBeInTheDocument();
+  });
+
+  it("筛选无结果时提示切换状态", async () => {
+    stubFetch((url) =>
+      url.includes("status=ready") ? jsonResponse(makeList([])) : jsonResponse(makeList([makeSave()])),
+    );
+    renderLibraryPage();
+    await screen.findByText("/saves/season-1.fm");
+
+    fireEvent.change(screen.getByLabelText("状态筛选"), { target: { value: "ready" } });
+
+    expect(await screen.findByText("没有符合条件的存档")).toBeInTheDocument();
+    expect(
+      screen.getByText("当前筛选条件下没有存档，切换状态后重试。"),
+    ).toBeInTheDocument();
+  });
+
+  it("禁用控件均带可访问说明", async () => {
+    stubFetch(() => jsonResponse(makeList([makeSave()])));
+    renderLibraryPage();
+    await screen.findByText("/saves/season-1.fm");
+
+    expect(screen.getByRole("button", { name: "上一页" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "下一页" })).toBeDisabled();
+    expectDisabledControlsExplained();
+  });
+
+  it("无可用草稿时说明阵容同步不可用原因", async () => {
+    stubFetch((url) => {
+      if (url.includes("/squad")) return jsonResponse(SQUAD);
+      if (url.includes("/api/drafts")) {
+        return jsonResponse({ items: [], total: 0, next_offset: null });
+      }
+      return jsonResponse(makeList([managedSave()]));
+    });
+    renderLibraryPage();
+    await screen.findByText("/saves/season-1.fm");
+
+    const section = await openSquad();
+    await within(section).findByText("萨卡");
+    const roster = within(section).getByRole("region", { name: "阵容同步" });
+    expect(
+      await within(roster).findByText("先在战术板保存草稿，才能同步阵容"),
+    ).toBeInTheDocument();
+    const draftSelect = within(roster).getByLabelText("选择同步草稿");
+    expect(draftSelect).toBeDisabled();
+    expect(draftSelect).toHaveAccessibleDescription("先在战术板保存草稿，才能同步阵容");
+    const sync = within(roster).getByRole("button", { name: "同步阵容" });
+    expect(sync).toBeDisabled();
+    expect(sync).toHaveAccessibleDescription("先在战术板保存草稿，才能同步阵容");
+    const undo = within(roster).getByRole("button", { name: "撤销同步" });
+    expect(undo).toBeDisabled();
+    expect(undo).toHaveAccessibleDescription("先在战术板保存草稿，才能同步阵容");
+    expectDisabledControlsExplained();
+  });
+});
+
+function makeSaveTactic(overrides: Partial<SaveTactic> = {}): SaveTactic {
+  return {
+    index: 0,
+    name: "北岸联 4-4-2",
+    style: "控制",
+    mentality: 3,
+    club_uid: 7,
+    club_name: "北岸联",
+    team_slot: 0,
+    importable: true,
+    ...overrides,
+  };
+}
+
+function openTactics(): HTMLElement {
+  fireEvent.click(
+    within(rowFor("/saves/season-1.fm")).getByRole("button", { name: "战术库" }),
+  );
+  return screen.getByRole("region", { name: "存档存储战术" });
+}
+
+function stubSaveLibrary(tacticsResponse: (init: RequestInit) => Response | Promise<Response>) {
+  stubFetch((url, init) => {
+    if (url.includes("/tactics")) return tacticsResponse(init);
+    return jsonResponse(makeList([makeSave()]));
+  });
+}
+
+describe("存档存储战术", () => {
+  beforeEach(() => {
+    fetchMock.mockReset();
+    vi.stubGlobal("fetch", fetchMock);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it("加载中展示状态，成功后渲染存储战术并高亮一线队槽位", async () => {
+    const pending = deferred<Response>();
+    stubSaveLibrary(() => pending.promise);
+    renderLibraryPage();
+    await screen.findByText("/saves/season-1.fm");
+
+    const section = openTactics();
+    expect(within(section).getByRole("status")).toHaveTextContent("正在加载存档战术");
+    expect(within(section).getByText("/saves/season-1.fm")).toBeInTheDocument();
+
+    pending.resolve(
+      jsonResponse({
+        items: [
+          makeSaveTactic(),
+          makeSaveTactic({
+            index: 1,
+            name: "北岸联 5-3-2",
+            style: "反击",
+            mentality: 5,
+            team_slot: 1,
+          }),
+        ],
+      }),
+    );
+
+    expect(await within(section).findByText("北岸联 4-4-2")).toBeInTheDocument();
+    const firstRow = within(section).getByText("北岸联 4-4-2").closest("tr");
+    if (firstRow === null) throw new Error("未找到战术行");
+    expect(within(firstRow).getByText("控制")).toBeInTheDocument();
+    expect(within(firstRow).getByText("谨慎")).toBeInTheDocument();
+    expect(within(firstRow).getByText("可导入")).toBeInTheDocument();
+    expect(within(firstRow).getByText("一线队")).toHaveAttribute("data-primary", "true");
+    expect(within(firstRow).getByRole("button", { name: "导入到战术板" })).toBeEnabled();
+
+    const secondRow = within(section).getByText("北岸联 5-3-2").closest("tr");
+    if (secondRow === null) throw new Error("未找到战术行");
+    expect(within(secondRow).getByText("槽位 1")).toBeInTheDocument();
+    expect(within(secondRow).getByText("积极")).toBeInTheDocument();
+
+    const calls = callsTo("/api/saves/save-1/tactics");
+    expect(calls).toHaveLength(1);
+    expect(calls[0].url).toBe("http://127.0.0.1:43210/api/saves/save-1/tactics");
+    expect(new Headers(calls[0].init.headers).get("Authorization")).toBe("Bearer test-token");
+  });
+
+  it("导入成功后跳转战术板草稿并使草稿查询失效", async () => {
+    stubFetch((url, init) => {
+      if (init.method === "POST") {
+        return jsonResponse({ draft: fmfDraft({ id: "draft-save" }) }, 201);
+      }
+      if (url.includes("/tactics")) return jsonResponse({ items: [makeSaveTactic({ index: 2 })] });
+      return jsonResponse(makeList([makeSave()]));
+    });
+    const invalidateSpy = vi.spyOn(QueryClient.prototype, "invalidateQueries");
+    renderLibraryPage();
+    await screen.findByText("/saves/season-1.fm");
+
+    const section = openTactics();
+    fireEvent.click(await within(section).findByRole("button", { name: "导入到战术板" }));
+
+    const placeholder = await screen.findByTestId("tactics-placeholder");
+    expect(placeholder).toHaveTextContent("/tactics?draft=draft-save");
+    const calls = callsTo("/api/saves/save-1/tactics/2/import");
+    expect(calls).toHaveLength(1);
+    expect(calls[0].url).toBe("http://127.0.0.1:43210/api/saves/save-1/tactics/2/import");
+    expect(calls[0].init.method).toBe("POST");
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["drafts", connection.url] });
+  });
+
+  it("不可导入的战术禁用按钮并给出行内原因", async () => {
+    stubSaveLibrary(() =>
+      jsonResponse({
+        items: [
+          makeSaveTactic({ index: 0, name: "一线队可用", team_slot: 0, importable: true }),
+          makeSaveTactic({ index: 1, name: "青年队战术", team_slot: 2, importable: false }),
+          makeSaveTactic({ index: 2, name: "一线队缺引擎", team_slot: 0, importable: false }),
+        ],
+      }),
+    );
+    renderLibraryPage();
+    await screen.findByText("/saves/season-1.fm");
+
+    const section = openTactics();
+    await within(section).findByText("青年队战术");
+
+    const youthRow = within(section).getByText("青年队战术").closest("tr");
+    if (youthRow === null) throw new Error("未找到战术行");
+    expect(within(youthRow).getByText("非一线队存储战术")).toBeInTheDocument();
+    expect(within(youthRow).getByText("槽位 2")).toBeInTheDocument();
+    expect(within(youthRow).getByText("不可导入")).toBeInTheDocument();
+    const youthButton = within(youthRow).getByRole("button", { name: "导入到战术板" });
+    expect(youthButton).toBeDisabled();
+    expect(youthButton).toHaveAttribute("title", "非一线队存储战术");
+
+    const engineRow = within(section).getByText("一线队缺引擎").closest("tr");
+    if (engineRow === null) throw new Error("未找到战术行");
+    expect(within(engineRow).getByText("需要先配置引擎资源")).toBeInTheDocument();
+    const engineButton = within(engineRow).getByRole("button", { name: "导入到战术板" });
+    expect(engineButton).toBeDisabled();
+    expect(engineButton).toHaveAttribute("title", "需要先配置引擎资源");
+
+    const primaryRow = within(section).getByText("一线队可用").closest("tr");
+    if (primaryRow === null) throw new Error("未找到战术行");
+    expect(within(primaryRow).getByRole("button", { name: "导入到战术板" })).toBeEnabled();
+  });
+
+  it("战术列表加载失败时展示后端消息并在重试后成功", async () => {
+    let attempts = 0;
+    stubSaveLibrary(() => {
+      attempts += 1;
+      if (attempts === 1) {
+        return jsonResponse({ error: { code: "not_found", message: "存档不存在" } }, 404);
+      }
+      return jsonResponse({ items: [makeSaveTactic()] });
+    });
+    renderLibraryPage();
+    await screen.findByText("/saves/season-1.fm");
+
+    const section = openTactics();
+    expect(await within(section).findByRole("alert")).toHaveTextContent("存档不存在");
+
+    fireEvent.click(within(section).getByRole("button", { name: "重试" }));
+
+    expect(await within(section).findByText("北岸联 4-4-2")).toBeInTheDocument();
+    expect(attempts).toBe(2);
+  });
+
+  it("存档没有存储战术时显示空态", async () => {
+    stubSaveLibrary(() => jsonResponse({ items: [] }));
+    renderLibraryPage();
+    await screen.findByText("/saves/season-1.fm");
+
+    const section = openTactics();
+    expect(await within(section).findByText("该存档没有可用的存储战术")).toBeInTheDocument();
+  });
+
+  it("引擎不可用时展示后端消息与设置页链接", async () => {
+    stubFetch((url, init) => {
+      if (init.method === "POST") {
+        return jsonResponse(
+          {
+            error: {
+              code: "engine_unavailable",
+              message: "引擎资源未配置，无法导入存档战术；请在设置页配置引擎目录与游戏目录",
+            },
+          },
+          503,
+        );
+      }
+      if (url.includes("/tactics")) return jsonResponse({ items: [makeSaveTactic()] });
+      return jsonResponse(makeList([makeSave()]));
+    });
+    renderLibraryPage();
+    await screen.findByText("/saves/season-1.fm");
+
+    const section = openTactics();
+    fireEvent.click(await within(section).findByRole("button", { name: "导入到战术板" }));
+
+    const alert = await within(section).findByRole("alert");
+    expect(alert).toHaveTextContent("引擎资源未配置");
+    expect(within(alert).getByRole("link", { name: "去设置页" })).toHaveAttribute(
+      "href",
+      "/settings",
+    );
+    expect(screen.queryByTestId("tactics-placeholder")).not.toBeInTheDocument();
+  });
+});
+
+describe("存档战术 API 客户端", () => {
+  beforeEach(() => {
+    fetchMock.mockReset();
+    vi.stubGlobal("fetch", fetchMock);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("listSaveTactics 请求存档战术并解包 items", async () => {
+    stubFetch(() => jsonResponse({ items: [makeSaveTactic({ index: 3 })] }));
+
+    const items = await listSaveTactics(connection, "save-1");
+
+    expect(items).toHaveLength(1);
+    expect(items[0].index).toBe(3);
+    const [call] = fetchCalls();
+    expect(call.url).toBe("http://127.0.0.1:43210/api/saves/save-1/tactics");
+    expect(call.init.method).toBeUndefined();
+  });
+
+  it("importSaveTactic 以 POST 导入指定索引并解包 draft", async () => {
+    stubFetch(() => jsonResponse({ draft: fmfDraft({ id: "draft-imported" }) }, 201));
+
+    const draft = await importSaveTactic(connection, "save-1", 2);
+
+    expect(draft.id).toBe("draft-imported");
+    const [call] = fetchCalls();
+    expect(call.url).toBe("http://127.0.0.1:43210/api/saves/save-1/tactics/2/import");
+    expect(call.init.method).toBe("POST");
+    expect(call.init.body).toBeUndefined();
+  });
+
+  it("引擎不可用时抛出不带跳转的 ApiError", async () => {
+    stubFetch(() =>
+      jsonResponse({ error: { code: "engine_unavailable", message: "引擎资源未配置" } }, 503),
+    );
+
+    const caught = await importSaveTactic(connection, "save-1", 0).catch((error: unknown) => error);
+
+    expect(caught).toBeInstanceOf(ApiError);
+    expect((caught as ApiError).status).toBe(503);
+    expect((caught as ApiError).code).toBe("engine_unavailable");
+    expect((caught as ApiError).message).toBe("引擎资源未配置");
   });
 });

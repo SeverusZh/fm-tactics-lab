@@ -1,0 +1,43 @@
+.saves-tactics {
+  display: grid;
+  gap: var(--space-3);
+  margin-top: var(--space-5);
+  padding-top: var(--space-5);
+  border-top: 1px solid var(--border);
+}
+
+.saves-tactics-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.saves-tactics-head h3 {
+  margin: 0;
+  font-size: var(--type-h3);
+  font-weight: 600;
+}
+
+.saves-tactics-head .button {
+  margin-left: auto;
+}
+
+.saves-tactics-target {
+  margin: 0;
+  color: var(--text-subtle);
+  font-size: var(--type-body-sm);
+}
+
+.saves-tactics-table {
+  min-width: 560px;
+}
+
+.saves-tactic-slot[data-primary="true"] {
+  color: var(--accent-text);
+  font-weight: 600;
+}
+
+.saves-settings-link {
+  margin-left: var(--space-2);
+  white-space: nowrap;
+}

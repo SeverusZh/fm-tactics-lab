@@ -122,19 +122,6 @@
   min-width: 0;
 }
 
-.runbar {
-  display: flex;
-  align-items: end;
-  gap: var(--space-4);
-  flex-wrap: wrap;
-  padding: var(--space-4) var(--space-8);
-  border-top: 1px solid var(--border);
-  background: var(--surface);
-  position: sticky;
-  bottom: 0;
-  z-index: 20;
-}
-
 .field-inline {
   display: flex;
   align-items: center;
@@ -147,14 +134,6 @@
 
 .field-inline input {
   accent-color: var(--accent);
-}
-
-.runbar-fields {
-  display: flex;
-  align-items: end;
-  gap: var(--space-3);
-  flex-wrap: wrap;
-  margin-left: auto;
 }
 
 .field {
@@ -356,8 +335,7 @@
   }
 
   .topbar,
-  .workspace,
-  .runbar {
+  .workspace {
     padding-inline: var(--space-5);
   }
 

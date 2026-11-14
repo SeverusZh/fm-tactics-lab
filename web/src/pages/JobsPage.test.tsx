@@ -154,6 +154,33 @@ function rowFor(text: string): HTMLElement {
   return row;
 }
 
+function disabledControls(): Array<HTMLButtonElement | HTMLInputElement | HTMLSelectElement> {
+  const controls = [
+    ...screen.queryAllByRole("button"),
+    ...screen.queryAllByRole("checkbox"),
+    ...screen.queryAllByRole("combobox"),
+  ];
+  return controls
+    .filter(
+      (control): control is HTMLButtonElement | HTMLInputElement | HTMLSelectElement =>
+        control instanceof HTMLButtonElement ||
+        control instanceof HTMLInputElement ||
+        control instanceof HTMLSelectElement,
+    )
+    .filter((control) => control.disabled);
+}
+
+function expectDisabledControlsExplained() {
+  const controls = disabledControls();
+  expect(controls.length).toBeGreaterThan(0);
+  for (const control of controls) {
+    const descriptionId = control.getAttribute("aria-describedby");
+    const described = descriptionId === null ? null : document.getElementById(descriptionId);
+    const explanation = control.getAttribute("title") ?? described?.textContent ?? "";
+    expect(explanation.trim()).not.toBe("");
+  }
+}
+
 describe("JobsPage", () => {
   beforeEach(() => {
     fetchMock.mockReset();
@@ -188,7 +215,76 @@ describe("JobsPage", () => {
     renderJobsPage();
 
     expect(await screen.findByText("尚无任务")).toBeInTheDocument();
-    expect(screen.getByText("创建任务后，这里会显示运行状态、进度与取消入口。")).toBeInTheDocument();
+    expect(
+      screen.getByText("任务由实验页提交批次后产生，运行状态、进度与取消入口会显示在这里。"),
+    ).toBeInTheDocument();
+  });
+
+  it("不提供新建任务入口", async () => {
+    stubFetch(() => jsonResponse({ items: [], total: 0, next_offset: null }));
+    renderJobsPage();
+    await screen.findByText("尚无任务");
+
+    expect(screen.queryByRole("button", { name: "新建任务" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("form", { name: "新建任务" })).not.toBeInTheDocument();
+  });
+
+  it("状态筛选无结果时提示切换状态", async () => {
+    stubFetch(() => jsonResponse({ items: [], total: 0, next_offset: null }));
+    renderJobsPage();
+    await screen.findByText("尚无任务");
+
+    fireEvent.change(screen.getByLabelText("状态筛选"), { target: { value: "completed" } });
+
+    expect(await screen.findByText("没有符合条件的任务")).toBeInTheDocument();
+    expect(
+      screen.getByText("当前筛选条件下没有任务，切换状态后重试。"),
+    ).toBeInTheDocument();
+  });
+
+  it("运行中任务不可删除时说明原因并禁用批量删除", async () => {
+    stubFetch(() =>
+      jsonResponse({ items: [makeJob({ status: "running" })], total: 1, next_offset: null }),
+    );
+    renderJobsPage();
+    await screen.findByText("任务一");
+
+    expect(
+      screen.getByText("当前页任务均在运行中或排队中，暂不可删除"),
+    ).toBeInTheDocument();
+    const selectAll = screen.getByLabelText("全选当前页任务");
+    expect(selectAll).toBeDisabled();
+    expect(selectAll).toHaveAttribute("title", "当前页没有可删除的任务");
+    const bulkDelete = screen.getByRole("button", { name: "删除所选" });
+    expect(bulkDelete).toBeDisabled();
+    expect(bulkDelete).toHaveAccessibleDescription("勾选可删除的任务后可批量删除");
+    expectDisabledControlsExplained();
+  });
+
+  it("刷新进行中禁用刷新按钮并说明原因", async () => {
+    const pending = deferred<Response>();
+    let calls = 0;
+    stubFetch(() => {
+      calls += 1;
+      return calls === 1
+        ? jsonResponse({
+            items: [makeJob({ status: "completed" })],
+            total: 1,
+            next_offset: null,
+          })
+        : pending.promise;
+    });
+    renderJobsPage();
+    await screen.findByText("任务一");
+
+    fireEvent.click(screen.getByRole("button", { name: "刷新" }));
+
+    const refresh = screen.getByRole("button", { name: "刷新" });
+    await waitFor(() => expect(refresh).toBeDisabled());
+    expect(refresh).toHaveAttribute("title", "正在刷新任务列表");
+    expect(screen.getByText("正在刷新任务列表")).toBeInTheDocument();
+
+    pending.resolve(jsonResponse({ items: [], total: 0, next_offset: null }));
   });
 
   it("列表加载失败时展示后端错误信息并可重试", async () => {
@@ -291,38 +387,6 @@ describe("JobsPage", () => {
     expect(callsTo("/api/jobs/job-1")[0].init.method).toBe("DELETE");
     expect(await screen.findByText("已删除任务「待删除任务」")).toBeInTheDocument();
     expect(await screen.findByText("尚无任务")).toBeInTheDocument();
-  });
-
-  it("创建任务提交表单并刷新列表", async () => {
-    stubFetch((_url, init) => {
-      if (init.method === "POST") return jsonResponse(makeJob({ name: "批量任务" }), 201);
-      return jsonResponse({ items: [], total: 0, next_offset: null });
-    });
-    renderJobsPage();
-    await screen.findByText("尚无任务");
-
-    fireEvent.click(screen.getByRole("button", { name: "新建任务" }));
-    const workers = screen.getByLabelText("并行数");
-    fireEvent.change(workers, { target: { value: "257" } });
-    expect(workers).toHaveAttribute("aria-invalid", "true");
-    expect(screen.getByText("并行数需为 1–256 的整数")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "创建" })).toBeDisabled();
-
-    fireEvent.change(workers, { target: { value: "4" } });
-    fireEvent.change(screen.getByLabelText("任务名称"), { target: { value: "批量任务" } });
-    fireEvent.change(screen.getByLabelText("总场数"), { target: { value: "100" } });
-    fireEvent.click(screen.getByRole("button", { name: "创建" }));
-
-    await waitFor(() => expect(fetchCalls().some((call) => call.init.method === "POST")).toBe(true));
-    const post = fetchCalls().find((call) => call.init.method === "POST");
-    expect(JSON.parse(String(post?.init.body))).toEqual({
-      kind: "experiment",
-      name: "批量任务",
-      workers: 4,
-      total: 100,
-    });
-    expect(await screen.findByText("任务已创建")).toBeInTheDocument();
-    await waitFor(() => expect(callsTo("/api/jobs?").length).toBe(2));
   });
 
   it("取消操作失败时展示后端错误信息", async () => {

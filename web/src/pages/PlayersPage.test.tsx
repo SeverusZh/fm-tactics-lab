@@ -237,10 +237,26 @@ function detailRegion(): HTMLElement {
 }
 
 function displayedAttribute(label: string): string {
+  return cellInput(label).value;
+}
+
+function cellInput(label: string): HTMLInputElement {
   const term = screen.getByText(label, { selector: "dt" });
-  const value = term.parentElement?.querySelector("dd");
-  if (value === null || value === undefined) throw new Error("未找到属性值：" + label);
-  return value.textContent ?? "";
+  const input = term.parentElement?.querySelector<HTMLInputElement>("dd input");
+  if (input === null || input === undefined) throw new Error("未找到属性输入：" + label);
+  return input;
+}
+
+function advancedDetails(): HTMLDetailsElement {
+  const details = document.querySelector<HTMLDetailsElement>("details.players-advanced");
+  if (details === null) throw new Error("未找到高级批量工具");
+  return details;
+}
+
+async function openBulkTools(): Promise<HTMLElement> {
+  await screen.findByRole("complementary", { name: /球员名单/ });
+  advancedDetails().open = true;
+  return screen.getByRole("region", { name: "批量属性编辑" });
 }
 
 function draftHandlers(detail: Draft = makeDraft()) {
@@ -517,7 +533,7 @@ describe("PlayersPage", () => {
     });
     renderPlayersPage();
 
-    const panel = await screen.findByRole("region", { name: "批量属性编辑" });
+    const panel = await openBulkTools();
     fireEvent.change(within(panel).getByLabelText("显示值"), { target: { value: "12" } });
     fireEvent.click(within(panel).getByRole("checkbox", { name: "门将" }));
     fireEvent.click(within(panel).getByRole("checkbox", { name: "包含性格" }));
@@ -553,9 +569,9 @@ describe("PlayersPage", () => {
     });
     renderPlayersPage();
 
-    await screen.findByRole("region", { name: "批量属性编辑" });
+    await openBulkTools();
     fireEvent.click(screen.getByRole("button", { name: "客队" }));
-    const panel = screen.getByRole("region", { name: "批量属性编辑" });
+    const panel = await openBulkTools();
     fireEvent.change(within(panel).getByRole("combobox", { name: "操作" }), {
       target: { value: "position" },
     });
@@ -588,7 +604,7 @@ describe("PlayersPage", () => {
 
     const homeRoster = await screen.findByRole("complementary", { name: "主队球员名单" });
     fireEvent.click(within(homeRoster).getByRole("button", { name: /主队球员 03/ }));
-    const panel = screen.getByRole("region", { name: "批量属性编辑" });
+    const panel = await openBulkTools();
     fireEvent.change(within(panel).getByRole("combobox", { name: "操作" }), {
       target: { value: "copy" },
     });
@@ -624,7 +640,7 @@ describe("PlayersPage", () => {
     });
     renderPlayersPage();
 
-    const panel = await screen.findByRole("region", { name: "批量属性编辑" });
+    const panel = await openBulkTools();
     fireEvent.click(within(panel).getByRole("button", { name: "撤销" }));
 
     await waitFor(() => expect(attributeCalls()).toHaveLength(1));
@@ -651,7 +667,8 @@ describe("PlayersPage", () => {
     });
     renderPlayersPage();
 
-    const panel = await screen.findByRole("region", { name: "批量属性编辑" });
+    const panel = await openBulkTools();
+    fireEvent.change(within(panel).getByLabelText("显示值"), { target: { value: "12" } });
     fireEvent.click(within(panel).getByRole("button", { name: "应用" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent("属性显示值必须在 1–20 之间");
@@ -1062,5 +1079,544 @@ describe("草稿 API 客户端", () => {
       operation: "position",
       params: { position: "ST", value: 9 },
     });
+  });
+});
+
+describe("球员单项属性编辑", () => {
+  beforeEach(() => {
+    fetchMock.mockReset();
+    vi.stubGlobal("fetch", fetchMock);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  function attributeHandlers(changedPlayers = 1) {
+    return (url: string) => {
+      if (url.endsWith("/api/drafts")) return jsonResponse(makeDraftList([makeSummary()]));
+      if (url.endsWith("/attributes")) {
+        return jsonResponse(makeAttributeResult({ changed_players: changedPlayers }));
+      }
+      return jsonResponse(makeDraft());
+    };
+  }
+
+  it("属性格以显示值渲染可编辑数字输入", async () => {
+    stubFetch(draftHandlers());
+    renderPlayersPage();
+
+    await screen.findByRole("complementary", { name: "主队球员名单" });
+
+    const crossing = screen.getByRole("spinbutton", { name: "传中" });
+    expect(crossing).toHaveValue(15.6);
+    expect(crossing).toHaveAttribute("type", "number");
+    expect(crossing).toHaveAttribute("step", "0.2");
+    expect(crossing).toHaveAttribute("min", "1");
+    expect(crossing).toHaveAttribute("max", "20");
+
+    const goalkeeper = screen.getByRole("spinbutton", { name: "门将" });
+    expect(goalkeeper).toHaveValue(5);
+    expect(goalkeeper).toHaveAttribute("step", "1");
+    expect(goalkeeper).toHaveAttribute("min", "0");
+
+    expect(screen.queryByRole("button", { name: /保存修改/ })).not.toBeInTheDocument();
+    expect(screen.queryByText("已修改")).not.toBeInTheDocument();
+  });
+
+  it("修改单个属性后标记 dirty 并出现保存与放弃按钮", async () => {
+    stubFetch(draftHandlers());
+    renderPlayersPage();
+
+    await screen.findByRole("complementary", { name: "主队球员名单" });
+    fireEvent.change(cellInput("传中"), { target: { value: "14" } });
+
+    expect(cellInput("传中")).toHaveValue(14);
+    expect(screen.getByText("已修改 1 项")).toBeInTheDocument();
+    expect(screen.getByText("已修改")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "保存修改（1）" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "放弃" })).toBeEnabled();
+  });
+
+  it("保存只提交改动格并刷新草稿", async () => {
+    stubFetch(attributeHandlers(1));
+    renderPlayersPage();
+
+    await screen.findByRole("complementary", { name: "主队球员名单" });
+    fireEvent.change(cellInput("传中"), { target: { value: "14" } });
+    fireEvent.change(cellInput("门将"), { target: { value: "7" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存修改（2）" }));
+
+    await waitFor(() => expect(attributeCalls()).toHaveLength(1));
+    expect(JSON.parse(String(attributeCalls()[0].init.body))).toEqual({
+      side: "home",
+      scope: "player",
+      player_index: 0,
+      operation: "cells",
+      params: { values: { "0": 7, "15": 14 } },
+    });
+    expect(await screen.findByText("已更新 2 项属性")).toBeInTheDocument();
+    await waitFor(() => expect(detailCalls()).toHaveLength(2));
+    expect(screen.queryByRole("button", { name: /保存修改/ })).not.toBeInTheDocument();
+    expect(screen.queryByText("已修改")).not.toBeInTheDocument();
+  });
+
+  it("客队第二名球员保存提交对应 side 与 player_index", async () => {
+    stubFetch(attributeHandlers(1));
+    renderPlayersPage();
+
+    await screen.findByRole("complementary", { name: "主队球员名单" });
+    fireEvent.click(screen.getByRole("button", { name: "客队" }));
+    const awayRoster = await screen.findByRole("complementary", { name: "客队球员名单" });
+    fireEvent.click(within(awayRoster).getByRole("button", { name: /客队球员 02/ }));
+
+    fireEvent.change(cellInput("门将"), { target: { value: "7" } });
+    fireEvent.change(cellInput("传中"), { target: { value: "14" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存修改（2）" }));
+
+    await waitFor(() => expect(attributeCalls()).toHaveLength(1));
+    expect(JSON.parse(String(attributeCalls()[0].init.body))).toEqual({
+      side: "away",
+      scope: "player",
+      player_index: 1,
+      operation: "cells",
+      params: { values: { "0": 7, "15": 14 } },
+    });
+    expect(await screen.findByText("已更新 2 项属性")).toBeInTheDocument();
+    await waitFor(() => expect(detailCalls()).toHaveLength(2));
+  });
+
+  it("改回原值后清除改动状态", async () => {
+    stubFetch(draftHandlers());
+    renderPlayersPage();
+
+    await screen.findByRole("complementary", { name: "主队球员名单" });
+    fireEvent.change(cellInput("传中"), { target: { value: "14" } });
+    fireEvent.change(cellInput("传中"), { target: { value: "15.6" } });
+
+    expect(screen.queryByRole("button", { name: /保存修改/ })).not.toBeInTheDocument();
+    expect(screen.queryByText("已修改")).not.toBeInTheDocument();
+    expect(attributeCalls()).toHaveLength(0);
+  });
+
+  it("点击放弃后恢复原值并清除改动标记", async () => {
+    stubFetch(draftHandlers());
+    renderPlayersPage();
+
+    await screen.findByRole("complementary", { name: "主队球员名单" });
+    fireEvent.change(cellInput("传中"), { target: { value: "14" } });
+    expect(screen.getByText("已修改 1 项")).toBeInTheDocument();
+    expect(screen.getByText("已修改")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "放弃" }));
+
+    expect(cellInput("传中")).toHaveValue(15.6);
+    expect(screen.queryByText("已修改")).not.toBeInTheDocument();
+    expect(screen.queryByText("已修改 1 项")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /保存修改/ })).not.toBeInTheDocument();
+    expect(attributeCalls()).toHaveLength(0);
+  });
+
+  it("显示值越界阻止保存并提示", async () => {
+    stubFetch(draftHandlers());
+    renderPlayersPage();
+
+    await screen.findByRole("complementary", { name: "主队球员名单" });
+    fireEvent.change(cellInput("传中"), { target: { value: "21" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存修改（1）" }));
+
+    const alert = screen.getByRole("alert");
+    expect(alert).toHaveTextContent("属性“传中”必须是 1–20 之间的显示值");
+    expect(alert).toHaveAttribute("id", "players-cell-error");
+    expect(cellInput("传中")).toHaveAttribute("aria-invalid", "true");
+    expect(cellInput("传中")).toHaveAttribute("aria-describedby", "players-cell-error");
+    expect(cellInput("门将")).not.toHaveAttribute("aria-invalid");
+    expect(attributeCalls()).toHaveLength(0);
+    expect(cellInput("传中")).toHaveValue(21);
+    expect(screen.getByRole("button", { name: "保存修改（1）" })).toBeInTheDocument();
+
+    fireEvent.change(cellInput("传中"), { target: { value: "14" } });
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(cellInput("传中")).not.toHaveAttribute("aria-invalid");
+    expect(cellInput("传中")).not.toHaveAttribute("aria-describedby");
+  });
+
+  it("位置熟练度必须为 0–20 的整数", async () => {
+    stubFetch(draftHandlers());
+    renderPlayersPage();
+
+    await screen.findByRole("complementary", { name: "主队球员名单" });
+    fireEvent.change(cellInput("门将"), { target: { value: "10.5" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存修改（1）" }));
+
+    expect(screen.getByRole("alert")).toHaveTextContent("属性“门将”必须是 0–20 的整数");
+    expect(attributeCalls()).toHaveLength(0);
+  });
+
+  it("显示值必须按 0.2 步进", async () => {
+    stubFetch(draftHandlers());
+    renderPlayersPage();
+
+    await screen.findByRole("complementary", { name: "主队球员名单" });
+    fireEvent.change(cellInput("传中"), { target: { value: "14.3" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存修改（1）" }));
+
+    expect(screen.getByRole("alert")).toHaveTextContent("属性“传中”必须以 0.2 为步进");
+    expect(attributeCalls()).toHaveLength(0);
+  });
+
+  it("清空属性输入后不能保存并展示原因", async () => {
+    stubFetch(draftHandlers());
+    renderPlayersPage();
+
+    await screen.findByRole("complementary", { name: "主队球员名单" });
+    fireEvent.change(cellInput("传中"), { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存修改（1）" }));
+
+    expect(screen.getByRole("alert")).toHaveTextContent("属性“传中”不能为空");
+    expect(attributeCalls()).toHaveLength(0);
+    expect(cellInput("传中").value).toBe("");
+    expect(screen.getByText("已修改 1 项")).toBeInTheDocument();
+  });
+
+  it("保存进行中禁用保存与放弃并展示进行中文案", async () => {
+    const pending = deferred<Response>();
+    stubFetch((url) => {
+      if (url.endsWith("/api/drafts")) return jsonResponse(makeDraftList([makeSummary()]));
+      if (url.endsWith("/attributes")) return pending.promise;
+      return jsonResponse(makeDraft());
+    });
+    renderPlayersPage();
+
+    await screen.findByRole("complementary", { name: "主队球员名单" });
+    fireEvent.change(cellInput("传中"), { target: { value: "14" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存修改（1）" }));
+
+    await waitFor(() => expect(attributeCalls()).toHaveLength(1));
+    expect(screen.getByRole("button", { name: "保存修改（1）" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "放弃" })).toBeDisabled();
+    expect(screen.getByText("正在保存…")).toBeInTheDocument();
+    expect(cellInput("传中")).toBeDisabled();
+
+    pending.resolve(jsonResponse(makeAttributeResult({ changed_players: 1 })));
+    expect(await screen.findByText("已更新 1 项属性")).toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: /保存修改/ })).not.toBeInTheDocument(),
+    );
+  });
+
+  it("等值不同写法不标记为改动", async () => {
+    stubFetch(draftHandlers());
+    renderPlayersPage();
+
+    await screen.findByRole("complementary", { name: "主队球员名单" });
+    fireEvent.change(cellInput("传中"), { target: { value: "15.60" } });
+    expect(screen.queryByText("已修改")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /保存修改/ })).not.toBeInTheDocument();
+
+    fireEvent.change(cellInput("门将"), { target: { value: "5.0" } });
+    expect(screen.queryByText("已修改")).not.toBeInTheDocument();
+
+    fireEvent.change(cellInput("传中"), { target: { value: "14" } });
+    expect(screen.getByText("已修改 1 项")).toBeInTheDocument();
+  });
+
+  it("保存失败时展示后端消息并保留 dirty", async () => {
+    stubFetch((url) => {
+      if (url.endsWith("/api/drafts")) return jsonResponse(makeDraftList([makeSummary()]));
+      if (url.endsWith("/attributes")) {
+        return jsonResponse(
+          { error: { code: "validation_failed", message: "至少需要一个属性值" } },
+          400,
+        );
+      }
+      return jsonResponse(makeDraft());
+    });
+    renderPlayersPage();
+
+    await screen.findByRole("complementary", { name: "主队球员名单" });
+    fireEvent.change(cellInput("传中"), { target: { value: "14" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存修改（1）" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("至少需要一个属性值");
+    expect(cellInput("传中")).not.toHaveAttribute("aria-invalid");
+    expect(cellInput("传中")).toHaveValue(14);
+    expect(screen.getByText("已修改 1 项")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "保存修改（1）" })).toBeInTheDocument();
+    expect(detailCalls()).toHaveLength(1);
+  });
+
+  it("存在未保存修改时阻止 beforeunload 关闭且放弃后解除", async () => {
+    stubFetch(draftHandlers());
+    renderPlayersPage();
+
+    await screen.findByRole("complementary", { name: "主队球员名单" });
+    const cleanEvent = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(cleanEvent);
+    expect(cleanEvent.defaultPrevented).toBe(false);
+
+    fireEvent.change(cellInput("传中"), { target: { value: "14" } });
+    const dirtyEvent = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(dirtyEvent);
+    expect(dirtyEvent.defaultPrevented).toBe(true);
+
+    fireEvent.click(screen.getByRole("button", { name: "放弃" }));
+    const discardedEvent = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(discardedEvent);
+    expect(discardedEvent.defaultPrevented).toBe(false);
+  });
+
+  it("保存成功后解除 beforeunload 守卫", async () => {
+    stubFetch(attributeHandlers(1));
+    renderPlayersPage();
+
+    await screen.findByRole("complementary", { name: "主队球员名单" });
+    fireEvent.change(cellInput("传中"), { target: { value: "14" } });
+    const dirtyEvent = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(dirtyEvent);
+    expect(dirtyEvent.defaultPrevented).toBe(true);
+
+    fireEvent.click(screen.getByRole("button", { name: "保存修改（1）" }));
+    expect(await screen.findByText("已更新 1 项属性")).toBeInTheDocument();
+    await waitFor(() => {
+      const savedEvent = new Event("beforeunload", { cancelable: true });
+      window.dispatchEvent(savedEvent);
+      expect(savedEvent.defaultPrevented).toBe(false);
+    });
+  });
+
+  it("切换球员前确认未保存修改", async () => {
+    stubFetch(draftHandlers());
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
+    renderPlayersPage();
+
+    await screen.findByRole("complementary", { name: "主队球员名单" });
+    fireEvent.change(cellInput("传中"), { target: { value: "14" } });
+
+    fireEvent.click(within(roster("主队球员名单")).getByRole("button", { name: /主队球员 02/ }));
+    expect(confirmSpy).toHaveBeenCalledWith("有 1 项属性修改尚未保存，确定放弃吗？");
+    expect(within(detailRegion()).getByText("主队球员 01")).toBeInTheDocument();
+    expect(cellInput("传中")).toHaveValue(14);
+
+    confirmSpy.mockReturnValue(true);
+    fireEvent.click(within(roster("主队球员名单")).getByRole("button", { name: /主队球员 02/ }));
+    expect(within(detailRegion()).getByText("主队球员 02")).toBeInTheDocument();
+    expect(cellInput("传中")).toHaveValue(12);
+    expect(screen.queryByRole("button", { name: /保存修改/ })).not.toBeInTheDocument();
+  });
+
+  it("切换草稿前确认未保存修改", async () => {
+    stubFetch((url) => {
+      if (url.endsWith("/api/drafts")) {
+        return jsonResponse(
+          makeDraftList([makeSummary(), makeSummary({ id: "draft-2", name: "草案二" })]),
+        );
+      }
+      if (url.endsWith("/api/drafts/draft-2")) {
+        return jsonResponse(
+          makeDraft({ id: "draft-2", name: "草案二", scenario: makeScenario("主队乙", "客队乙") }),
+        );
+      }
+      return jsonResponse(makeDraft());
+    });
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
+    renderPlayersPage();
+
+    const select = await screen.findByRole("combobox", { name: "选择草稿" });
+    await screen.findByRole("complementary", { name: "主队球员名单" });
+    fireEvent.change(cellInput("传中"), { target: { value: "14" } });
+
+    fireEvent.change(select, { target: { value: "draft-2" } });
+    expect(select).toHaveValue("draft-1");
+    expect(callsTo("/api/drafts/draft-2")).toHaveLength(0);
+    expect(cellInput("传中")).toHaveValue(14);
+
+    confirmSpy.mockReturnValue(true);
+    fireEvent.change(select, { target: { value: "draft-2" } });
+    await screen.findByRole("complementary", { name: "主队球员名单" });
+    expect(within(roster("主队球员名单")).getByText("主队乙球员 01")).toBeInTheDocument();
+    expect(select).toHaveValue("draft-2");
+    expect(screen.queryByRole("button", { name: /保存修改/ })).not.toBeInTheDocument();
+  });
+
+  it("切换主客队前确认未保存修改", async () => {
+    stubFetch(draftHandlers());
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
+    renderPlayersPage();
+
+    await screen.findByRole("complementary", { name: "主队球员名单" });
+    fireEvent.change(cellInput("门将"), { target: { value: "7" } });
+
+    fireEvent.click(screen.getByRole("button", { name: "客队" }));
+    expect(confirmSpy).toHaveBeenCalledWith("有 1 项属性修改尚未保存，确定放弃吗？");
+    expect(screen.getByRole("button", { name: "主队" })).toHaveAttribute("aria-pressed", "true");
+    expect(cellInput("门将")).toHaveValue(7);
+
+    confirmSpy.mockReturnValue(true);
+    fireEvent.click(screen.getByRole("button", { name: "客队" }));
+    await screen.findByRole("complementary", { name: "客队球员名单" });
+    expect(cellInput("门将")).toHaveValue(20);
+    expect(screen.queryByRole("button", { name: /保存修改/ })).not.toBeInTheDocument();
+  });
+
+  it("撤销批量工具同时清空单项编辑", async () => {
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+    stubFetch(attributeHandlers(23));
+    renderPlayersPage();
+
+    await screen.findByRole("complementary", { name: "主队球员名单" });
+    fireEvent.change(cellInput("传中"), { target: { value: "14" } });
+    const panel = await openBulkTools();
+    fireEvent.click(within(panel).getByRole("button", { name: "撤销" }));
+
+    expect(confirmSpy).toHaveBeenCalledWith(
+      "有 1 项单项属性修改尚未保存，继续该操作将放弃这些修改，确定继续吗？",
+    );
+
+    await waitFor(() => expect(attributeCalls()).toHaveLength(1));
+    expect(JSON.parse(String(attributeCalls()[0].init.body))).toEqual({
+      side: "home",
+      scope: "all",
+      operation: "undo",
+      params: {},
+    });
+    expect(await screen.findByText("已更新 23 名球员")).toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: /保存修改/ })).not.toBeInTheDocument(),
+    );
+    expect(cellInput("传中")).toHaveValue(15.6);
+    expect(screen.queryByText("已修改")).not.toBeInTheDocument();
+  });
+
+  it("有未保存单项编辑时批量应用需确认，取消则保留编辑且不发请求", async () => {
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
+    stubFetch(attributeHandlers(1));
+    renderPlayersPage();
+
+    await screen.findByRole("complementary", { name: "主队球员名单" });
+    fireEvent.change(cellInput("传中"), { target: { value: "14" } });
+    const panel = await openBulkTools();
+    fireEvent.change(within(panel).getByLabelText("显示值"), { target: { value: "12" } });
+    fireEvent.click(within(panel).getByRole("button", { name: "应用" }));
+
+    expect(confirmSpy).toHaveBeenCalledWith(
+      "有 1 项单项属性修改尚未保存，继续该操作将放弃这些修改，确定继续吗？",
+    );
+    expect(attributeCalls()).toHaveLength(0);
+    expect(screen.getByRole("button", { name: "保存修改（1）" })).toBeEnabled();
+    expect(cellInput("传中")).toHaveValue(14);
+  });
+
+  it("确认后批量应用提交并清空单项编辑", async () => {
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+    stubFetch(attributeHandlers(18));
+    renderPlayersPage();
+
+    await screen.findByRole("complementary", { name: "主队球员名单" });
+    fireEvent.change(cellInput("传中"), { target: { value: "14" } });
+    const panel = await openBulkTools();
+    fireEvent.change(within(panel).getByLabelText("显示值"), { target: { value: "12" } });
+    fireEvent.click(within(panel).getByRole("button", { name: "应用" }));
+
+    expect(confirmSpy).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(attributeCalls()).toHaveLength(1));
+    expect(JSON.parse(String(attributeCalls()[0].init.body))).toEqual({
+      side: "home",
+      scope: "all",
+      operation: "bulk",
+      params: {
+        value: 12,
+        groups: ["technical", "mental", "physical", "goalkeeping"],
+        include_personality: false,
+      },
+    });
+    expect(await screen.findByText("已更新 18 名球员")).toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: /保存修改/ })).not.toBeInTheDocument(),
+    );
+    expect(screen.queryByText("已修改")).not.toBeInTheDocument();
+  });
+
+  it("高级批量工具默认收起且不预填显示值", async () => {
+    stubFetch(draftHandlers());
+    renderPlayersPage();
+
+    await screen.findByRole("complementary", { name: "主队球员名单" });
+
+    const details = advancedDetails();
+    expect(details.open).toBe(false);
+    expect(details.querySelector("summary")).toHaveTextContent("高级批量工具");
+
+    details.open = true;
+    const panel = screen.getByRole("region", { name: "批量属性编辑" });
+    const displayValue = within(panel).getByLabelText("显示值") as HTMLInputElement;
+    expect(displayValue.value).toBe("");
+    expect(within(panel).getByRole("button", { name: "应用" })).toBeDisabled();
+
+    fireEvent.change(within(panel).getByRole("combobox", { name: "操作" }), {
+      target: { value: "position" },
+    });
+    const positionValue = within(panel).getByLabelText("位置熟练度") as HTMLInputElement;
+    expect(positionValue.value).toBe("");
+    expect(within(panel).getByRole("button", { name: "应用" })).toBeDisabled();
+  });
+
+  it("批量工具禁用时展示具体原因并在参数合法后消失", async () => {
+    stubFetch(draftHandlers());
+    renderPlayersPage();
+
+    const panel = await openBulkTools();
+    const applyButton = () => within(panel).getByRole("button", { name: "应用" });
+    expect(applyButton()).toBeDisabled();
+    expect(screen.getByText("请输入要应用的显示值")).toBeInTheDocument();
+
+    const displayValue = within(panel).getByLabelText("显示值");
+    fireEvent.change(displayValue, { target: { value: "21" } });
+    expect(screen.getByText("显示值需为 1–20 且按 0.2 步进")).toBeInTheDocument();
+    expect(applyButton()).toBeDisabled();
+
+    fireEvent.change(displayValue, { target: { value: "14.3" } });
+    expect(screen.getByText("显示值需为 1–20 且按 0.2 步进")).toBeInTheDocument();
+    expect(applyButton()).toBeDisabled();
+
+    fireEvent.change(displayValue, { target: { value: "12" } });
+    expect(screen.queryByText("显示值需为 1–20 且按 0.2 步进")).not.toBeInTheDocument();
+    expect(applyButton()).toBeEnabled();
+
+    for (const name of ["技术", "精神", "身体", "门将"]) {
+      fireEvent.click(within(panel).getByRole("checkbox", { name }));
+    }
+    expect(screen.getByText("请至少选择一个分组")).toBeInTheDocument();
+    expect(applyButton()).toBeDisabled();
+
+    fireEvent.click(within(panel).getByRole("checkbox", { name: "技术" }));
+    expect(screen.queryByText("请至少选择一个分组")).not.toBeInTheDocument();
+    expect(applyButton()).toBeEnabled();
+  });
+
+  it("位置熟练度禁用原因展示并在合法后消失", async () => {
+    stubFetch(draftHandlers());
+    renderPlayersPage();
+
+    const panel = await openBulkTools();
+    fireEvent.change(within(panel).getByRole("combobox", { name: "操作" }), {
+      target: { value: "position" },
+    });
+    expect(within(panel).getByRole("button", { name: "应用" })).toBeDisabled();
+    expect(screen.getByText("请输入要应用的位置熟练度")).toBeInTheDocument();
+
+    const positionInput = within(panel).getByLabelText("位置熟练度");
+    fireEvent.change(positionInput, { target: { value: "10.5" } });
+    expect(screen.getByText("位置熟练度需为 0–20 的整数")).toBeInTheDocument();
+    expect(within(panel).getByRole("button", { name: "应用" })).toBeDisabled();
+
+    fireEvent.change(positionInput, { target: { value: "21" } });
+    expect(screen.getByText("位置熟练度需为 0–20 的整数")).toBeInTheDocument();
+    expect(within(panel).getByRole("button", { name: "应用" })).toBeDisabled();
+
+    fireEvent.change(positionInput, { target: { value: "10" } });
+    expect(screen.queryByText("位置熟练度需为 0–20 的整数")).not.toBeInTheDocument();
+    expect(within(panel).getByRole("button", { name: "应用" })).toBeEnabled();
   });
 });
