@@ -48,7 +48,7 @@ npm install --global @tauri-apps/cli@^2
 tauri build --bundles nsis
 ```
 
-`tauri dev` starts the Vite server and the desktop window; the shell launches the sidecar from `FM27LAB_SIDECAR` or from `python -m fm27lab serve` in a development checkout. The release build packages `web/dist` and the PyInstaller sidecar from `sidecar-dist`, and writes the NSIS installer to `src-tauri/target/release/bundle/nsis/`. The CI job asserts that the sidecar executable and the installer exist.
+`tauri dev` starts the Vite server and the desktop window; the shell launches the sidecar from `FM27LAB_SIDECAR` or from `python -m fm27lab serve` in a development checkout. The release build packages `web/dist` and the PyInstaller sidecar from `sidecar-dist`, and writes the NSIS installer to `src-tauri/target/release/bundle/nsis/`. The resource mapping must use the directory form so the onedir `_internal/` payload keeps its layout; the CI job asserts the staged `_internal` directory, then extracts the installer with 7-Zip and asserts `sidecar/_internal`, the Python runtime and the migrations.
 
 ### Rust core
 

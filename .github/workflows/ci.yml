@@ -77,15 +77,33 @@ jobs:
       - run: cargo test --manifest-path src-tauri/Cargo.toml
       - run: npm install --global @tauri-apps/cli@^2
       - run: tauri build --bundles nsis
-      - name: Verify sidecar resource and installer
+      - name: Verify sidecar payload and installer
         shell: pwsh
         run: |
-          $sidecars = Get-ChildItem -Path src-tauri/target/release -Recurse -Filter fm27lab-sidecar.exe -ErrorAction SilentlyContinue
-          if (-not $sidecars) { throw "sidecar executable missing from build tree" }
-          $sidecars | ForEach-Object { Write-Host $_.FullName }
+          $staged = "src-tauri/target/release/sidecar"
+          if (-not (Test-Path (Join-Path $staged "fm27lab-sidecar.exe"))) { throw "staged sidecar executable missing" }
+          $stagedInternal = Join-Path $staged "_internal"
+          if (-not (Test-Path $stagedInternal)) { throw "staged sidecar payload is missing _internal" }
+          if (-not (Get-ChildItem -Path $stagedInternal -Filter "python*.dll" -ErrorAction SilentlyContinue)) { throw "staged sidecar payload is missing the Python runtime" }
+          if (-not (Test-Path (Join-Path $stagedInternal "fm27lab/adapters/storage_sqlite/migrations/001_init.sql"))) { throw "staged sidecar payload is missing migrations" }
           $installers = Get-ChildItem -Path src-tauri/target/release/bundle/nsis -Filter *.exe -ErrorAction SilentlyContinue
           if (-not $installers) { throw "NSIS installer missing" }
-          $installers | ForEach-Object { Write-Host $_.FullName }
+          $sevenZip = Join-Path ${env:ProgramFiles} "7-Zip/7z.exe"
+          if (-not (Test-Path $sevenZip)) { throw "7-Zip is required to inspect the installer payload" }
+          $payload = Join-Path $env:RUNNER_TEMP "installer-payload"
+          Remove-Item -Recurse -Force $payload -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force -Path $payload | Out-Null
+          foreach ($installer in $installers) {
+            & $sevenZip x $installer.FullName "-o$payload" -y | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw "failed to extract $($installer.FullName)" }
+            $installedExe = Join-Path $payload "sidecar/fm27lab-sidecar.exe"
+            $installedInternal = Join-Path $payload "sidecar/_internal"
+            if (-not (Test-Path $installedExe)) { throw "installer is missing sidecar/fm27lab-sidecar.exe" }
+            if (-not (Test-Path $installedInternal)) { throw "installer flattened the sidecar payload and lost _internal" }
+            if (-not (Get-ChildItem -Path $installedInternal -Filter "python*.dll" -ErrorAction SilentlyContinue)) { throw "installer is missing the Python runtime" }
+            if (-not (Test-Path (Join-Path $installedInternal "fm27lab/adapters/storage_sqlite/migrations/001_init.sql"))) { throw "installer is missing sidecar migrations" }
+          }
+          Write-Host "sidecar payload preserved in installer"
       - uses: actions/upload-artifact@v4
         with:
           name: windows-nsis

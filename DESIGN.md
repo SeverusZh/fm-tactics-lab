@@ -189,7 +189,7 @@ native/                C++17 适配器
 ## 兼容与打包
 
 - Tauri 安装包包含：Rust 壳、WebView2 前端资源、Python sidecar、原生宿主与私有引擎输入。
-- Python sidecar 使用 PyInstaller onedir 构建到 `sidecar-dist/fm27lab-sidecar`，独立可运行；`scripts/build_sidecar.py` 负责构建，`tauri.conf.json` 的 `bundle.resources` 将其复制到 `resource/sidecar/`。
+- Python sidecar 使用 PyInstaller onedir 构建到 `sidecar-dist/fm27lab-sidecar`，独立可运行；`scripts/build_sidecar.py` 负责构建，`tauri.conf.json` 的 `bundle.resources` 将其复制到 `resource/sidecar/`。资源映射必须使用目录形式：glob 形式会把 onedir 的 `_internal/` 与迁移目录平铺到同一层，安装后 sidecar 无法启动。
 - `beforeBuildCommand` 先构建前端再构建 sidecar；Windows CI 执行 sidecar 打包、Python 测试、`cargo build`、Tauri 安装包构建与 `cargo test`。`src-tauri/Cargo.lock` 必须提交以固定依赖。
 - Tauri 只负责启动、健康检查、重启与退出；若 sidecar 构建失败，安装包构建失败，不生成缺少后端的发布包。
 - sidecar 通过环境变量接收数据目录、引擎目录、端口与 token；token 只保存在内存与受保护文件。

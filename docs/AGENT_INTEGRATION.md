@@ -155,7 +155,7 @@ ready 行
 
 ### 3.4 打包与启动脚本
 
-- 前端构建命令为 pnpm --dir web build && python scripts/build_sidecar.py，产物 sidecar-dist/fm27lab-sidecar 作为 Tauri 资源映射到安装目录 sidecar/。证据 src-tauri/tauri.conf.json。
+- 前端构建命令为 pnpm --dir web build && python scripts/build_sidecar.py，产物 sidecar-dist/fm27lab-sidecar 作为 Tauri 资源映射到安装目录 sidecar/；映射使用目录形式以保留 PyInstaller onedir 的 _internal 布局。证据 src-tauri/tauri.conf.json。
 - release 启动可执行文件为资源目录 sidecar/fm27lab-sidecar，Windows 为 .exe；debug 构建用 FM27LAB_PYTHON 或 python 加参数 -m fm27lab serve，工作目录为项目根。证据 src-tauri/src/lib.rs:49-82。
 - 环境变量 FM27LAB_SIDECAR 可覆盖可执行文件路径，主要用于本地联调。证据 src-tauri/src/lib.rs:49-82。
 - 不再存在打包脚本生成 fm27lab.cmd 或 mcp.json 的逻辑；v1 的 src/fm27_agent 启动垫片未接入 v2 打包链路。
