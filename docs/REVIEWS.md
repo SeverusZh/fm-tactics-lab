@@ -170,6 +170,10 @@
 | 2026-11-14 | 前端审核修复 | web/src/pages/TacticsPage.tsx 及测试、web/src/pages/LibraryPage.tsx 及测试 | PASS | applyDraftParam 重置编辑态与本地副本、dirty 期间不更新已应用参数并由 URL 参数承担待应用记录、六项判别测试与竞态等待、浏览按钮请求中禁用；10 项新增测试、9 变异 8 杀（唯一生存为不可观测的 resetInteraction 重置），356 项 Vitest、typecheck、build 与独立复核探针通过。 |
 | 2026-11-14 | 草稿参数恢复修复复核 | web/src/pages/TacticsPage.tsx 及测试 | PASS | 参数移除后重置已应用参数，使同一 ?draft= 值再次加入仍生效；新增用例为其唯一确定性判别器，删除重置行 3/3 失败，旧 effect 顺序回归由 I-1/I-2 用例捕获；357 项 Vitest 连跑两次、typecheck、build、legacy 281 与独立探针通过；残余 Minor 为手动下拉不同步 URL。 |
 
+| 2026-11-14 | 存档读取升级支持新版引擎 | pyproject.toml、fm27lab/adapters/save_fmsave/reader.py、fm27lab/ports/save_reader.py、fm27lab/tests/test_save_reader.py、README.md、README.en.md、THIRD_PARTY_NOTICES.md、docs/AGENT_INTEGRATION.md | PASS | fmsave 0.9.0 对用户 FM27 27.0.1+2503222 存档抛 UnsupportedGameError 并被误报为“不是有效的 FM 存档”，升级 0.12.4 后真实存档可读：info、managed club 741、31922 俱乐部、34 人名单与 11+9 选人；错误映射区分版本不支持与存档变化，新增 5 项测试、2212 项 pytest、11 变异全杀，PyInstaller 归档含 fmsave 与 backports zstd。 |
+| 2026-11-14 | source_uid 冲突消歧 | fm27lab/adapters/save_fmsave/reader.py、fm27lab/ports/save_reader.py、fm27lab/tests/test_save_reader.py | FAIL | 未验证构建下 unique_id 与其它球员 uid 冲突时回退 uid 或更高新号，名单与首发/替补共用同一全局映射且 34 人标识全唯一；真实应用 apply-roster 仍 400“真实名单第 22 名球员名称无效”，因该构建有缺失名称球员被领域校验拒绝；M9 跨俱乐部全局映射变异存活，已补用例。 |
+| 2026-11-14 | 缺失名称占位与 uid 回退复核 | fm27lab/adapters/save_fmsave/reader.py、fm27lab/ports/save_reader.py、fm27lab/tests/test_save_reader.py | PASS | None 或纯空白名称以“未知球员 <source_uid>”占位、占位使用消歧后的标识、uid 缺失时回退 unique_id；真实存档 import 201、squad 34 人恰 1 占位、apply-roster scope both 200（首发 11 替补 12）与 starters 200；新增 2 项判别测试使 M4 与 uid 回退变异全杀、2222 项 pytest、ruff、类型生成与 281 项 legacy 通过；残余 Minor 为病态输入下占位标识可能重复与未验证构建告警仅写 stderr。 |
+
 ## 审核规则
 
 - 审核者不得修改文件、不得执行 Git 写操作。
@@ -177,6 +181,6 @@
 - 先列 findings，再列已验证项，最后给结论。
 - Critical 或 Important 未闭环时不得标记 PASS。
 - 审核通过不等于整体发布就绪；发布仍需最终验收与 Windows 真机验证。
-- 旧 `tests/` 当前 281 项通过，覆盖 legacy UI/HTTP/CLI/MCP、存档战术库、池与名单；新 `fm27lab/tests` 当前 2207 项通过，覆盖包版本、CLI 环境继承、配置/路径边界、SQLite 迁移/事务与池/草案/任务/存档/产物/幂等仓储、HTTP 健康/池/草案/任务 CRUD、鉴权、错误封套、Origin、ACL 失败清理、sidecar serve、23 人名单、真实名单应用、scenario 归一化与旧场景 schema 升级、原生场景编码与定位球记录、场景物化与实验接线、原生宿主按需构造与按任务并行配置、宿主资源探测、catalog/双阶段战术与草案写入校验、客队战术池选择与整批展开、结果指标与跨任务对比、任务状态机与输出状态枚举、存档状态机与应用服务、安全边界与数据目录权限、事件流前端订阅与刷新合并、页面错误边界、性能基准与并发通道基准、跨平台测试、存档导入路径清洗与 FMF 路径导入、桌面文件选择接线、战术页参数恢复、README 中英文一致；Vitest 当前 357 项（14 个文件）。
+- 旧 `tests/` 当前 281 项通过，覆盖 legacy UI/HTTP/CLI/MCP、存档战术库、池与名单；新 `fm27lab/tests` 当前 2222 项通过，覆盖包版本、CLI 环境继承、配置/路径边界、SQLite 迁移/事务与池/草案/任务/存档/产物/幂等仓储、HTTP 健康/池/草案/任务 CRUD、鉴权、错误封套、Origin、ACL 失败清理、sidecar serve、23 人名单、真实名单应用、scenario 归一化与旧场景 schema 升级、原生场景编码与定位球记录、场景物化与实验接线、原生宿主按需构造与按任务并行配置、宿主资源探测、catalog/双阶段战术与草案写入校验、客队战术池选择与整批展开、结果指标与跨任务对比、任务状态机与输出状态枚举、存档状态机与应用服务、安全边界与数据目录权限、事件流前端订阅与刷新合并、页面错误边界、性能基准与并发通道基准、跨平台测试、存档导入路径清洗与 FMF 路径导入、桌面文件选择接线、战术页参数恢复、README 中英文一致；Vitest 当前 357 项（14 个文件）。
 - Tauri sidecar supervisor 的静态实现已存在，但 Linux 无 WebKitGTK，Windows CI 的 `cargo build`/`cargo test`/安装包构建是唯一编译证据。PyInstaller onedir sidecar 已在 Linux 构建并通过 ready/health/shutdown 冒烟测试。
 - Rust 核心 crate 当前 4 项 cargo test 通过；前端当前 357 项 Vitest（14 个文件）通过、类型检查与生产构建通过。Windows CI run 43558281006 全 job success，含 cargo build/test、NSIS 安装包与 sidecar 资源断言；Linux 本机仍无 WebKitGTK。合并、设计、sidecar、壳层、名单五个审核门均已 PASS。

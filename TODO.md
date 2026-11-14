@@ -174,6 +174,7 @@
 - [x] 修复存档导入的路径输入失败：导入前去除首尾空白与成对 ASCII 引号，修复复制文件地址带引号或空白导致“存档文件不存在”；已通过独立审核。
 - [x] 免存档直接导入 FMF 战术文件：`POST /api/drafts/import-fmf-file` 按路径读取、4 MiB 上限、名称派生与截断、CLI `drafts import-fmf-file`、前端存档库表单与导入后跳转战术板，空状态说明无存档可用的功能范围；已通过独立审核。
 - [x] 战术页草稿参数恢复：清除 `?draft=` 参数后手动改选草稿，再重新加入同一参数仍会应用；未保存修改期间参数不抢占当前草稿；已通过独立审核。
+- [x] 修复新版引擎存档无法读取：fmsave 升级到 0.12.4 支持 FM27 未验证构建，版本不支持时提示具体 build 并引导更新应用，unique_id 冲突消歧与缺失名称占位使真实存档可导入并应用到草案；已通过独立审核。
 - [ ] 手动选择草稿同步地址栏参数：下拉切换不写 `?draft=`，刷新或分享会丢失选择；待后续。
 
 ## Phase 7 收尾
@@ -187,7 +188,7 @@
 - [x] Windows 安装包 sidecar 资源映射修复：`bundle.resources` 改用目录形式以保留 PyInstaller onedir 的 `_internal/` 与迁移目录，CI 解包安装包校验载荷；重建安装包经 7-Zip 复核与独立审核 PASS。
 - [ ] 真实引擎并发吞吐验证：1、8、256 路吞吐与结果身份对比，待 Windows 真机环境。
 - [x] 安全与隐私检查：`docs/SECURITY.md` 与 22 条边界测试覆盖鉴权矩阵、令牌与 endpoint 权限、CORS、路径包含、输入上限、幂等与仓库隐私；修复数据目录 0755 缺陷；已通过独立审核。
-- [x] 最终独立审核 PASS：全仓与增量两轮只读审核均 PASS，质量门 2207 项 pytest、281 项 legacy unittest、357 项 Vitest（14 文件）、ruff、类型生成与 manifest 394 文件通过，Windows CI run 43558281006 与打包修复后 run 43574355852 全 job success；发布候选构建与 Windows 真机验证仍为发布门槛。
+- [x] 最终独立审核 PASS：全仓与增量两轮只读审核均 PASS，质量门 2222 项 pytest、281 项 legacy unittest、357 项 Vitest（14 文件）、ruff、类型生成与 manifest 394 文件通过，Windows CI run 43558281006 与打包修复后 run 43574355852 全 job success；发布候选构建与 Windows 真机验证仍为发布门槛。
 - [ ] 发布候选构建与 Windows 真机验证。
 
 ## 发布门槛
