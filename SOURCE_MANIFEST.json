@@ -412,7 +412,7 @@
   "web/src/pages/ResultsPage.test.tsx": "44ff1f1ea6e2a9289dac86661bd3b8786e35526471d70819251c7ee24c27d9a2",
   "web/src/pages/ResultsPage.tsx": "c840ac64aeee7995cf9219fc770bde8a8f53b494fa4ecc6b4b8a5441b5a3356c",
   "web/src/pages/SettingsPage.test.tsx": "109b585a957268dc98ea5ebcbc0ff2ff54810e226f2e0e40fd6bb8b77ea78483",
-  "web/src/pages/SettingsPage.tsx": "5100ca587a68b5d1c47a48648b74e4cd36d3a5b85ead5d233827d716f9dde871",
+  "web/src/pages/SettingsPage.tsx": "7c9aa2e9cde7a00dee5c3438a0098422d4cbfa226bb55b4c3cf69646473f6bd9",
   "web/src/pages/TacticsPage.test.tsx": "33961e24146d8893e6ec8d4998ecd1660a8525ea65c86dfe06e076ef34940b64",
   "web/src/pages/TacticsPage.tsx": "94755b4921508c51796ba3da25f441e6baba556356ed649aedc9bc323dcd92b1",
   "web/src/styles/experiments.css": "f88f6ca4adf1ad83f315a77d1a79c5bab1a35361ded948444245be4cd7132b70",

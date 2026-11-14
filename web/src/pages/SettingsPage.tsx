@@ -1025,7 +1025,7 @@ export function SettingsPage() {
                 <input
                   id="engine-import-source"
                   value={importSource}
-                  placeholder="例如 C:/Users/<用户名>/AppData/Local/FM27TacticsDesktop"
+                  placeholder="例如 %LOCALAPPDATA%\FM27TacticsDesktop"
                   aria-describedby="engine-import-source-hint"
                   onChange={(event) => {
                     setImportSource(event.target.value);
