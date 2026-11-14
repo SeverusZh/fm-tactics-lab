@@ -44,7 +44,7 @@
 .venv/bin/python -m pytest
 ```
 
-配置来自 pyproject.toml，testpaths 为 fm27lab/tests，收集 1990 项，全部通过时退出码为 0。
+配置来自 pyproject.toml，testpaths 为 fm27lab/tests，收集 2039 项，全部通过时退出码为 0。
 
 覆盖范围：fm27lab/tests 下的 pytest 风格用例，包含 HTTP 路由、应用服务、领域规则、SQLite 适配器、MCP 协议与引擎宿主适配。
 
@@ -76,7 +76,7 @@ workspace scripts compile and squad selection is declared
 | --- | --- | --- |
 | legacy unittest | .venv/bin/python -m unittest discover -s tests | 281 |
 | v2 pytest | .venv/bin/python -m pytest | 1990 |
-| web Vitest | cd web && npx vitest run | 228，共 9 个文件 |
+| web Vitest | cd web && npx vitest run | 234，共 10 个文件 |
 | Node 脚本 | node tests/test_i18n.cjs 与 node tests/test_workspace_scripts.cjs | 2 个脚本 |
 
 口径说明
@@ -233,7 +233,7 @@ TOKEN=$(python -c "import json,sys;print(json.load(open(sys.argv[1]))['token'])"
 
 ## 8. 已知限制
 
-- 原生引擎未接入生产 sidecar，实验启动返回 503 engine_unavailable，完整实验链路当前不可完成。
+- 本机 Linux 无 FM27Simulator 可执行文件，保持原生引擎未启动时实验启动返回 503 engine_unavailable；配置 engine_root 后由惰性宿主在首次使用时构造。
 - Windows 桌面端 W1 至 W5 尚未执行。
 - 数据目录 exports 子目录当前无写入使用方。
 - 池条目库与实验解耦，实验只读草案内嵌 away_tactic_pool。

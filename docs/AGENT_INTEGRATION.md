@@ -432,7 +432,7 @@ retriable 默认在状态码不小于 500 或等于 409 时为 true。证据 fm2
 
 当前实现边界
 
-- 生产 sidecar 未注入原生引擎宿主，create_app 在未注入引擎时使用 MissingEngine，run_batch 抛出「原生引擎未配置」。因此当前开发构建可以保存草案、池与任务，但 POST /api/experiments/start 返回 503 engine_unavailable。证据 fm27lab/sidecar.py:69-95、fm27lab/interfaces/http/app.py:49-86、fm27lab/interfaces/http/app.py:117-140。
+- 引擎解析顺序为注入 EnginePort、settings.engine_root 非空的惰性原生宿主、MissingEngine 占位；未配置 engine_root 时 POST /api/experiments/start 返回 503 engine_unavailable，消息为「原生引擎未配置」。惰性宿主在首次能力协商或启动批次时构造，并在派发前按任务并行数配置分道。证据 fm27lab/interfaces/http/app.py:102、126-149、fm27lab/adapters/engine_native/lazy.py:22-71、fm27lab/sidecar.py:28。
 - 引擎宿主真实要求：可执行文件默认位于引擎工作区 fm27_native/FM27Simulator.exe，单批超时 190 秒，重试 1 次。证据 fm27lab/adapters/engine_native/host.py:231-330。
 
 ## 7. CLI
@@ -646,7 +646,7 @@ python -m fm27lab --data-dir /absolute/path/data jobs runs <job_id> --limit 50
 
 ## 14. 当前实现边界
 
-- 原生引擎尚未接入生产 sidecar，experiments start 返回 503 engine_unavailable；桌面界面与 CLI 的端到端实验依赖后续注入引擎宿主。
+- 引擎可执行文件缺失时 experiments start 返回 503 engine_unavailable；Linux 本机无 FM27Simulator，端到端实验需 Windows 引擎宿主，配置 engine_root 后不会在 create_app 阶段启动子进程。
 - 数据目录 exports 子目录只在初始化时创建，当前没有写入使用方。
 - 池条目库与实验解耦，实验只读草案内嵌 away_tactic_pool。
 - CLI 无超时选项；批次超过 30 秒时 CLI start 会本地超时，服务端继续执行。
@@ -657,7 +657,7 @@ python -m fm27lab --data-dir /absolute/path/data jobs runs <job_id> --limit 50
 
 | 风险 | 说明 |
 | --- | --- |
-| 引擎注入缺失 | 生产 sidecar 与桌面壳均未装配原生引擎，实验流程当前不可完成 |
+| 引擎可执行文件缺失 | 配置 engine_root 但其中没有可用的 FM27Simulator 时 start 返回 503；Linux 本机无该二进制，端到端实验需 Windows 宿主 |
 | 单请求同步执行 | start 在请求线程内跑完整批，长批次受客户端超时影响，且无进度推送 |
 | 幂等记录清理 | 幂等记录持久化在 SQLite 的 idempotency 表，主键唯一并对 request_hash 校验载荷，跨重启有效且同一数据库的多进程共享；进程内 asyncio.Lock 只串行单进程内同键请求。当前没有定时调用 prune，记录会随不同键累积。证据 fm27lab/interfaces/http/app.py:148、fm27lab/adapters/storage_sqlite/idempotency.py:35-81。 |
 | 发现文件竞争 | 手工启动与桌面壳共用数据目录时相互覆盖发现文件，需保证同一时刻只有一个 sidecar |

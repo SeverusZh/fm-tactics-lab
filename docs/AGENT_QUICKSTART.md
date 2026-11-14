@@ -16,7 +16,7 @@
 
 当前开发构建的边界必须了解：
 
-- sidecar 进程尚未接入原生引擎。未注入引擎实现时装配 MissingEngine，POST /api/experiments/start 返回 503 engine_unavailable，消息为“原生引擎未配置”（fm27lab/interfaces/http/app.py:49、72-86、125-133）。
+- 引擎按配置解析：注入 EnginePort 优先，其次 settings.engine_root 非空时装配惰性原生宿主，最后才用 MissingEngine 占位；未配置 engine_root 时 POST /api/experiments/start 返回 503 engine_unavailable，消息为“原生引擎未配置”（fm27lab/interfaces/http/app.py:102、126-149、fm27lab/adapters/engine_native/lazy.py:22-71）。engine_root 由 serve 的 --engine-root 或环境变量 FM27_ENGINE_ROOT 提供，配置后首次实验启动才构造宿主。
 - 提交实验有两条引擎目录相关错误，均为 400 validation_failed：engine_root 未设置时报“引擎目录未配置，无法生成比赛配置”；engine_root 已设置但找不到 catalog.json 时报“未找到引擎目录文件，无法生成比赛配置”（fm27lab/application/experiment_material.py:30-31、214-226）。
 - 所有访问只走本机回环地址，不支持远程连接。
 
@@ -257,7 +257,7 @@ fm27lab.db 路径由 fm27lab/config.py:88-89 决定；agent、exports 等目录�
 | 403 forbidden_origin | 请求 Origin 不在白名单；浏览器调试时使用开发来源或桌面壳 |
 | 400 validation_failed 且消息为“引擎目录未配置，无法生成比赛配置” | engine_root 未设置 |
 | 400 validation_failed 且消息为“未找到引擎目录文件，无法生成比赛配置” | engine_root 已设置但其中缺少 catalog.json |
-| 503 engine_unavailable 且消息为原生引擎未配置 | 当前 sidecar 未接入原生引擎，属于已知边界 |
+| 503 engine_unavailable 且消息为原生引擎未配置 | sidecar 未配置 engine_root；用 serve --engine-root 或 FM27_ENGINE_ROOT 指定引擎工作区。引擎可执行文件缺失或启动失败也返回该码 |
 | 503 database_unavailable | 数据库未就绪，查看 sidecar 日志 |
 | 409 invalid_transition | 任务状态不允许该操作，例如对非 interrupted 任务执行 resume |
 | 400 invalid_last_event_id | Last-Event-ID 必须为非负整数 |
@@ -266,7 +266,7 @@ fm27lab.db 路径由 fm27lab/config.py:88-89 决定；agent、exports 等目录�
 
 ## 10. 已知限制
 
-- 原生引擎尚未接入 sidecar，实验任务可以提交入队但无法执行，start 返回 503；TODO.md 的发布门槛“CLI 与 MCP 在无桌面环境下可完成完整实验流程”仍未完成。
+- 本机 Linux 环境没有 FM27Simulator 可执行文件，端到端实验仍需 Windows 引擎宿主；配置 engine_root 后 sidecar 会惰性构造宿主，未配置或宿主不可用时 start 返回 503。
 - 实验执行在请求线程内同步进行，没有后台调度线程（fm27lab/application/experiments.py:257-299）。
 - MCP 无进度通知与取消通知，只能轮询任务状态。
 - 仅支持本机回环访问，没有多用户或远程认证设计。

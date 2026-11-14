@@ -136,6 +136,10 @@
 | 2026-11-14 | 实验提交页面预检单字段补测 | ExperimentsPage.test.tsx | PASS | 补 CPU 与可用内存各一条单字段用例，三条 queryKey 字段变异分别被对应用例杀死、基线 41 条在同变异下全绿；反向删除还原原始 sha256、纯增量；228 项 Vitest、typecheck 与 build 通过；MINOR 为子串断言可被超串满足与连接字段既有盲区。 |
 | 2026-11-14 | 文档对齐 v2 事实 | docs/AGENT_QUICKSTART.md、docs/AGENT_INTEGRATION.md、docs/AGENT_VERIFICATION.md、src/desktop_locale.py、src/fm27_agent_contract.py、src/tactics_ui/i18n-en.js | FAIL | 三份接入文档整体重写并与代码逐条核对，25 条抽样断言与 12 条 v1 退场结论成立；唯一 IMPORTANT 为幂等风险表把 SQLite 持久化记录误写为进程内、重启失效，另有 7 项 MINOR 为引擎目录错误混同、MCP 启动文案标点、工具分组计数、token 格式、系统接口归类与证据行号。 |
 | 2026-11-14 | 文档对齐修复轮 | 同上 | PASS | I-1 改为持久化幂等（主键唯一、payload 指纹校验、跨重启有效、同库多进程共享、单进程 asyncio.Lock），并补真实剩余风险“无定时 prune”；7 项 MINOR 全部逐条修正并经复审实测确认；标题无括号、无未发生审核声称、node 测试与 281 项 unittest 通过；遗留 MINOR 为种子错误文案与证据区间。 |
+| 2026-11-14 | 前端 API 类型统一到生成 schema | web/src/lib/api.ts、web/src/lib/api-schema.ts、web/src/lib/api-types.test.ts、fm27lab/interfaces/http/routes/jobs.py、routes/saves.py、fm27lab/tests/test_http_output_status_enums.py | PASS | 67 个类型中 40 项改为生成接口别名、2 项派生、25 项保留手写并记录理由；JobOutput 与 SaveOutput 收紧为 Literal 且与 TRANSITIONS/SAVE_STATUSES 联动，输入模型保持 str 以防 400 文案变化；页面零改动、37 个函数签名与路径字节不变、api-schema diff 恰 2 行；10 变异 8 杀，2 条存活为刻意构造且无实际语义危害；234 项 Vitest。 |
+| 2026-11-14 | 前端类型测试补强 | web/src/lib/api-types.test.ts | PASS | 新增剥 `//` 注释后断言别名、`from "./api-schema"` 子句与 import 组各恰 1 且 specifier 集合严格相等；注释伪造别名与额外导入两条变异由存活转为被杀；残留 MINOR 为块注释伪造仍可存活。 |
+| 2026-11-14 | 原生引擎生产接线与按任务并行数配置 | fm27lab/adapters/engine_native/lazy.py、host.py、fm27lab/application/experiments.py、fm27lab/interfaces/http/app.py、fm27lab/tests/test_lazy_engine.py、test_engine_host.py、test_experiments_service.py、test_http_experiments.py | PASS | 引擎解析顺序为注入 engine > engine_root 惰性宿主 > 未配置占位；LazyNativeEngine 双检锁构造且 factory 失败不缓存；运行时计划兼容零参可调用并在创建任务前解析；start_next 置 running 后、run_batch 前调用 configure_workers；HTTP 端到端以 fake_simulator 完成草案提交到 4 场结果且 config 为绝对路径 FM27CFG1 文件；16 变异 14 杀，2 条判定等价；2037 项 pytest。 |
+| 2026-11-14 | 接线测试补强 | fm27lab/tests/test_experiments_service.py、test_lazy_engine.py | PASS | 新增 configure_workers 回调内读取任务状态断言 running 且序列早于 run_batch、factory 前两次失败不留半初始化缓存且第三次成功两条判别用例；对应两处变异被杀；2039 项 pytest、ruff 与类型生成检查通过。 |
 
 ## 审核规则
 
@@ -144,6 +148,6 @@
 - 先列 findings，再列已验证项，最后给结论。
 - Critical 或 Important 未闭环时不得标记 PASS。
 - 审核通过不等于整体发布就绪；发布仍需最终验收与 Windows 真机验证。
-- 旧 `tests/` 当前 281 项通过，覆盖 legacy UI/HTTP/CLI/MCP、存档战术库、池与名单；新 `fm27lab/tests` 当前 1990 项通过，覆盖包版本、CLI 环境继承、配置/路径边界、SQLite 迁移/事务与池/草案/任务/存档/产物/幂等仓储、HTTP 健康/池/草案/任务 CRUD、鉴权、错误封套、Origin、ACL 失败清理、sidecar serve、23 人名单、真实名单应用、scenario 归一化、原生场景编码与定位球记录、场景物化与实验接线、宿主资源探测、catalog/双阶段战术、客队战术池选择与整批展开、结果指标与跨任务对比、任务状态机、存档状态机与应用服务；Vitest 当前 228 项。
+- 旧 `tests/` 当前 281 项通过，覆盖 legacy UI/HTTP/CLI/MCP、存档战术库、池与名单；新 `fm27lab/tests` 当前 2039 项通过，覆盖包版本、CLI 环境继承、配置/路径边界、SQLite 迁移/事务与池/草案/任务/存档/产物/幂等仓储、HTTP 健康/池/草案/任务 CRUD、鉴权、错误封套、Origin、ACL 失败清理、sidecar serve、23 人名单、真实名单应用、scenario 归一化、原生场景编码与定位球记录、场景物化与实验接线、原生宿主按需构造与按任务并行配置、宿主资源探测、catalog/双阶段战术、客队战术池选择与整批展开、结果指标与跨任务对比、任务状态机与输出状态枚举、存档状态机与应用服务；Vitest 当前 234 项。
 - Tauri sidecar supervisor 的静态实现已存在，但 Linux 无 WebKitGTK，Windows CI 的 `cargo build`/`cargo test`/安装包构建是唯一编译证据。PyInstaller onedir sidecar 已在 Linux 构建并通过 ready/health/shutdown 冒烟测试。
-- Rust 核心 crate 当前 4 项 cargo test 通过；前端当前 228 项 Vitest（9 个文件）通过、类型检查与生产构建通过。Windows CI 已通过 cargo build/test、NSIS 安装包与 sidecar 资源断言；Linux 本机仍无 WebKitGTK。合并、设计、sidecar、壳层、名单五个审核门均已 PASS。
+- Rust 核心 crate 当前 4 项 cargo test 通过；前端当前 234 项 Vitest（10 个文件）通过、类型检查与生产构建通过。Windows CI 已通过 cargo build/test、NSIS 安装包与 sidecar 资源断言；Linux 本机仍无 WebKitGTK。合并、设计、sidecar、壳层、名单五个审核门均已 PASS。
