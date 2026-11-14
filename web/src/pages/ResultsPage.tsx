@@ -21,6 +21,8 @@ import {
   type JobSummary,
   type PoolSummary,
 } from "../lib/api";
+import { useAppEvents } from "../lib/useAppEvents";
+import { useEventRefresh } from "../lib/useEventRefresh";
 
 const PAGE_SIZE = 20;
 const JOB_PAGE_SIZE = 50;
@@ -178,6 +180,11 @@ function metricCards(metrics: JobMetrics, paired: JobSummary["paired"]): MetricC
   ];
 }
 
+function eventPayloadField(payload: unknown, key: string): unknown {
+  if (typeof payload !== "object" || payload === null) return undefined;
+  return Object.getOwnPropertyDescriptor(payload, key)?.value;
+}
+
 export function ResultsPage() {
   const { connection } = useAppContext();
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
@@ -236,6 +243,25 @@ export function ResultsPage() {
     queryKey: ["job-pool-summary", connection?.url, activeJobId],
     queryFn: () => getJobPoolSummary(connection!, activeJobId!),
     enabled: connection !== null && activeJobId !== null && summary.data !== undefined,
+  });
+
+  const refreshJobList = useEventRefresh([["results-jobs"]]);
+  const refreshActiveJob = useEventRefresh([
+    ["results-jobs"],
+    ["job-summary"],
+    ["job-runs"],
+    ["job-pool-summary"],
+  ]);
+
+  useAppEvents(connection, (event) => {
+    if (eventPayloadField(event.data, "deleted") === true) {
+      refreshJobList();
+      return;
+    }
+    const eventJobId =
+      eventPayloadField(event.data, "id") ?? eventPayloadField(event.data, "job_id");
+    if (typeof eventJobId !== "string" || eventJobId !== activeJobId) return;
+    refreshActiveJob();
   });
 
   const candidateJobs = jobItems.filter((job) => job.id !== activeJobId);

@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 
 import { AppContext } from "./app-context";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 import { Rail } from "./components/Rail";
 import { RunBar } from "./components/RunBar";
 import { TopBar } from "./components/TopBar";
@@ -138,17 +139,19 @@ export function App() {
             </div>
           ) : null}
           <main className="workspace">
-            <Routes>
-              <Route path="/" element={<Navigate to="/tactics" replace />} />
-              <Route path="/tactics" element={<TacticsPage />} />
-              <Route path="/players" element={<PlayersPage />} />
-              <Route path="/library" element={<LibraryPage />} />
-              <Route path="/experiments" element={<ExperimentsPage />} />
-              <Route path="/results" element={<ResultsPage />} />
-              <Route path="/jobs" element={<JobsPage />} />
-              <Route path="/settings" element={<SettingsPage />} />
-              <Route path="*" element={<Navigate to="/tactics" replace />} />
-            </Routes>
+            <ErrorBoundary key={location.pathname}>
+              <Routes>
+                <Route path="/" element={<Navigate to="/tactics" replace />} />
+                <Route path="/tactics" element={<TacticsPage />} />
+                <Route path="/players" element={<PlayersPage />} />
+                <Route path="/library" element={<LibraryPage />} />
+                <Route path="/experiments" element={<ExperimentsPage />} />
+                <Route path="/results" element={<ResultsPage />} />
+                <Route path="/jobs" element={<JobsPage />} />
+                <Route path="/settings" element={<SettingsPage />} />
+                <Route path="*" element={<Navigate to="/tactics" replace />} />
+              </Routes>
+            </ErrorBoundary>
           </main>
           <RunBar />
         </div>

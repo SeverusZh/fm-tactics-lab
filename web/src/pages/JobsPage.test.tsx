@@ -28,10 +28,47 @@ const fetchMock = vi.fn();
 
 type FetchHandler = (url: string, init: RequestInit) => Response | Promise<Response>;
 
-function stubFetch(handler: FetchHandler) {
+type EventStreamHandler = () => Response | Promise<Response>;
+
+function openEventStream(): Response {
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode(": connected\n\n"));
+    },
+  });
+  return new Response(stream);
+}
+
+type EventStreamControl = {
+  response: Response;
+  send(text: string): void;
+  close(): void;
+};
+
+function controllableEventStream(): EventStreamControl {
+  let controller: ReadableStreamDefaultController<Uint8Array> | null = null;
+  const stream = new ReadableStream<Uint8Array>({
+    start(inner) {
+      controller = inner;
+    },
+  });
+  return {
+    response: new Response(stream),
+    send(text) {
+      controller?.enqueue(new TextEncoder().encode(text));
+    },
+    close() {
+      controller?.close();
+    },
+  };
+}
+
+function stubFetch(handler: FetchHandler, eventsHandler: EventStreamHandler = openEventStream) {
   fetchMock.mockImplementation(async (...args: unknown[]) => {
     const [input, init] = args as [RequestInfo | URL, RequestInit | undefined];
-    return handler(String(input), init ?? {});
+    const url = String(input);
+    if (url.endsWith("/api/events")) return eventsHandler();
+    return handler(url, init ?? {});
   });
 }
 
@@ -53,11 +90,19 @@ function noContentResponse(): Response {
   } as unknown as Response;
 }
 
-function fetchCalls(): { url: string; init: RequestInit }[] {
+function allCalls(): { url: string; init: RequestInit }[] {
   return fetchMock.mock.calls.map((call) => {
     const [input, init] = call as unknown as [RequestInfo | URL, RequestInit | undefined];
     return { url: String(input), init: init ?? {} };
   });
+}
+
+function fetchCalls() {
+  return allCalls().filter((call) => !call.url.endsWith("/api/events"));
+}
+
+function eventsCalls() {
+  return allCalls().filter((call) => call.url.endsWith("/api/events"));
 }
 
 function callsTo(fragment: string) {
@@ -746,5 +791,68 @@ describe("JobsPage 批量删除", () => {
     expect(new Headers(call.init.headers).get("Authorization")).toBe("Bearer test-token");
     expect(new Headers(call.init.headers).get("Content-Type")).toBe("application/json");
     expect(JSON.parse(String(call.init.body))).toEqual({ ids: ["job-1", "job-2"] });
+  });
+});
+
+describe("JobsPage 实时事件", () => {
+  beforeEach(() => {
+    fetchMock.mockReset();
+    vi.stubGlobal("fetch", fetchMock);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  function jobListHandler() {
+    return jsonResponse({ items: [makeJob()], total: 1, next_offset: null });
+  }
+
+  it("任务事件触发列表重新查询", async () => {
+    const stream = controllableEventStream();
+    stubFetch(jobListHandler, () => stream.response);
+    renderJobsPage();
+    await screen.findByText("任务一");
+    await waitFor(() => expect(eventsCalls()).toHaveLength(1));
+
+    stream.send(
+      'event: job.updated\ndata: {"id":"job-1","status":"running","completed":3,"total":100}\n\n',
+    );
+
+    await waitFor(() => expect(callsTo("/api/jobs?").length).toBe(2));
+  });
+
+  it("事件流断开后显示重连提示，恢复后清除", async () => {
+    const stream = controllableEventStream();
+    let attempts = 0;
+    stubFetch(jobListHandler, () => {
+      attempts += 1;
+      return attempts === 1 ? new Response(null, { status: 503 }) : stream.response;
+    });
+    renderJobsPage();
+    expect(screen.queryByText("实时连接中断，正在重连")).not.toBeInTheDocument();
+    await screen.findByText("任务一");
+
+    const hint = await screen.findByText("实时连接中断，正在重连");
+    expect(hint).toHaveAttribute("role", "status");
+
+    await waitFor(
+      () => expect(screen.queryByText("实时连接中断，正在重连")).not.toBeInTheDocument(),
+      { timeout: 3000 },
+    );
+  });
+
+  it("卸载时中止事件流连接", async () => {
+    const stream = controllableEventStream();
+    stubFetch(jobListHandler, () => stream.response);
+    const view = renderJobsPage();
+    await screen.findByText("任务一");
+    await waitFor(() => expect(eventsCalls()).toHaveLength(1));
+    const signal = eventsCalls()[0].init.signal;
+    expect(signal?.aborted).toBe(false);
+
+    view.unmount();
+
+    expect(signal?.aborted).toBe(true);
   });
 });

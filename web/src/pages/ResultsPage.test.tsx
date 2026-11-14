@@ -24,6 +24,7 @@ import {
   type PoolSummaryEntry,
 } from "../lib/api";
 import { ResultsPage } from "./ResultsPage";
+import { REFRESH_WINDOW_MS } from "../lib/useEventRefresh";
 
 const connection = { url: "http://127.0.0.1:43210", token: "test-token", api: "fm27lab/v2" };
 const health: Health = {
@@ -37,10 +38,47 @@ const fetchMock = vi.fn();
 
 type FetchHandler = (url: string, init: RequestInit) => Response | Promise<Response>;
 
-function stubFetch(handler: FetchHandler) {
+type EventStreamHandler = () => Response | Promise<Response>;
+
+function openEventStream(): Response {
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode(": connected\n\n"));
+    },
+  });
+  return new Response(stream);
+}
+
+type EventStreamControl = {
+  response: Response;
+  send(text: string): void;
+  close(): void;
+};
+
+function controllableEventStream(): EventStreamControl {
+  let controller: ReadableStreamDefaultController<Uint8Array> | null = null;
+  const stream = new ReadableStream<Uint8Array>({
+    start(inner) {
+      controller = inner;
+    },
+  });
+  return {
+    response: new Response(stream),
+    send(text) {
+      controller?.enqueue(new TextEncoder().encode(text));
+    },
+    close() {
+      controller?.close();
+    },
+  };
+}
+
+function stubFetch(handler: FetchHandler, eventsHandler: EventStreamHandler = openEventStream) {
   fetchMock.mockImplementation(async (...args: unknown[]) => {
     const [input, init] = args as [RequestInfo | URL, RequestInit | undefined];
-    return handler(String(input), init ?? {});
+    const url = String(input);
+    if (url.endsWith("/api/events")) return eventsHandler();
+    return handler(url, init ?? {});
   });
 }
 
@@ -60,11 +98,19 @@ function textResponse(body: string): Response {
   } as unknown as Response;
 }
 
-function fetchCalls(): { url: string; init: RequestInit }[] {
+function allCalls(): { url: string; init: RequestInit }[] {
   return fetchMock.mock.calls.map((call) => {
     const [input, init] = call as unknown as [RequestInfo | URL, RequestInit | undefined];
     return { url: String(input), init: init ?? {} };
   });
+}
+
+function fetchCalls() {
+  return allCalls().filter((call) => !call.url.endsWith("/api/events"));
+}
+
+function eventsCalls() {
+  return allCalls().filter((call) => call.url.endsWith("/api/events"));
 }
 
 function callsTo(fragment: string) {
@@ -279,7 +325,7 @@ function resultsFetch(fixtures: ResultsFixtures = {}): FetchHandler {
 
 function renderResultsPage(activeConnection: typeof connection | null = connection) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(
+  const view = render(
     <QueryClientProvider client={client}>
       <AppContext.Provider
         value={{
@@ -294,6 +340,7 @@ function renderResultsPage(activeConnection: typeof connection | null = connecti
       </AppContext.Provider>
     </QueryClientProvider>,
   );
+  return { client, ...view };
 }
 
 function metricValue(label: string): string {
@@ -1787,5 +1834,128 @@ describe("实验结果路由", () => {
 
     expect(await screen.findByRole("link", { name: "实验结果" })).toBeInTheDocument();
     expect(await screen.findByText("尚无实验结果")).toBeInTheDocument();
+  });
+});
+
+describe("ResultsPage 实时事件", () => {
+  beforeEach(() => {
+    fetchMock.mockReset();
+    vi.stubGlobal("fetch", fetchMock);
+    sessionStorage.clear();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("活动任务事件触发汇总、逐场与客队池刷新", async () => {
+    const stream = controllableEventStream();
+    stubFetch(resultsFetch(), () => stream.response);
+    renderResultsPage();
+    await screen.findByText("批次一");
+    await waitFor(() => expect(callsTo("/job-1/summary")).toHaveLength(1));
+    await waitFor(() => expect(callsTo("/job-1/runs")).toHaveLength(1));
+    await waitFor(() => expect(callsTo("/job-1/pool-summary")).toHaveLength(1));
+    await waitFor(() => expect(callsTo("/api/jobs?")).toHaveLength(1));
+
+    stream.send(
+      'event: job.updated\ndata: {"job_id":"job-1","status":"completed","completed":4,"total":4}\n\n',
+    );
+
+    await waitFor(() => expect(callsTo("/job-1/summary")).toHaveLength(2));
+    await waitFor(() => expect(callsTo("/job-1/runs")).toHaveLength(2));
+    await waitFor(() => expect(callsTo("/job-1/pool-summary")).toHaveLength(2));
+    await waitFor(() => expect(callsTo("/api/jobs?")).toHaveLength(2));
+  });
+
+  it("活动任务事件兼容 id 形状负载", async () => {
+    const stream = controllableEventStream();
+    stubFetch(resultsFetch(), () => stream.response);
+    renderResultsPage();
+    await screen.findByText("批次一");
+    await waitFor(() => expect(callsTo("/job-1/summary")).toHaveLength(1));
+
+    stream.send(
+      'event: job.updated\ndata: {"id":"job-1","status":"completed","completed":4,"total":4}\n\n',
+    );
+
+    await waitFor(() => expect(callsTo("/job-1/summary")).toHaveLength(2));
+  });
+
+  it("窗口内连续事件合并为一次刷新", async () => {
+    const stream = controllableEventStream();
+    stubFetch(resultsFetch(), () => stream.response);
+    const { client } = renderResultsPage();
+    await screen.findByText("批次一");
+    await waitFor(() => expect(callsTo("/job-1/summary")).toHaveLength(1));
+    await waitFor(() => expect(eventsCalls()).toHaveLength(1));
+    const invalidate = vi.spyOn(client, "invalidateQueries");
+
+    const eventPayload = (completed: number) =>
+      `event: job.updated\ndata: {"job_id":"job-1","status":"running","completed":${completed},"total":4}\n\n`;
+    stream.send(eventPayload(1));
+    stream.send(eventPayload(2));
+    stream.send(eventPayload(3));
+
+    await waitFor(() => expect(invalidate).toHaveBeenCalledTimes(4), { timeout: 2000 });
+    for (const key of ["results-jobs", "job-summary", "job-runs", "job-pool-summary"]) {
+      expect(invalidate).toHaveBeenCalledWith({ queryKey: [key] });
+    }
+    await waitFor(() => expect(callsTo("/job-1/summary")).toHaveLength(2));
+    expect(invalidate).toHaveBeenCalledTimes(4);
+  });
+
+  it("删除事件只刷新任务列表", async () => {
+    const stream = controllableEventStream();
+    stubFetch(resultsFetch(), () => stream.response);
+    renderResultsPage();
+    await screen.findByText("批次一");
+    await waitFor(() => expect(callsTo("/job-1/summary")).toHaveLength(1));
+
+    stream.send('event: job.deleted\ndata: {"job_id":"job-2","deleted":true}\n\n');
+
+    await waitFor(() => expect(callsTo("/api/jobs?")).toHaveLength(2));
+    expect(callsTo("/job-1/summary")).toHaveLength(1);
+  });
+
+  it("非活动任务事件不触发刷新", async () => {
+    const stream = controllableEventStream();
+    stubFetch(
+      resultsFetch({
+        jobs: {
+          items: [makeJob(), makeJob({ id: "job-2", name: "批次二" })],
+          total: 2,
+          next_offset: null,
+        },
+      }),
+      () => stream.response,
+    );
+    const { client } = renderResultsPage();
+    await screen.findAllByText("批次二");
+    await waitFor(() => expect(callsTo("/job-1/summary")).toHaveLength(1));
+    await waitFor(() => expect(eventsCalls()).toHaveLength(1));
+    const invalidate = vi.spyOn(client, "invalidateQueries");
+
+    stream.send(
+      'event: job.updated\ndata: {"id":"job-2","status":"running","completed":1,"total":4}\n\n',
+    );
+    await new Promise((resolve) => setTimeout(resolve, REFRESH_WINDOW_MS + 100));
+
+    expect(invalidate).not.toHaveBeenCalled();
+    expect(callsTo("/job-1/summary")).toHaveLength(1);
+  });
+
+  it("卸载时中止事件流连接", async () => {
+    const stream = controllableEventStream();
+    stubFetch(resultsFetch(), () => stream.response);
+    const view = renderResultsPage();
+    await screen.findByText("批次一");
+    await waitFor(() => expect(eventsCalls()).toHaveLength(1));
+    const signal = eventsCalls()[0].init.signal;
+    expect(signal?.aborted).toBe(false);
+
+    view.unmount();
+
+    expect(signal?.aborted).toBe(true);
   });
 });

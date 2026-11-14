@@ -5,8 +5,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { invoke } from "@tauri-apps/api/core";
 
-const { listeners } = vi.hoisted(() => ({
+const { listeners, jobsPage } = vi.hoisted(() => ({
   listeners: {} as Record<string, (event: { payload: unknown }) => void>,
+  jobsPage: { shouldThrow: false },
+}));
+
+vi.mock("./pages/JobsPage", () => ({
+  JobsPage: () => {
+    if (jobsPage.shouldThrow) throw new Error("jobs page render failed");
+    return "任务页占位";
+  },
 }));
 
 vi.mock("@tauri-apps/api/core", () => ({
@@ -146,5 +154,52 @@ describe("App shell", () => {
     await waitFor(() => {
       expect(screen.getByText("http://127.0.0.1:55555")).toBeInTheDocument();
     });
+  });
+});
+
+describe("App error boundary", () => {
+  beforeEach(() => {
+    jobsPage.shouldThrow = false;
+    vi.spyOn(console, "error").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    jobsPage.shouldThrow = false;
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  it("shows the fallback when a route page throws and keeps navigation", async () => {
+    jobsPage.shouldThrow = true;
+    renderApp("/jobs");
+    await screen.findByText("sidecar 正常");
+    const alert = screen.getByRole("alert");
+    expect(alert).toHaveTextContent("页面渲染失败");
+    expect(alert).toHaveTextContent("当前页面遇到错误，可以重试或切换页面");
+    expect(screen.getByRole("link", { name: /战术板/ })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /设置/ })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "任务管理" })).toBeInTheDocument();
+  });
+
+  it("resets the boundary after navigating to another route", async () => {
+    jobsPage.shouldThrow = true;
+    renderApp("/jobs");
+    await screen.findByText("sidecar 正常");
+    expect(screen.getByText("页面渲染失败")).toBeInTheDocument();
+    jobsPage.shouldThrow = false;
+    fireEvent.click(screen.getByRole("link", { name: /设置/ }));
+    await waitFor(() => expect(screen.queryByText("页面渲染失败")).not.toBeInTheDocument());
+    expect(screen.getByRole("link", { name: /战术板/ })).toBeInTheDocument();
+  });
+
+  it("recovers through the retry action when the page renders again", async () => {
+    jobsPage.shouldThrow = true;
+    renderApp("/jobs");
+    await screen.findByText("sidecar 正常");
+    const retry = screen.getByRole("button", { name: "重试" });
+    jobsPage.shouldThrow = false;
+    fireEvent.click(retry);
+    await waitFor(() => expect(screen.getByText("任务页占位")).toBeInTheDocument());
+    expect(screen.queryByText("页面渲染失败")).not.toBeInTheDocument();
   });
 });

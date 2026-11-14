@@ -16,6 +16,8 @@ import {
   type Job,
   type JobStatus,
 } from "../lib/api";
+import { useAppEvents } from "../lib/useAppEvents";
+import { useEventRefresh } from "../lib/useEventRefresh";
 
 const GIB = 1024 ** 3;
 const NAME_LIMIT = 100;
@@ -86,6 +88,14 @@ function parseSeeds(text: string): { seeds: number[]; problem: string | null } {
 export function ExperimentsPage() {
   const { connection } = useAppContext();
   const queryClient = useQueryClient();
+
+  const refreshJobs = useEventRefresh([["jobs"]]);
+
+  useAppEvents(connection, (event) => {
+    if (event.event.startsWith("experiment.") || event.event.startsWith("job.")) {
+      refreshJobs();
+    }
+  });
   const [name, setName] = useState("");
   const [draftId, setDraftId] = useState("");
   const [baselineDraftId, setBaselineDraftId] = useState("");

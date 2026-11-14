@@ -27,10 +27,47 @@ const fetchMock = vi.fn();
 
 type FetchHandler = (url: string, init: RequestInit) => Response | Promise<Response>;
 
-function stubFetch(handler: FetchHandler) {
+type EventStreamHandler = () => Response | Promise<Response>;
+
+function openEventStream(): Response {
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode(": connected\n\n"));
+    },
+  });
+  return new Response(stream);
+}
+
+type EventStreamControl = {
+  response: Response;
+  send(text: string): void;
+  close(): void;
+};
+
+function controllableEventStream(): EventStreamControl {
+  let controller: ReadableStreamDefaultController<Uint8Array> | null = null;
+  const stream = new ReadableStream<Uint8Array>({
+    start(inner) {
+      controller = inner;
+    },
+  });
+  return {
+    response: new Response(stream),
+    send(text) {
+      controller?.enqueue(new TextEncoder().encode(text));
+    },
+    close() {
+      controller?.close();
+    },
+  };
+}
+
+function stubFetch(handler: FetchHandler, eventsHandler: EventStreamHandler = openEventStream) {
   fetchMock.mockImplementation(async (...args: unknown[]) => {
     const [input, init] = args as [RequestInfo | URL, RequestInit | undefined];
-    return handler(String(input), init ?? {});
+    const url = String(input);
+    if (url.endsWith("/api/events")) return eventsHandler();
+    return handler(url, init ?? {});
   });
 }
 
@@ -52,11 +89,19 @@ function noContentResponse(): Response {
   } as unknown as Response;
 }
 
-function fetchCalls(): { url: string; init: RequestInit }[] {
+function allCalls(): { url: string; init: RequestInit }[] {
   return fetchMock.mock.calls.map((call) => {
     const [input, init] = call as unknown as [RequestInfo | URL, RequestInit | undefined];
     return { url: String(input), init: init ?? {} };
   });
+}
+
+function fetchCalls() {
+  return allCalls().filter((call) => !call.url.endsWith("/api/events"));
+}
+
+function eventsCalls() {
+  return allCalls().filter((call) => call.url.endsWith("/api/events"));
 }
 
 function callsTo(fragment: string) {
@@ -154,6 +199,7 @@ type ScenarioOptions = {
   check?: (url: string) => Response;
   submit?: (body: unknown) => Response | Promise<Response>;
   start?: () => Response;
+  events?: EventStreamHandler;
 };
 
 function stubScenario(options: ScenarioOptions = {}) {
@@ -175,7 +221,7 @@ function stubScenario(options: ScenarioOptions = {}) {
       return submit(JSON.parse(String(init.body)));
     }
     throw new Error("未预期的请求：" + url);
-  });
+  }, options.events);
 }
 
 function renderExperimentsPage(activeConnection: typeof connection | null = connection) {
@@ -1107,5 +1153,56 @@ describe("ExperimentsPage", () => {
     expect(screen.getByRole("link", { name: "实验" })).toHaveAttribute("href", "/experiments");
     expect(await screen.findByRole("heading", { name: "实验", level: 2 })).toBeInTheDocument();
     expect(await screen.findByLabelText("草案")).toBeInTheDocument();
+  });
+});
+
+describe("ExperimentsPage 实时事件", () => {
+  beforeEach(() => {
+    fetchMock.mockReset();
+    vi.stubGlobal("fetch", fetchMock);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("实验事件使任务列表失效", async () => {
+    const stream = controllableEventStream();
+    stubScenario({ events: () => stream.response });
+    const { client } = renderExperimentsPage();
+    await screen.findByLabelText("草案");
+    const invalidate = vi.spyOn(client, "invalidateQueries");
+
+    stream.send(
+      'event: experiment.progress\ndata: {"id":"job-123","status":"running","completed":1,"total":2}\n\n',
+    );
+
+    await waitFor(() => expect(invalidate).toHaveBeenCalledWith({ queryKey: ["jobs"] }));
+  });
+
+  it("任务事件使任务列表失效", async () => {
+    const stream = controllableEventStream();
+    stubScenario({ events: () => stream.response });
+    const { client } = renderExperimentsPage();
+    await screen.findByLabelText("草案");
+    const invalidate = vi.spyOn(client, "invalidateQueries");
+
+    stream.send('event: job.created\ndata: {"id":"job-456","status":"queued"}\n\n');
+
+    await waitFor(() => expect(invalidate).toHaveBeenCalledWith({ queryKey: ["jobs"] }));
+  });
+
+  it("卸载时中止事件流连接", async () => {
+    const stream = controllableEventStream();
+    stubScenario({ events: () => stream.response });
+    const view = renderExperimentsPage();
+    await screen.findByLabelText("草案");
+    await waitFor(() => expect(eventsCalls()).toHaveLength(1));
+    const signal = eventsCalls()[0].init.signal;
+    expect(signal?.aborted).toBe(false);
+
+    view.unmount();
+
+    expect(signal?.aborted).toBe(true);
   });
 });

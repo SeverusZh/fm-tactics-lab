@@ -16,6 +16,9 @@ import {
   type JobCreate,
   type JobStatus,
 } from "../lib/api";
+import type { EventStatus } from "../lib/events";
+import { useAppEvents } from "../lib/useAppEvents";
+import { useEventRefresh } from "../lib/useEventRefresh";
 
 const PAGE_SIZE = 20;
 
@@ -103,6 +106,7 @@ export function JobsPage() {
   );
   const [actionError, setActionError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [eventsStatus, setEventsStatus] = useState<EventStatus | null>(null);
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set<string>());
   const [batchConfirmOpen, setBatchConfirmOpen] = useState(false);
   const [batchResult, setBatchResult] = useState<JobBatchDeleteResult | null>(null);
@@ -129,6 +133,16 @@ export function JobsPage() {
   const invalidateJobs = () => {
     void queryClient.invalidateQueries({ queryKey: ["jobs"] });
   };
+
+  const refreshJobs = useEventRefresh([["jobs"]]);
+
+  useAppEvents(
+    connection,
+    (event) => {
+      if (event.event.startsWith("job.")) refreshJobs();
+    },
+    setEventsStatus,
+  );
 
   const data = jobs.data;
   const pageJobs = data?.items ?? [];
@@ -550,6 +564,11 @@ export function JobsPage() {
       action={
         <div className="jobs-toolbar">
           <JobStatusFilter value={status} onChange={changeStatus} />
+          {eventsStatus === "reconnecting" ? (
+            <span className="jobs-hint" role="status">
+              实时连接中断，正在重连
+            </span>
+          ) : null}
           <button
             className="button"
             type="button"
