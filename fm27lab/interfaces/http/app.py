@@ -30,6 +30,7 @@ from fm27lab.application.jobs import JobService
 from fm27lab.application.pools import PoolService
 from fm27lab.application.save_import import SaveImportService
 from fm27lab.application.saves import SavesService
+from fm27lab.application.tactics_validation import TacticalValidator
 from fm27lab.config import Settings
 from fm27lab.interfaces.http.common import (
     ID_PATTERN,
@@ -100,6 +101,7 @@ def create_app(
     events: EventPublisher | None = None,
     catalog_service: CatalogService | None = None,
     engine: EnginePort | None = None,
+    tactics_validator: TacticalValidator | None = None,
 ) -> FastAPI:
     app = FastAPI(
         title="FM Tactics Lab Sidecar",
@@ -112,7 +114,16 @@ def create_app(
     app.state.database = database
     app.state.events = events or EventPublisher()
     app.state.pools = pool_service or PoolService(PoolRepository(database))
-    app.state.drafts = draft_service or DraftService(DraftRepository(database))
+    catalog_repository = getattr(catalog_service, "repository", None)
+    if catalog_repository is None:
+        catalog_repository = CatalogRepository(settings.engine_root, settings.data_dir)
+    if tactics_validator is None and draft_service is None:
+        tactics_validator = TacticalValidator(catalog_repository)
+    app.state.tactics_validator = tactics_validator
+    app.state.drafts = draft_service or DraftService(
+        DraftRepository(database),
+        validator=tactics_validator,
+    )
     app.state.draft_attributes = draft_attribute_service or DraftAttributeService(app.state.drafts)
     app.state.fmf_service = fmf_service or FmfService(FmfCodec(), app.state.drafts)
     app.state.jobs = job_service or JobService(JobRepository(database), publisher=app.state.events)
@@ -153,9 +164,7 @@ def create_app(
         app.state.drafts,
         FmsaveReader,
     )
-    app.state.catalog_service = catalog_service or CatalogService(
-        CatalogRepository(settings.engine_root, settings.data_dir)
-    )
+    app.state.catalog_service = catalog_service or CatalogService(catalog_repository)
     app.state.idempotency = idempotency_service or IdempotencyService(IdempotencyRepository(database))
     app.state.shutdown = shutdown
 

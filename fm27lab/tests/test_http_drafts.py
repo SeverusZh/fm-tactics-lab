@@ -1,8 +1,15 @@
+import copy
+import json
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
+from fm27lab.adapters.catalog_native.catalog import CatalogRepository
+from fm27lab.application.tactics_validation import TacticalValidator
+from fm27lab.interfaces.http.app import create_app
 from fm27lab.tests.test_http_health import make_app
+from fm27lab.tests.test_tactics_validation import catalog_document, invalid_plan, phases
 
 
 def auth(settings):
@@ -183,3 +190,208 @@ def test_draft_patch_normalizes_scenario_and_keeps_created_at(tmp_path: Path):
     assert value["created_at"] == created["created_at"]
     assert value["updated_at"] >= created["updated_at"]
     assert client.get(f"/api/drafts/{created['id']}", headers=headers).json() == value
+
+
+def write_validation_catalog(tmp_path: Path) -> None:
+    (tmp_path / "catalog.json").write_text(json.dumps(catalog_document()), encoding="utf-8")
+
+
+def tactic_scenario(plan):
+    value = scenario(26)
+    for side in value["teams"]:
+        side["phases"] = copy.deepcopy(plan)
+    return value
+
+
+def test_draft_http_rejects_invalid_tactics_when_catalog_available(tmp_path: Path):
+    write_validation_catalog(tmp_path)
+    app, settings, _, _ = make_app(tmp_path)
+    client = TestClient(app)
+    headers = auth(settings)
+    rejected = client.post(
+        "/api/drafts",
+        json={"name": "Bad", "scenario": tactic_scenario(invalid_plan())},
+        headers=headers,
+    )
+    assert rejected.status_code == 400
+    error = rejected.json()["error"]
+    assert error["code"] == "validation_failed"
+    assert error["message"] == "战术角色不具备该位置资格"
+    listing = client.get("/api/drafts", headers=headers)
+    assert listing.json()["total"] == 0
+    created = client.post(
+        "/api/drafts",
+        json={"name": "Good", "scenario": tactic_scenario(phases())},
+        headers=headers,
+    )
+    assert created.status_code == 201
+    assert len(created.json()["scenario"]["teams"][1]["phases"]) == 2
+
+
+def test_draft_http_rejects_invalid_tactics_on_update(tmp_path: Path):
+    write_validation_catalog(tmp_path)
+    app, settings, _, _ = make_app(tmp_path)
+    client = TestClient(app)
+    headers = auth(settings)
+    draft = client.post(
+        "/api/drafts",
+        json={"name": "Good", "scenario": tactic_scenario(phases())},
+        headers=headers,
+    ).json()
+    before = client.get(f"/api/drafts/{draft['id']}", headers=headers).json()
+    rejected = client.patch(
+        f"/api/drafts/{draft['id']}",
+        json={"scenario": tactic_scenario(invalid_plan())},
+        headers=headers,
+    )
+    assert rejected.status_code == 400
+    assert rejected.json()["error"]["message"] == "战术角色不具备该位置资格"
+    after = client.get(f"/api/drafts/{draft['id']}", headers=headers).json()
+    assert after["scenario"] == before["scenario"]
+    accepted = client.patch(
+        f"/api/drafts/{draft['id']}",
+        json={"scenario": tactic_scenario(phases())},
+        headers=headers,
+    )
+    assert accepted.status_code == 200
+    assert len(accepted.json()["scenario"]["teams"][0]["phases"]) == 2
+
+
+def test_draft_http_update_without_scenario_skips_tactics_validation(tmp_path: Path):
+    app, settings, _, _ = make_app(tmp_path)
+    client = TestClient(app)
+    headers = auth(settings)
+    created = client.post(
+        "/api/drafts",
+        json={"name": "Draft", "scenario": tactic_scenario(invalid_plan())},
+        headers=headers,
+    )
+    assert created.status_code == 201
+    write_validation_catalog(tmp_path)
+    patched = client.patch(
+        f"/api/drafts/{created.json()['id']}",
+        json={"name": "Renamed"},
+        headers=headers,
+    )
+    assert patched.status_code == 200
+    assert patched.json()["name"] == "Renamed"
+
+
+def test_draft_http_skips_tactics_validation_without_catalog(tmp_path: Path):
+    app, settings, _, _ = make_app(tmp_path)
+    client = TestClient(app)
+    headers = auth(settings)
+    created = client.post(
+        "/api/drafts",
+        json={"name": "Bad", "scenario": tactic_scenario(invalid_plan())},
+        headers=headers,
+    )
+    assert created.status_code == 201
+    patched = client.patch(
+        f"/api/drafts/{created.json()['id']}",
+        json={"scenario": tactic_scenario(invalid_plan())},
+        headers=headers,
+    )
+    assert patched.status_code == 200
+
+
+@pytest.mark.parametrize("content", ["{", "[]"])
+def test_draft_http_skips_tactics_validation_with_invalid_catalog(tmp_path: Path, content: str):
+    (tmp_path / "catalog.json").write_text(content, encoding="utf-8")
+    app, settings, _, _ = make_app(tmp_path)
+    client = TestClient(app)
+    created = client.post(
+        "/api/drafts",
+        json={"name": "Bad", "scenario": tactic_scenario(invalid_plan())},
+        headers=auth(settings),
+    )
+    assert created.status_code == 201
+
+
+class _StubCatalogService:
+    def __init__(self, repository: CatalogRepository) -> None:
+        self.repository = repository
+
+    def snapshot(self):
+        return {"available": False, "catalog": None}
+
+
+def test_draft_http_reuses_injected_catalog_repository(tmp_path: Path):
+    shared = tmp_path / "shared"
+    shared.mkdir()
+    (shared / "catalog.json").write_text(json.dumps(catalog_document()), encoding="utf-8")
+    _, settings, _, database = make_app(tmp_path)
+    app = create_app(
+        settings,
+        database,
+        catalog_service=_StubCatalogService(CatalogRepository(None, shared)),
+    )
+    response = TestClient(app).post(
+        "/api/drafts",
+        json={"name": "Bad", "scenario": tactic_scenario(invalid_plan())},
+        headers=auth(settings),
+    )
+    assert response.status_code == 400
+    assert response.json()["error"]["message"] == "战术角色不具备该位置资格"
+
+
+class _FakeDraftService:
+    def __init__(self) -> None:
+        self.created = 0
+
+    def list(self, limit=128, offset=0):
+        return {"items": [], "total": 0, "next_offset": None}
+
+    def create(self, name, scenario, source=None):
+        self.created += 1
+        return {
+            "id": "fake",
+            "name": name,
+            "source": source or {},
+            "scenario": scenario,
+            "created_at": "a",
+            "updated_at": "a",
+        }
+
+    def get(self, draft_id):
+        return None
+
+    def update(self, draft_id, **changes):
+        return None
+
+    def delete(self, draft_id):
+        return False
+
+
+def test_draft_http_does_not_wrap_injected_draft_service(tmp_path: Path):
+    write_validation_catalog(tmp_path)
+    _, settings, _, database = make_app(tmp_path)
+    fake = _FakeDraftService()
+    app = create_app(settings, database, draft_service=fake)
+    assert app.state.drafts is fake
+    response = TestClient(app).post(
+        "/api/drafts",
+        json={"name": "Bad", "scenario": tactic_scenario(invalid_plan())},
+        headers=auth(settings),
+    )
+    assert response.status_code == 201
+    assert fake.created == 1
+
+
+class _RejectingValidator:
+    def validate(self, scenario):
+        raise ValueError("自定义战术校验失败")
+
+
+def test_create_app_uses_injected_tactics_validator(tmp_path: Path):
+    app, settings, _, database = make_app(tmp_path)
+    assert isinstance(app.state.tactics_validator, TacticalValidator)
+    second = create_app(settings, database, tactics_validator=_RejectingValidator())
+    response = TestClient(second).post("/api/drafts", json=body(), headers=auth(settings))
+    assert response.status_code == 400
+    assert response.json()["error"]["message"] == "自定义战术校验失败"
+
+
+def test_create_app_shares_catalog_repository_with_catalog_service(tmp_path: Path):
+    app, _, _, _ = make_app(tmp_path)
+    assert app.state.catalog_service.repository is app.state.tactics_validator.repository

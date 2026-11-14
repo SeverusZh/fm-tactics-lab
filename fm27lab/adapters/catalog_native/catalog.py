@@ -28,6 +28,19 @@ class CatalogRepository:
         return tuple(paths)
 
     def load(self) -> dict[str, Any] | None:
+        document = self.load_document()
+        if document is None:
+            return None
+        for section in REQUIRED_SECTIONS:
+            if not isinstance(document.get(section), list):
+                raise ValueError(CATALOG_ERROR)
+        snapshot: dict[str, Any] = {section: list(document[section]) for section in REQUIRED_SECTIONS}
+        for section in OPTIONAL_SECTIONS:
+            if section in document:
+                snapshot[section] = document[section]
+        return snapshot
+
+    def load_document(self) -> dict[str, Any] | None:
         for path in self.candidates():
             if path.is_file():
                 return self._read(path)
@@ -40,11 +53,4 @@ class CatalogRepository:
             raise ValueError(CATALOG_ERROR) from error
         if not isinstance(value, Mapping):
             raise ValueError(CATALOG_ERROR)
-        for section in REQUIRED_SECTIONS:
-            if not isinstance(value.get(section), list):
-                raise ValueError(CATALOG_ERROR)
-        snapshot: dict[str, Any] = {section: list(value[section]) for section in REQUIRED_SECTIONS}
-        for section in OPTIONAL_SECTIONS:
-            if section in value:
-                snapshot[section] = value[section]
-        return snapshot
+        return dict(value)

@@ -6,12 +6,14 @@ from collections.abc import Mapping
 from typing import Any
 
 from fm27lab.adapters.storage_sqlite.repositories import DraftRepository
+from fm27lab.application.tactics_validation import TacticalValidator
 from fm27lab.domain.scenario import normalize_scenario
 
 
 class DraftService:
-    def __init__(self, repository: DraftRepository):
+    def __init__(self, repository: DraftRepository, *, validator: TacticalValidator | None = None):
         self.repository = repository
+        self.validator = validator
 
     def create(
         self,
@@ -21,10 +23,13 @@ class DraftService:
     ) -> dict[str, Any]:
         if source is not None and not isinstance(source, Mapping):
             raise ValueError("草案来源必须是对象")
+        normalized = normalize_scenario(scenario)
+        if self.validator is not None:
+            self.validator.validate(normalized)
         return self.repository.add(
             {
                 "name": name,
-                "scenario": normalize_scenario(scenario),
+                "scenario": normalized,
                 "source": dict(source or {}),
             }
         )
@@ -64,6 +69,8 @@ class DraftService:
             changes["scenario"] = normalize_scenario(changes["scenario"])
         if "source" in changes and not isinstance(changes["source"], Mapping):
             raise ValueError("草案来源必须是对象")
+        if self.validator is not None and "scenario" in changes:
+            self.validator.validate(changes["scenario"])
         return self.repository.update(draft_id, changes)
 
     def delete(self, draft_id: str) -> bool:

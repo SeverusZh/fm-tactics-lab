@@ -180,3 +180,63 @@ def test_snapshot_delegates_to_repository():
     snapshot = CatalogService(repository).snapshot()
     assert snapshot == {"available": True, "catalog": loaded}
     assert repository.loads == 1
+
+
+def test_load_document_returns_raw_mapping_with_all_sections(tmp_path: Path):
+    payload = catalog_payload()
+    payload["duties"] = ["0", "2097152"]
+    payload["role_eligibility"] = {"GK": [["GK_D"]]}
+    write_catalog(tmp_path / "data" / "catalog.json", payload)
+    assert make_repository(tmp_path).load_document() == payload
+
+
+def test_load_document_follows_candidate_order(tmp_path: Path):
+    write_catalog(
+        tmp_path / "engine" / "fm27_native" / "catalog.json",
+        catalog_payload(positions=[{"id": "NATIVE"}]),
+    )
+    write_catalog(tmp_path / "engine" / "catalog.json", catalog_payload(positions=[{"id": "ENGINE"}]))
+    write_catalog(tmp_path / "data" / "catalog.json", catalog_payload(positions=[{"id": "DATA"}]))
+    repository = make_repository(tmp_path)
+    assert repository.load_document()["positions"] == [{"id": "NATIVE"}]
+    (tmp_path / "engine" / "fm27_native" / "catalog.json").unlink()
+    assert repository.load_document()["positions"] == [{"id": "ENGINE"}]
+    (tmp_path / "engine" / "catalog.json").unlink()
+    assert repository.load_document()["positions"] == [{"id": "DATA"}]
+    (tmp_path / "data" / "catalog.json").unlink()
+    assert repository.load_document() is None
+
+
+@pytest.mark.parametrize("content", ["", "{", "[]", '"text"', "null", "3"])
+def test_load_document_rejects_invalid_documents(tmp_path: Path, content: str):
+    path = tmp_path / "data" / "catalog.json"
+    path.parent.mkdir(parents=True)
+    path.write_text(content, encoding="utf-8")
+    with pytest.raises(ValueError, match=CATALOG_ERROR):
+        make_repository(tmp_path).load_document()
+
+
+def test_load_document_rejects_undecodable_file(tmp_path: Path):
+    path = tmp_path / "data" / "catalog.json"
+    path.parent.mkdir(parents=True)
+    path.write_bytes(b"\xff\xfe\x00")
+    with pytest.raises(ValueError, match=CATALOG_ERROR):
+        make_repository(tmp_path).load_document()
+
+
+def test_load_document_keeps_sections_that_the_snapshot_drops(tmp_path: Path):
+    payload = {"positions": [{"id": "GK", "mask": 1, "x": 50, "y": 92}], "custom": {"a": 1}}
+    write_catalog(tmp_path / "data" / "catalog.json", payload)
+    repository = make_repository(tmp_path)
+    assert repository.load_document() == payload
+    with pytest.raises(ValueError, match=CATALOG_ERROR):
+        repository.load()
+
+
+def test_load_document_reports_corrupt_preferred_file_without_falling_back(tmp_path: Path):
+    broken = tmp_path / "engine" / "fm27_native" / "catalog.json"
+    broken.parent.mkdir(parents=True)
+    broken.write_text("{", encoding="utf-8")
+    write_catalog(tmp_path / "data" / "catalog.json", catalog_payload())
+    with pytest.raises(ValueError, match=CATALOG_ERROR):
+        make_repository(tmp_path).load_document()
