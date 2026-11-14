@@ -8,6 +8,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from fm27lab.adapters.engine_native.capabilities import parse_capabilities, plan_runtime
+from fm27lab.adapters.engine_native.host import NativeEngineHost
+from fm27lab.adapters.engine_native.lazy import LazyNativeEngine
 from fm27lab.adapters.engine_native.scenario_assets import load_scenario_assets
 from fm27lab.adapters.storage_sqlite.db import Database
 from fm27lab.adapters.storage_sqlite.repositories import DraftRepository, JobRepository
@@ -46,6 +48,7 @@ JOB_FIELDS = {
 }
 ERROR_FIELDS = {"code", "message", "details", "retriable", "retry_after_seconds"}
 HTTP_METHODS = {"get", "post", "patch", "put", "delete", "options", "head"}
+FAKE_SIMULATOR = Path(__file__).resolve().parent / "fixtures" / "fake_simulator.py"
 
 
 def auth(settings: Settings) -> dict[str, str]:
@@ -659,7 +662,7 @@ def test_missing_engine_is_engine_port_and_reports_unavailable():
     engine.cancel()
 
 
-def test_create_app_builds_materializer_and_default_engine(tmp_path: Path):
+def test_create_app_builds_materializer_and_lazy_default_engine(tmp_path: Path):
     settings = build_settings(tmp_path)
     database = Database(settings.database_path)
     database.initialize()
@@ -668,6 +671,9 @@ def test_create_app_builds_materializer_and_default_engine(tmp_path: Path):
     app = create_app(settings, database, job_service=jobs)
     client = TestClient(app)
     assert isinstance(app.state.experiments, ExperimentService)
+    default_engine = app.state.experiments._engine
+    assert isinstance(default_engine, LazyNativeEngine)
+    assert default_engine._host is None
     submitted = client.post(
         "/api/experiments",
         json=experiment_payload(seeds=[1], draft_id=draft_id),
@@ -677,7 +683,57 @@ def test_create_app_builds_materializer_and_default_engine(tmp_path: Path):
     job = submitted.json()
     assert job["config"]["materialized"]["codec"] == "FM27CFG1"
     assert job["summary"]["configs_count"] == 1
-    started = client.post("/api/experiments/start", headers=auth(settings))
+    assert job["summary"]["runtime_mode"] == DEFAULT_PLAN.runtime_mode
+    assert job["summary"]["provenance"] == DEFAULT_PLAN.provenance
+
+
+class _RecordingHostFactory:
+    def __init__(self) -> None:
+        self.calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
+
+    def __call__(self, *args: object, **kwargs: object) -> object:
+        self.calls.append((args, kwargs))
+        raise AssertionError("create_app must not construct the native host")
+
+
+def test_create_app_does_not_construct_the_native_engine(tmp_path: Path):
+    settings = build_settings(tmp_path)
+    database = Database(settings.database_path)
+    database.initialize()
+    factory = _RecordingHostFactory()
+    lazy = LazyNativeEngine(settings.engine_root, tmp_path / "engine-work", factory=factory)
+    create_app(settings, database, engine=lazy)
+    assert factory.calls == []
+    assert lazy._host is None
+
+
+def test_create_app_builds_materializer_and_default_engine(tmp_path: Path):
+    settings = build_settings(tmp_path, engine=False)
+    materializer_settings = build_settings(tmp_path / "assets")
+    database = Database(settings.database_path)
+    database.initialize()
+    draft_id, _ = seed_drafts(database, materializer_settings)
+    drafts = DraftService(DraftRepository(database))
+    jobs = JobService(JobRepository(database))
+    materializer = ExperimentMaterializer(drafts, materializer_settings)
+    app = create_app(
+        settings,
+        database,
+        job_service=jobs,
+        draft_service=drafts,
+        experiment_materializer=materializer,
+    )
+    client = TestClient(app)
+    headers = auth(settings)
+    assert isinstance(app.state.experiments._engine, MissingEngine)
+    submitted = client.post(
+        "/api/experiments",
+        json=experiment_payload(seeds=[1], draft_id=draft_id),
+        headers=headers,
+    )
+    assert submitted.status_code == 201, submitted.text
+    job = submitted.json()
+    started = client.post("/api/experiments/start", headers=headers)
     assert started.status_code == 503
     error = started.json()["error"]
     assert set(error) == ERROR_FIELDS
@@ -686,6 +742,40 @@ def test_create_app_builds_materializer_and_default_engine(tmp_path: Path):
     assert error["retriable"] is True
     assert jobs.get(job["id"])["status"] == "error"
     assert jobs.get(job["id"])["summary"]["error"] == ENGINE_UNAVAILABLE
+
+
+def test_explicit_engine_takes_precedence_over_configured_root(tmp_path: Path):
+    settings = build_settings(tmp_path)
+    database = Database(settings.database_path)
+    database.initialize()
+    jobs = JobService(JobRepository(database))
+    engine = FakeEngine()
+    app = create_app(settings, database, job_service=jobs, engine=engine)
+    assert app.state.experiments._engine is engine
+    assert not isinstance(app.state.experiments._engine, LazyNativeEngine)
+
+
+def test_default_runtime_plan_is_built_from_engine_capabilities(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    _, settings, _, database = make_app(tmp_path)
+    engine = FakeEngine()
+    recorded = []
+
+    def recording(capabilities, *, has_pool_variants, has_experimental_execution):
+        recorded.append((capabilities, has_pool_variants, has_experimental_execution))
+        return DEFAULT_PLAN
+
+    monkeypatch.setattr("fm27lab.interfaces.http.app.plan_runtime", recording)
+    app = create_app(settings, database, engine=engine)
+    plan = app.state.experiments._runtime_plan
+    assert callable(plan)
+    assert recorded == []
+    assert plan() == DEFAULT_PLAN
+    capabilities, pool_variants, experimental_execution = recorded[0]
+    assert capabilities == engine.capabilities()
+    assert pool_variants is False
+    assert experimental_execution is False
 
 
 def test_cancel_experiment_contract(tmp_path: Path):
@@ -1044,3 +1134,93 @@ def test_batch_delete_action_removes_materialized_directory(tmp_path: Path):
     assert actions.status_code == 200, actions.text
     assert actions.json()["succeeded"] == [job["id"]]
     assert not directory.exists()
+
+
+def test_end_to_end_native_engine_host_wiring(tmp_path: Path):
+    settings = build_settings(tmp_path)
+    assert settings.engine_root is not None
+    fixture = settings.engine_root / "fm27_native" / "fixtures" / "match.pkm"
+    fixture.parent.mkdir(parents=True, exist_ok=True)
+    fixture.write_bytes(b"fake match fixture")
+    database = Database(settings.database_path)
+    database.initialize()
+    drafts = DraftService(DraftRepository(database))
+    jobs = JobService(JobRepository(database))
+    work_dir = tmp_path / "native-work"
+    work_dir.mkdir()
+    host = NativeEngineHost(
+        settings.engine_root,
+        work_dir,
+        executable=FAKE_SIMULATOR,
+        retries=0,
+    )
+    app = create_app(
+        settings,
+        database,
+        job_service=jobs,
+        draft_service=drafts,
+        engine=host,
+    )
+    client = TestClient(app)
+    headers = auth(settings)
+    assets = load_scenario_assets(settings.engine_root)
+    candidate = client.post(
+        "/api/drafts",
+        json={"name": "候选草案", "scenario": normalizable_scenario(assets)},
+        headers=headers,
+    )
+    assert candidate.status_code == 201, candidate.text
+    baseline = client.post(
+        "/api/drafts",
+        json={
+            "name": "基线草案",
+            "scenario": normalizable_scenario(assets, home_name="基线主队", home_mentality=3),
+        },
+        headers=headers,
+    )
+    assert baseline.status_code == 201, baseline.text
+    submitted = client.post(
+        "/api/experiments",
+        json=experiment_payload(
+            seeds=[11, 12],
+            draft_id=candidate.json()["id"],
+            baseline_draft_id=baseline.json()["id"],
+        ),
+        headers=headers,
+    )
+    assert submitted.status_code == 201, submitted.text
+    job = submitted.json()
+    materialized = job["config"]["materialized"]
+    assert job["total"] == 4
+    assert [(entry["variant"], entry["seed"]) for entry in materialized["configs"]] == [
+        ("A", 11),
+        ("B", 11),
+        ("A", 12),
+        ("B", 12),
+    ]
+    config_paths = [Path(entry["config_file"]) for entry in materialized["configs"]]
+    assert all(path.is_absolute() for path in config_paths)
+    assert all(path.read_bytes().startswith(b"FM27CFG1") for path in config_paths)
+    started = client.post("/api/experiments/start", headers=headers)
+    assert started.status_code == 200, started.text
+    finished = started.json()["job"]
+    assert finished["status"] == "completed"
+    assert finished["completed"] == 4
+    runs = client.get(f"/api/jobs/{job['id']}/runs?limit=10", headers=headers)
+    assert runs.status_code == 200
+    runs_body = runs.json()
+    assert runs_body["total"] == 4
+    assert {(item["variant"], item["seed"]) for item in runs_body["items"]} == {
+        ("A", 11),
+        ("B", 11),
+        ("A", 12),
+        ("B", 12),
+    }
+    assert all(item["score"] is not None for item in runs_body["items"])
+    assert all(Path(item["log_path"]).is_file() for item in runs_body["items"])
+    summary = client.get(f"/api/jobs/{job['id']}/summary", headers=headers)
+    assert summary.status_code == 200
+    summary_body = summary.json()
+    assert set(summary_body) == {"job", "metrics", "paired"}
+    assert summary_body["job"]["status"] == "completed"
+    assert summary_body["metrics"]["n"] == 4

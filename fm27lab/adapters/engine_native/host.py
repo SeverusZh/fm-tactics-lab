@@ -307,6 +307,11 @@ class NativeEngineHost:
                 self._capabilities = capabilities
             return self._capabilities
 
+    def configure_workers(self, workers: int) -> None:
+        validated = validate_workers(workers)
+        with self._lock:
+            self._workers = validated
+
     def run_batch(
         self,
         tasks: Sequence[Mapping[str, Any]],

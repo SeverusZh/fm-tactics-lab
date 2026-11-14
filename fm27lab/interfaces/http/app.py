@@ -12,6 +12,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from fm27lab.adapters.catalog_native.catalog import CatalogRepository
 from fm27lab.adapters.engine_native.capabilities import parse_capabilities, plan_runtime
+from fm27lab.adapters.engine_native.lazy import LazyNativeEngine
 from fm27lab.adapters.fmf import FmfCodec
 from fm27lab.adapters.save_fmsave import FmsaveReader
 from fm27lab.adapters.storage_sqlite.db import Database
@@ -42,16 +43,11 @@ from fm27lab.interfaces.http.common import (
 from fm27lab.interfaces.http.idempotency import IdempotencyMiddleware
 from fm27lab.interfaces.http.routes import register_routes
 from fm27lab.interfaces.http.routes.fmf import FmfService
-from fm27lab.ports.engine import EngineCapabilities
+from fm27lab.ports.engine import EngineCapabilities, EnginePort
 
 TAURI_ORIGINS = ("tauri://localhost", "http://tauri.localhost")
 DEV_ORIGINS = ("http://localhost:1420",)
 ENGINE_UNAVAILABLE_MESSAGE = "原生引擎未配置"
-EXPERIMENT_RUNTIME_PLAN = plan_runtime(
-    parse_capabilities(None),
-    has_pool_variants=False,
-    has_experimental_execution=False,
-)
 LOGGER = logging.getLogger(__name__)
 
 __all__ = [
@@ -103,6 +99,7 @@ def create_app(
     idempotency_service: IdempotencyService | None = None,
     events: EventPublisher | None = None,
     catalog_service: CatalogService | None = None,
+    engine: EnginePort | None = None,
 ) -> FastAPI:
     app = FastAPI(
         title="FM Tactics Lab Sidecar",
@@ -126,10 +123,24 @@ def create_app(
             app.state.drafts,
             settings,
         )
+        resolved_engine: EnginePort
+        if engine is not None:
+            resolved_engine = engine
+        elif settings.engine_root is not None:
+            resolved_engine = LazyNativeEngine(
+                settings.engine_root,
+                settings.data_dir / "agent" / "engine",
+            )
+        else:
+            resolved_engine = MissingEngine()
         app.state.experiments = ExperimentService(
             app.state.jobs,
-            MissingEngine(),
-            EXPERIMENT_RUNTIME_PLAN,
+            resolved_engine,
+            lambda: plan_runtime(
+                resolved_engine.capabilities(),
+                has_pool_variants=False,
+                has_experimental_execution=False,
+            ),
             publisher=app.state.events,
             materializer=materializer,
         )

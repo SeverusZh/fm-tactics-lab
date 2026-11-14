@@ -932,3 +932,54 @@ def test_parallel_lane_batch_is_stable_across_repeats(tmp_path):
         assert len(set(pairs)) == len(tasks)
         identities.append(normalized_results(results))
     assert identities[0] == identities[1] == identities[2]
+
+
+def test_configure_workers_splits_batch_into_requested_lanes(tmp_path):
+    host = make_host(tmp_path)
+    host.configure_workers(2)
+    tasks = [make_task(tmp_path, variant="A", seed=seed) for seed in range(4)]
+    results, progress = run_batch(host, tasks)
+    descriptors = [item for snapshot in progress for item in snapshot]
+    assert {item["lane"] for item in descriptors} == {0, 1}
+    assert all(item["worker_total"] == 2 for item in descriptors)
+    assert len(results) == 4
+    assert len(manifest_paths(tmp_path)) == 2
+
+
+@pytest.mark.parametrize("workers", [0, 257, -1, True, False, 2.0, "2", None])
+def test_configure_workers_rejects_invalid_counts(tmp_path, workers):
+    host = make_host(tmp_path)
+    with pytest.raises(ValueError, match=WORKER_ERROR):
+        host.configure_workers(workers)
+    tasks = [make_task(tmp_path, variant="A", seed=seed) for seed in range(2)]
+    results, progress = run_batch(host, tasks)
+    descriptors = [item for snapshot in progress for item in snapshot]
+    assert all("lane" not in item for item in descriptors)
+    assert len(results) == 2
+    assert len(manifest_paths(tmp_path)) == 1
+
+
+def test_configure_workers_replaces_the_constructor_value(tmp_path):
+    host = make_host(tmp_path, workers=3)
+    tasks = [make_task(tmp_path, variant="A", seed=seed) for seed in range(4)]
+    results, progress = run_batch(host, tasks)
+    descriptors = [item for snapshot in progress for item in snapshot]
+    assert {item["lane"] for item in descriptors} == {0, 1, 2}
+    assert len(results) == 4
+    assert len(manifest_paths(tmp_path)) == 3
+    host.configure_workers(2)
+    results, progress = run_batch(host, tasks)
+    descriptors = [item for snapshot in progress for item in snapshot]
+    assert {item["lane"] for item in descriptors} == {0, 1}
+    assert len(results) == 4
+    assert len(manifest_paths(tmp_path)) == 5
+
+
+def test_configure_workers_does_not_reprobe_capabilities(tmp_path, monkeypatch):
+    probe_log = tmp_path / "probe.log"
+    monkeypatch.setenv("FAKE_SIMULATOR_PROBE_LOG", str(probe_log))
+    host = make_host(tmp_path)
+    probes = probe_log.read_text(encoding="utf-8").splitlines()
+    assert len(probes) == 1
+    host.configure_workers(2)
+    assert probe_log.read_text(encoding="utf-8").splitlines() == probes

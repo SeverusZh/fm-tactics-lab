@@ -989,3 +989,105 @@ def test_start_next_marks_new_config_without_materialized_scenarios_error(tmp_pa
     assert final["summary"]["error"] == "实验配置缺少比赛场景"
     assert fake.tasks == []
     assert jobs.runs(job["id"])["total"] == 0
+
+
+class RecordingEngine(FakeEngine):
+    def __init__(self) -> None:
+        super().__init__()
+        self.events: list[tuple[str, int | None]] = []
+
+    def configure_workers(self, workers: int) -> None:
+        self.events.append(("configure", workers))
+
+    def run_batch(self, tasks, on_result, on_progress) -> None:
+        self.events.append(("run_batch", None))
+        super().run_batch(tasks, on_result, on_progress)
+
+
+def test_callable_runtime_plan_is_resolved_for_the_job_summary(tmp_path: Path):
+    jobs = job_service(tmp_path)
+    calls: list[None] = []
+
+    def plan() -> RuntimePlan:
+        calls.append(None)
+        return PLAN
+
+    service = ExperimentService(jobs, FakeEngine(), plan)
+    job = submit(service, seeds=(1,), variants=("A",))
+    assert calls == [None]
+    assert job["summary"]["runtime_mode"] == PLAN.runtime_mode
+    assert job["summary"]["provenance"] == PLAN.provenance
+
+
+@pytest.mark.parametrize("invalid", [None, "plan", {"runtime_mode": "reused_worker"}])
+def test_invalid_runtime_plan_is_rejected_before_job_creation(tmp_path: Path, invalid):
+    jobs = job_service(tmp_path)
+    service = ExperimentService(jobs, FakeEngine(), lambda: invalid)
+    with pytest.raises(ValueError, match="运行时计划无效"):
+        submit(service, seeds=(1,), variants=("A",))
+    assert jobs.list()["items"] == []
+
+
+def test_runtime_plan_failure_is_rejected_before_job_creation(tmp_path: Path):
+    jobs = job_service(tmp_path)
+
+    def plan() -> RuntimePlan:
+        raise RuntimeError("引擎探测失败")
+
+    service = ExperimentService(jobs, FakeEngine(), plan)
+    with pytest.raises(RuntimeError, match="引擎探测失败"):
+        submit(service, seeds=(1,), variants=("A",))
+    assert jobs.list()["items"] == []
+
+
+def test_start_next_configures_engine_workers_before_dispatch(tmp_path: Path):
+    jobs = job_service(tmp_path)
+    engine = RecordingEngine()
+    service = ExperimentService(jobs, engine, PLAN)
+    submitted = submit(service, seeds=(2,), variants=("A",), workers=3)
+
+    final = service.start_next()
+
+    assert final is not None
+    assert final["status"] == "completed"
+    assert submitted["workers"] == 3
+    assert engine.events == [("configure", 3), ("run_batch", None)]
+
+
+class WorkerStatusEngine(RecordingEngine):
+    def __init__(self, jobs: JobService) -> None:
+        super().__init__()
+        self._jobs = jobs
+        self.job_id: str | None = None
+        self.worker_status: list[str] = []
+
+    def configure_workers(self, workers: int) -> None:
+        assert self.job_id is not None
+        self.worker_status.append(self._jobs.get(self.job_id)["status"])
+        super().configure_workers(workers)
+
+
+def test_start_next_configures_workers_after_marking_the_job_running(tmp_path: Path):
+    jobs = job_service(tmp_path)
+    engine = WorkerStatusEngine(jobs)
+    service = ExperimentService(jobs, engine, PLAN)
+    submitted = submit(service, seeds=(2,), variants=("A",), workers=3)
+    engine.job_id = submitted["id"]
+
+    final = service.start_next()
+
+    assert final is not None
+    assert final["status"] == "completed"
+    assert engine.worker_status == ["running"]
+    assert engine.events == [("configure", 3), ("run_batch", None)]
+
+
+def test_start_next_tolerates_engines_without_worker_configuration(tmp_path: Path):
+    service, fake, _ = make_service(tmp_path)
+    submit(service, seeds=(1,), variants=("A",))
+
+    final = service.start_next()
+
+    assert final is not None
+    assert final["status"] == "completed"
+    assert len(fake.tasks) == 1

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import threading
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
 from fm27lab.application.events import EventPublisher
@@ -28,6 +28,7 @@ RUNNING_ERROR = "已有任务在运行"
 CANCEL_ERROR = "任务状态不允许取消"
 RESUME_ERROR = "任务状态不允许续跑"
 ENGINE_ERROR = "引擎执行失败"
+RUNTIME_PLAN_ERROR = "运行时计划无效"
 RESOURCE_ERROR_MESSAGES = {
     "insufficient_memory": "可用内存低于 2 GiB，资源预检未通过",
     "insufficient_disk": "空闲磁盘不足，资源预检未通过",
@@ -127,7 +128,7 @@ class ExperimentService:
         self,
         job_service: JobService,
         engine: EnginePort,
-        runtime_plan: RuntimePlan,
+        runtime_plan: RuntimePlan | Callable[[], RuntimePlan],
         publisher: EventPublisher | None = None,
         materializer: ExperimentMaterializer | None = None,
     ):
@@ -138,6 +139,12 @@ class ExperimentService:
         self._materializer = materializer
         self._lock = threading.Lock()
         self._cancel_requested: dict[str, threading.Event] = {}
+
+    def _resolve_plan(self) -> RuntimePlan:
+        plan = self._runtime_plan() if callable(self._runtime_plan) else self._runtime_plan
+        if not isinstance(plan, RuntimePlan):
+            raise ValueError(RUNTIME_PLAN_ERROR)
+        return plan
 
     def submit(
         self,
@@ -175,6 +182,7 @@ class ExperimentService:
         if draft_id is not None:
             created_config["draft_id"] = draft_id
             created_config["baseline_draft_id"] = baseline_draft_id
+        runtime_plan = self._resolve_plan()
         with self._lock:
             job = self._job_service.create(
                 kind="experiment",
@@ -184,8 +192,8 @@ class ExperimentService:
                 total=total,
             )
             summary: dict[str, Any] = {
-                "provenance": dict(self._runtime_plan.provenance),
-                "runtime_mode": self._runtime_plan.runtime_mode,
+                "provenance": dict(runtime_plan.provenance),
+                "runtime_mode": runtime_plan.runtime_mode,
             }
             try:
                 if self._materializer is not None and draft_id is not None:
@@ -283,6 +291,9 @@ class ExperimentService:
                 if (task["variant"], task["seed"]) not in completed_pairs
             ]
             if remaining:
+                configure = getattr(self._engine, "configure_workers", None)
+                if callable(configure):
+                    configure(int(running["workers"]))
                 self._engine.run_batch(remaining, on_result, on_progress)
                 status = "cancelled" if event.is_set() else "completed"
                 final = self._job_service.update(job_id, {"status": status})
