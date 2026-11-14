@@ -1335,6 +1335,90 @@
   text-align: center;
 }
 
+.tactics-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  margin-left: auto;
+}
+
+.tactics-dirty-note {
+  margin: 0 0 var(--space-3);
+  color: var(--amber);
+}
+
+.tactics-save-notice {
+  margin: 0 0 var(--space-3);
+  color: var(--pitch);
+}
+
+.tactics-role-editor {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  margin-top: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border);
+}
+
+.tactics-role-target {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  color: var(--text-muted);
+  font-size: var(--type-body-sm);
+}
+
+.tactics-role-field select {
+  min-width: 160px;
+}
+
+.tactics-slot--editable {
+  padding: 0;
+  cursor: grab;
+}
+
+.tactics-slot--editable:active {
+  cursor: grabbing;
+}
+
+.tactics-slot-button {
+  display: grid;
+  justify-items: center;
+  gap: 1px;
+  width: 100%;
+  padding: var(--space-1) var(--space-2);
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: center;
+  cursor: pointer;
+}
+
+.tactics-slot--compact .tactics-slot-button {
+  gap: 0;
+  padding: 1px;
+}
+
+.tactics-slot-button:focus-visible {
+  outline: 2px solid var(--accent-text);
+  outline-offset: 2px;
+  border-radius: var(--radius-tag);
+}
+
+.tactics-slot.is-drop-target {
+  border-width: 2px;
+  border-color: var(--pitch);
+}
+
+.tactics-slot.is-dragging {
+  opacity: 0.6;
+}
+
 .tactics-skeleton {
   min-height: 420px;
   border: 1px dashed var(--border);
@@ -1422,6 +1506,19 @@
 @media (max-width: 640px) {
   .tactics-board .panel-body {
     padding: var(--space-3);
+  }
+
+  .tactics-role-editor {
+    align-items: stretch;
+  }
+
+  .tactics-role-field {
+    flex: 1 1 100%;
+  }
+
+  .tactics-role-field select {
+    width: 100%;
+    min-width: 0;
   }
 }
 

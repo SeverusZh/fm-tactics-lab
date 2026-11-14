@@ -1,12 +1,26 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { SquaresFour } from "@phosphor-icons/react";
-import { useEffect, useState, type ReactNode } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type DragEvent,
+  type KeyboardEvent,
+  type ReactNode,
+} from "react";
 import { Link } from "react-router-dom";
 
 import { useAppContext } from "../app-context";
 import { EmptyState } from "../components/EmptyState";
 import { Panel } from "../components/Panel";
-import { getCatalog, getDraft, listDrafts, type Catalog, type CatalogTeamInstruction } from "../lib/api";
+import {
+  getCatalog,
+  getDraft,
+  listDrafts,
+  updateDraft,
+  type Catalog,
+  type CatalogTeamInstruction,
+} from "../lib/api";
 
 const SLOT_COUNT = 11;
 const MAX_INSTRUCTION_ROWS = 8;
@@ -98,10 +112,20 @@ type TeamView = {
 type ScenarioView = { teams: [TeamView, TeamView] };
 type InstructionRow = { key: string; label: string; value: string };
 type CatalogGroup = { label: string; phase: number | null; options: Map<string, string> };
+type SlotRoleOption = { id: string; label: string; phase: 0 | 1 | null };
 type CatalogLookup = {
   roleLabels: Map<string, string>;
+  roleOptions: SlotRoleOption[];
   groups: Map<string, CatalogGroup>;
   mentalityLabels: Map<string, string>;
+};
+type SlotDirection = "up" | "down" | "left" | "right";
+
+const SLOT_DIRECTIONS: Partial<Record<string, SlotDirection>> = {
+  ArrowUp: "up",
+  ArrowDown: "down",
+  ArrowLeft: "left",
+  ArrowRight: "right",
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -129,10 +153,13 @@ function catalogLabel(entry: Record<string, unknown>, fallback: string): string 
 function buildCatalogLookup(catalog: Catalog | null): CatalogLookup | null {
   if (catalog === null) return null;
   const roleLabels = new Map<string, string>();
+  const roleOptions: SlotRoleOption[] = [];
   for (const entry of catalogEntries(catalog.roles)) {
     const id = catalogId(entry.id);
     if (id === null) continue;
-    roleLabels.set(id, catalogLabel(entry, id));
+    const label = catalogLabel(entry, id);
+    roleLabels.set(id, label);
+    roleOptions.push({ id, label, phase: entryPhase(entry) });
   }
   const groups = new Map<string, CatalogGroup>();
   for (const entry of catalogEntries(catalog.team_instructions)) {
@@ -152,7 +179,7 @@ function buildCatalogLookup(catalog: Catalog | null): CatalogLookup | null {
     if (id === null) continue;
     mentalityLabels.set(id, catalogLabel(entry, id));
   }
-  return { roleLabels, groups, mentalityLabels };
+  return { roleLabels, roleOptions, groups, mentalityLabels };
 }
 
 function entryPhase(entry: CatalogTeamInstruction | Record<string, unknown>): 0 | 1 | null {
@@ -231,6 +258,113 @@ function parseScenario(value: Record<string, unknown>): ScenarioView | null {
   const away = parseTeam(teams[1]);
   if (home === null || away === null) return null;
   return { teams: [home, away] };
+}
+
+function cloneScenario(scenario: Record<string, unknown>): Record<string, unknown> | null {
+  const copy: unknown = JSON.parse(JSON.stringify(scenario));
+  return isRecord(copy) ? copy : null;
+}
+
+function rawTeam(scenario: Record<string, unknown>, side: 0 | 1): Record<string, unknown> | null {
+  const teams = scenario.teams;
+  if (!Array.isArray(teams)) return null;
+  const team = teams[side];
+  return isRecord(team) ? team : null;
+}
+
+function recordCells(value: unknown): Record<string, unknown>[] | null {
+  if (!Array.isArray(value) || value.length !== SLOT_COUNT) return null;
+  const cells: Record<string, unknown>[] = [];
+  for (const entry of value) {
+    if (!isRecord(entry)) return null;
+    cells.push(entry);
+  }
+  return cells;
+}
+
+function rawPhaseCells(
+  team: Record<string, unknown>,
+  phase: 0 | 1,
+): Record<string, unknown>[] | null {
+  if (Array.isArray(team.phase_plans) && team.phase_plans.length === 2) {
+    const wanted = phase === 0 ? "in_possession" : "out_of_possession";
+    const plan = team.phase_plans.find((entry) => isRecord(entry) && entry.phase === wanted);
+    return isRecord(plan) ? recordCells(plan.assignments) : null;
+  }
+  if (Array.isArray(team.phases) && team.phases.length === 2) {
+    return recordCells(team.phases[phase]);
+  }
+  return null;
+}
+
+function updatePhaseCells(
+  scenario: Record<string, unknown>,
+  side: 0 | 1,
+  phase: 0 | 1,
+  update: (cells: Record<string, unknown>[]) => void,
+): Record<string, unknown> | null {
+  const next = cloneScenario(scenario);
+  if (next === null) return null;
+  const team = rawTeam(next, side);
+  if (team === null) return null;
+  const cells = rawPhaseCells(team, phase);
+  if (cells === null) return null;
+  update(cells);
+  return next;
+}
+
+function swapLineupSlots(
+  scenario: Record<string, unknown>,
+  side: 0 | 1,
+  from: number,
+  to: number,
+): Record<string, unknown> | null {
+  if (from === to) return null;
+  const next = cloneScenario(scenario);
+  if (next === null) return null;
+  const team = rawTeam(next, side);
+  if (team === null || !Array.isArray(team.lineup)) return null;
+  const lineup = team.lineup;
+  if (from < 0 || to < 0 || from >= lineup.length || to >= lineup.length) return null;
+  const value = lineup[from];
+  lineup[from] = lineup[to];
+  lineup[to] = value;
+  return next;
+}
+
+function nearestSlotInDirection(
+  cells: PhaseCell[],
+  current: number,
+  direction: SlotDirection,
+): number | null {
+  const origin = positionPoint(cells[current].position);
+  let best: number | null = null;
+  let bestDistance = Number.POSITIVE_INFINITY;
+  for (let index = 0; index < cells.length; index += 1) {
+    if (index === current) continue;
+    const point = positionPoint(cells[index].position);
+    const dx = point.x - origin.x;
+    const dy = point.y - origin.y;
+    const inDirection =
+      direction === "left"
+        ? dx < 0
+        : direction === "right"
+          ? dx > 0
+          : direction === "up"
+            ? dy < 0
+            : dy > 0;
+    if (!inDirection) continue;
+    const distance = dx * dx + dy * dy;
+    if (distance < bestDistance) {
+      best = index;
+      bestDistance = distance;
+    }
+  }
+  return best;
+}
+
+function dataTransferOf(event: { dataTransfer?: DataTransfer | null }): DataTransfer | null {
+  return event.dataTransfer ?? null;
 }
 
 function positionPoint(position: string): { x: number; y: number } {
@@ -317,10 +451,23 @@ function useCompactSlots(): boolean {
 
 export function TacticsPage() {
   const { connection } = useAppContext();
+  const queryClient = useQueryClient();
   const [selectedDraftId, setSelectedDraftId] = useState<string | null>(null);
   const [side, setSide] = useState<0 | 1>(0);
   const [phase, setPhase] = useState<0 | 1>(0);
   const compact = useCompactSlots();
+  const [editing, setEditing] = useState(false);
+  const [baselineScenario, setBaselineScenario] = useState<Record<string, unknown> | null>(null);
+  const [workingScenario, setWorkingScenario] = useState<Record<string, unknown> | null>(null);
+  const [dirty, setDirty] = useState(false);
+  const [saveNotice, setSaveNotice] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [focusedSlot, setFocusedSlot] = useState(0);
+  const [pickedSlot, setPickedSlot] = useState<number | null>(null);
+  const [announcement, setAnnouncement] = useState("");
+  const [dragFrom, setDragFrom] = useState<number | null>(null);
+  const [dragOver, setDragOver] = useState<number | null>(null);
+  const slotRefs = useRef<Array<HTMLButtonElement | null>>([]);
 
   const drafts = useQuery({
     queryKey: ["drafts", connection?.url],
@@ -346,23 +493,213 @@ export function TacticsPage() {
     enabled: connection !== null && activeDraftId !== null,
   });
 
-  const scenario =
-    detail.data === undefined || !isRecord(detail.data.scenario)
-      ? null
-      : parseScenario(detail.data.scenario);
+  const serverScenario =
+    detail.data === undefined || !isRecord(detail.data.scenario) ? null : detail.data.scenario;
+  const shownScenario = editing && workingScenario !== null ? workingScenario : serverScenario;
+  const scenario = shownScenario === null ? null : parseScenario(shownScenario);
   const team = scenario === null ? null : scenario.teams[side];
+  const activePlan = team === null ? null : team.plans[phase];
+  const focusedCell = activePlan === null ? null : activePlan.cells[focusedSlot];
   const lookup = buildCatalogLookup(catalog.data ?? null);
   const catalogMissing = catalog.isSuccess && (catalog.data ?? null) === null;
+  const phaseRoleOptions =
+    lookup === null ? [] : lookup.roleOptions.filter((option) => option.phase === phase);
+  const fallbackRoleOption =
+    focusedCell === null ||
+    focusedCell.role === "" ||
+    phaseRoleOptions.some((option) => option.id === focusedCell.role)
+      ? null
+      : { id: focusedCell.role, label: roleLabel(focusedCell.role, lookup) };
+
+  const saveMutation = useMutation({
+    mutationFn: (input: { draftId: string; scenario: Record<string, unknown> }) =>
+      updateDraft(connection!, input.draftId, { scenario: input.scenario }),
+    onMutate: () => {
+      setSaveError(null);
+      setSaveNotice(null);
+    },
+    onSuccess: (_data, variables) => {
+      setDirty(false);
+      setEditing(false);
+      setWorkingScenario(null);
+      setBaselineScenario(null);
+      setPickedSlot(null);
+      setAnnouncement("");
+      setSaveNotice("已保存");
+      void queryClient.invalidateQueries({
+        queryKey: ["draft", connection?.url, variables.draftId],
+      });
+    },
+    onError: (error) => {
+      setSaveError(errorMessage(error));
+    },
+  });
+  const saving = saveMutation.isPending;
+
+  const resetInteraction = () => {
+    setPickedSlot(null);
+    setAnnouncement("");
+    setDragFrom(null);
+    setDragOver(null);
+  };
+
+  const handleStartEditing = () => {
+    if (serverScenario === null) return;
+    const baseline = cloneScenario(serverScenario);
+    const working = cloneScenario(serverScenario);
+    if (baseline === null || working === null) return;
+    setBaselineScenario(baseline);
+    setWorkingScenario(working);
+    setEditing(true);
+    setDirty(false);
+    setSaveError(null);
+    setSaveNotice(null);
+    setFocusedSlot(0);
+    resetInteraction();
+  };
+
+  const handleAbandon = () => {
+    if (saving) return;
+    setWorkingScenario(baselineScenario === null ? null : cloneScenario(baselineScenario));
+    setBaselineScenario(null);
+    setEditing(false);
+    setDirty(false);
+    setSaveError(null);
+    resetInteraction();
+  };
+
+  const applyEditedScenario = (next: Record<string, unknown> | null) => {
+    if (next === null) return;
+    setWorkingScenario(next);
+    setDirty(true);
+    setSaveNotice(null);
+  };
+
+  const handleSave = () => {
+    if (saving || !editing || workingScenario === null || activeDraftId === null) return;
+    saveMutation.mutate({ draftId: activeDraftId, scenario: workingScenario });
+  };
+
+  const swapSlots = (from: number, to: number) => {
+    if (workingScenario === null || from === to) return;
+    applyEditedScenario(swapLineupSlots(workingScenario, side, from, to));
+  };
+
+  const focusSlot = (slot: number) => {
+    setFocusedSlot(slot);
+    slotRefs.current[slot]?.focus();
+  };
+
+  const handleSlotKeyDown = (event: KeyboardEvent<HTMLButtonElement>, index: number) => {
+    if (!editing || activePlan === null) return;
+    const direction = SLOT_DIRECTIONS[event.key];
+    if (direction !== undefined) {
+      event.preventDefault();
+      const target = nearestSlotInDirection(activePlan.cells, index, direction);
+      if (target !== null) focusSlot(target);
+      return;
+    }
+    if (event.key === "Home") {
+      event.preventDefault();
+      focusSlot(0);
+      return;
+    }
+    if (event.key === "End") {
+      event.preventDefault();
+      focusSlot(SLOT_COUNT - 1);
+      return;
+    }
+    if (event.key === "Escape") {
+      if (pickedSlot === null) return;
+      event.preventDefault();
+      setPickedSlot(null);
+      setAnnouncement("已取消选择");
+      return;
+    }
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    if (pickedSlot === null) {
+      setPickedSlot(index);
+      setAnnouncement(`已选择槽位 ${slotCode(index)}`);
+      return;
+    }
+    if (pickedSlot === index) return;
+    setPickedSlot(null);
+    setFocusedSlot(index);
+    setAnnouncement(`已与槽位 ${slotCode(index)} 交换`);
+    swapSlots(pickedSlot, index);
+  };
+
+  const handleRoleChange = (role: string) => {
+    if (workingScenario === null) return;
+    applyEditedScenario(
+      updatePhaseCells(workingScenario, side, phase, (cells) => {
+        const cell = cells[focusedSlot];
+        if (cell !== undefined) cell.role = role;
+      }),
+    );
+  };
+
+  const handleDragStart = (event: DragEvent<HTMLLIElement>, index: number) => {
+    if (!editing) return;
+    setDragFrom(index);
+    setDragOver(null);
+    const transfer = dataTransferOf(event);
+    if (transfer !== null) {
+      transfer.setData("text/plain", String(index));
+      transfer.effectAllowed = "move";
+    }
+  };
+
+  const handleDragOver = (event: DragEvent<HTMLLIElement>, index: number) => {
+    if (!editing || dragFrom === null || dragFrom === index) return;
+    event.preventDefault();
+    const transfer = dataTransferOf(event);
+    if (transfer !== null) transfer.dropEffect = "move";
+    if (dragOver !== index) setDragOver(index);
+  };
+
+  const handleDragLeave = (index: number) => {
+    if (dragOver === index) setDragOver(null);
+  };
+
+  const handleDrop = (event: DragEvent<HTMLLIElement>, index: number) => {
+    if (!editing) return;
+    event.preventDefault();
+    const from = dragFrom;
+    setDragFrom(null);
+    setDragOver(null);
+    if (from === null || from === index) return;
+    swapSlots(from, index);
+  };
+
+  const handleDragEnd = () => {
+    setDragFrom(null);
+    setDragOver(null);
+  };
+
+  const handleDraftChange = (draftId: string) => {
+    setSelectedDraftId(draftId);
+    setEditing(false);
+    setBaselineScenario(null);
+    setWorkingScenario(null);
+    setDirty(false);
+    setSaveNotice(null);
+    setSaveError(null);
+    setFocusedSlot(0);
+    resetInteraction();
+  };
 
   const toolbar =
     draftItems.length === 0 ? null : (
-      <div className="tactics-toolbar">
+      <div className="tactics-toolbar" aria-busy={saving ? true : undefined}>
         <label className="field tactics-draft">
           草稿
           <select
             aria-label="选择草稿"
             value={activeDraftId ?? ""}
-            onChange={(event) => setSelectedDraftId(event.target.value)}
+            disabled={dirty}
+            onChange={(event) => handleDraftChange(event.target.value)}
           >
             {draftItems.map((item) => (
               <option key={item.id} value={item.id}>
@@ -386,6 +723,32 @@ export function TacticsPage() {
           <button type="button" aria-pressed={phase === 1} onClick={() => setPhase(1)}>
             无球
           </button>
+        </div>
+        <div className="tactics-actions">
+          {editing ? (
+            <>
+              <button className="button small" type="button" disabled={saving} onClick={handleSave}>
+                保存
+              </button>
+              <button
+                className="button small danger"
+                type="button"
+                disabled={saving}
+                onClick={handleAbandon}
+              >
+                放弃
+              </button>
+            </>
+          ) : (
+            <button
+              className="button small"
+              type="button"
+              disabled={serverScenario === null}
+              onClick={handleStartEditing}
+            >
+              编辑阵型
+            </button>
+          )}
         </div>
       </div>
     );
@@ -476,7 +839,7 @@ export function TacticsPage() {
     );
   }
 
-  if (scenario === null || team === null) {
+  if (scenario === null || team === null || activePlan === null) {
     return (
       <Panel title="双阶段战术板">
         {toolbar}
@@ -487,7 +850,7 @@ export function TacticsPage() {
     );
   }
 
-  const plan = team.plans[phase];
+  const plan = activePlan;
   const rows = instructionRows(plan, phase, lookup);
   const visibleRows = rows.slice(0, MAX_INSTRUCTION_ROWS);
   const hiddenRows = rows.length - visibleRows.length;
@@ -496,7 +859,27 @@ export function TacticsPage() {
     <div className="page-grid">
       {boardPanel(
         <>
-          <div className="tactics-pitch" role="group" aria-label={`${PHASE_LABELS[phase]}战术板`}>
+          {saveError === null ? null : (
+            <div className="inline-alert" role="alert">
+              <span>{saveError}</span>
+            </div>
+          )}
+          {saveNotice === null ? null : (
+            <p className="tactics-note tactics-save-notice" role="status">
+              {saveNotice}
+            </p>
+          )}
+          {editing ? (
+            <p className="tactics-note tactics-dirty-note">
+              {dirty ? "有未保存修改，保存或放弃后可切换草稿" : "编辑阵型中，修改后请保存或放弃"}
+            </p>
+          ) : null}
+          <div
+            className="tactics-pitch"
+            role="group"
+            aria-label={`${PHASE_LABELS[phase]}战术板`}
+            aria-busy={saving ? true : undefined}
+          >
             <div className="tactics-pitch-lines" aria-hidden="true">
               <span className="tactics-pitch-halfway" />
               <span className="tactics-pitch-circle" />
@@ -508,23 +891,92 @@ export function TacticsPage() {
                 const point = positionPoint(cell.position);
                 const name = playerName(team, index);
                 const role = roleLabel(cell.role, lookup);
-                return (
-                  <li
-                    key={index}
-                    className={compact ? "tactics-slot tactics-slot--compact" : "tactics-slot"}
-                    style={{ left: `${point.x}%`, top: `${point.y}%` }}
-                    title={`${slotCode(index)} · ${name} · ${cell.position} · ${role}`}
-                  >
+                const classNames = ["tactics-slot"];
+                if (compact) classNames.push("tactics-slot--compact");
+                if (editing) classNames.push("tactics-slot--editable");
+                if (editing && pickedSlot === index) classNames.push("is-selected");
+                if (dragFrom === index) classNames.push("is-dragging");
+                if (dragOver === index && dragFrom !== null && dragFrom !== index) {
+                  classNames.push("is-drop-target");
+                }
+                const content = (
+                  <>
                     <span className="tactics-slot-shirt">{slotCode(index)}</span>
                     {compact ? null : <span className="tactics-slot-name">{name}</span>}
                     <span className="tactics-slot-position">{cell.position}</span>
                     {compact ? null : <span className="tactics-slot-role">{role}</span>}
+                  </>
+                );
+                return (
+                  <li
+                    key={index}
+                    className={classNames.join(" ")}
+                    style={{ left: `${point.x}%`, top: `${point.y}%` }}
+                    title={`${slotCode(index)} · ${name} · ${cell.position} · ${role}`}
+                    draggable={editing || undefined}
+                    onDragStart={(event) => handleDragStart(event, index)}
+                    onDragOver={(event) => handleDragOver(event, index)}
+                    onDragLeave={() => handleDragLeave(index)}
+                    onDrop={(event) => handleDrop(event, index)}
+                    onDragEnd={handleDragEnd}
+                  >
+                    {editing ? (
+                      <button
+                        type="button"
+                        className="tactics-slot-button"
+                        ref={(node) => {
+                          slotRefs.current[index] = node;
+                        }}
+                        tabIndex={focusedSlot === index ? 0 : -1}
+                        aria-label={`槽位 ${slotCode(index)}，${cell.position}，${role}`}
+                        onClick={() => setFocusedSlot(index)}
+                        onFocus={() => setFocusedSlot(index)}
+                        onKeyDown={(event) => handleSlotKeyDown(event, index)}
+                      >
+                        {content}
+                      </button>
+                    ) : (
+                      content
+                    )}
                   </li>
                 );
               })}
             </ol>
           </div>
           <p className="tactics-direction">进攻方向 ↑</p>
+          {editing && focusedCell !== null ? (
+            <div className="tactics-role-editor">
+              <div className="tactics-role-target">
+                <span>槽位 {slotCode(focusedSlot)}</span>
+                <span>{focusedCell.position}</span>
+                <span>{roleLabel(focusedCell.role, lookup)}</span>
+              </div>
+              <label className="field tactics-role-field">
+                角色
+                <select
+                  aria-label="角色"
+                  value={focusedCell.role}
+                  disabled={lookup === null}
+                  onChange={(event) => handleRoleChange(event.target.value)}
+                >
+                  {phaseRoleOptions.map((option) => (
+                    <option key={option.id} value={option.id}>
+                      {option.label}
+                    </option>
+                  ))}
+                  {fallbackRoleOption === null ? null : (
+                    <option value={fallbackRoleOption.id}>{fallbackRoleOption.label}</option>
+                  )}
+                  {focusedCell.role === "" ? <option value="">—</option> : null}
+                </select>
+              </label>
+            </div>
+          ) : null}
+          {editing ? (
+            <p className="sr-only" aria-live="polite">
+              {announcement}
+            </p>
+          ) : null}
         </>
       )}
       <Panel

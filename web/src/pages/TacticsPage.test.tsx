@@ -316,7 +316,7 @@ function makeDraftList(items: DraftSummary[], total = items.length): DraftList {
 
 function renderTacticsPage(activeConnection: Connection | null = connection) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(
+  const result = render(
     <QueryClientProvider client={client}>
       <MemoryRouter initialEntries={["/tactics"]}>
         <AppContext.Provider
@@ -333,6 +333,7 @@ function renderTacticsPage(activeConnection: Connection | null = connection) {
       </MemoryRouter>
     </QueryClientProvider>,
   );
+  return { ...result, client };
 }
 
 async function pitchSlots(): Promise<HTMLElement[]> {
@@ -351,6 +352,219 @@ function draftHandlers(
     const detail = details[id] ?? makeDraft({ id });
     return jsonResponse(detail);
   };
+}
+
+const ROLE_PHASE_CATALOG = {
+  available: true,
+  catalog: {
+    positions: [],
+    roles: [
+      { id: "Goalkeeper", label: "门将", phase: 0 },
+      { id: "FullBack", label: "边后卫", phase: 0 },
+      { id: "CentreBack", label: "中后卫", phase: 0 },
+      { id: "DefensiveMidfielder", label: "防守型中场", phase: 0 },
+      { id: "CentralMidfielder", label: "中前卫", phase: 0 },
+      { id: "Winger", label: "边锋", phase: 0 },
+      { id: "CentreForward", label: "中锋", phase: 0 },
+      { id: "OPGoalkeeper", label: "防守门将", phase: 1 },
+      { id: "OPFullBack", label: "防守边后卫", phase: 1 },
+      { id: "OPCentreBack", label: "防守中后卫", phase: 1 },
+      { id: "OPScreeningDefensiveMidfielder", label: "防守型后腰", phase: 1 },
+      { id: "OPWideMidfielder", label: "防守边前卫", phase: 1 },
+      { id: "OPCentralMidfielder", label: "防守中前卫", phase: 1 },
+      { id: "OPAttackingMidfielder", label: "防守前腰", phase: 1 },
+      { id: "OPCentreForward", label: "防守中锋", phase: 1 },
+      { id: "LegacyRole", label: "无阶段角色" },
+    ],
+    team_instructions: [],
+    mentalities: [],
+  },
+};
+
+const NATIVE_HOME_OUT_OF_POSSESSION: Cell[] = [
+  { position: "GK", role: "OPGoalkeeper" },
+  ...HOME_OUT_OF_POSSESSION.slice(1),
+];
+
+const NATIVE_AWAY_OUT_OF_POSSESSION: Cell[] = [
+  { position: "GK", role: "OPGoalkeeper" },
+  ...AWAY_OUT_OF_POSSESSION.slice(1),
+];
+
+function makeNativeCells(cells: Cell[]) {
+  return cells.map((cell) => ({
+    ...cell,
+    duty: "0",
+    instructions: {},
+    target_player: 255,
+    target_position: 0,
+  }));
+}
+
+function makeNativeTeam(
+  name: string,
+  uidBase: number,
+  possession: Cell[],
+  outOfPossession: Cell[],
+  mentality = 5,
+) {
+  return {
+    name,
+    mentality,
+    players: makePlayers(name, uidBase),
+    lineup: Array.from({ length: 11 }, (_, index) => index),
+    substitutes: Array.from({ length: 12 }, (_, index) => index + 11),
+    roster_size: 23,
+    instructions: {},
+    phases: [makeNativeCells(possession), makeNativeCells(outOfPossession)],
+  };
+}
+
+function makeNativeScenario(): Record<string, unknown> {
+  return {
+    schema: 3,
+    fixture: "bundled_match_pkm",
+    rules: "game",
+    teams: [
+      makeNativeTeam("北岸联", 100, HOME_POSSESSION, NATIVE_HOME_OUT_OF_POSSESSION),
+      makeNativeTeam("南港队", 200, AWAY_POSSESSION, NATIVE_AWAY_OUT_OF_POSSESSION, 6),
+    ],
+  };
+}
+
+const PHASE_KEYS = ["in_possession", "out_of_possession"] as const;
+
+function asRecord(value: unknown): Record<string, unknown> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new Error("expected record");
+  }
+  return value as Record<string, unknown>;
+}
+
+function cloneRecord(value: Record<string, unknown>): Record<string, unknown> {
+  return JSON.parse(JSON.stringify(value)) as Record<string, unknown>;
+}
+
+function requiredTeam(scenario: Record<string, unknown>, side: 0 | 1): Record<string, unknown> {
+  const teams = scenario.teams;
+  if (!Array.isArray(teams)) throw new Error("teams missing");
+  return asRecord(teams[side]);
+}
+
+function requiredCells(value: unknown): Record<string, unknown>[] {
+  if (!Array.isArray(value)) throw new Error("cells missing");
+  return value.map((entry) => asRecord(entry));
+}
+
+function withLineupSwap(
+  scenario: Record<string, unknown>,
+  side: 0 | 1,
+  from: number,
+  to: number,
+): Record<string, unknown> {
+  const next = cloneRecord(scenario);
+  const team = requiredTeam(next, side);
+  const lineup = team.lineup;
+  if (!Array.isArray(lineup)) throw new Error("lineup missing");
+  const value = lineup[from];
+  lineup[from] = lineup[to];
+  lineup[to] = value;
+  return next;
+}
+
+function withNativeCellRole(
+  scenario: Record<string, unknown>,
+  side: 0 | 1,
+  phase: 0 | 1,
+  slot: number,
+  role: string,
+): Record<string, unknown> {
+  const next = cloneRecord(scenario);
+  const team = requiredTeam(next, side);
+  const phases = team.phases;
+  if (!Array.isArray(phases)) throw new Error("phases missing");
+  requiredCells(phases[phase])[slot].role = role;
+  return next;
+}
+
+function withLegacyCellRole(
+  scenario: Record<string, unknown>,
+  side: 0 | 1,
+  phase: 0 | 1,
+  slot: number,
+  role: string,
+): Record<string, unknown> {
+  const next = cloneRecord(scenario);
+  const team = requiredTeam(next, side);
+  const plans = team.phase_plans;
+  if (!Array.isArray(plans)) throw new Error("phase plans missing");
+  const wanted = PHASE_KEYS[phase];
+  const plan = plans
+    .map((entry) => asRecord(entry))
+    .find((entry) => entry.phase === wanted);
+  if (plan === undefined) throw new Error("phase plan missing");
+  requiredCells(plan.assignments)[slot].role = role;
+  return next;
+}
+
+function patchedBodies(): Record<string, unknown>[] {
+  return callsTo("/api/drafts/draft-1")
+    .filter((call) => call.init.method === "PATCH")
+    .map((call) => asRecord(JSON.parse(String(call.init.body))));
+}
+
+function detailGets() {
+  return callsTo("/api/drafts/draft-1").filter((call) => call.init.method !== "PATCH");
+}
+
+type EditableHandlerOptions = {
+  scenario?: Record<string, unknown>;
+  catalogBody?: unknown;
+  onPatch?: (body: Record<string, unknown>) => Response | Promise<Response>;
+  details?: Record<string, Draft>;
+  items?: DraftSummary[];
+};
+
+function editableHandlers(options: EditableHandlerOptions = {}): FetchHandler {
+  const scenario = options.scenario ?? makeNativeScenario();
+  const catalogBody = options.catalogBody ?? ROLE_PHASE_CATALOG;
+  const items = options.items ?? [makeSummary()];
+  return (url, init) => {
+    if (url.endsWith("/api/catalog")) return jsonResponse(catalogBody);
+    if (url.endsWith("/api/drafts")) return jsonResponse(makeDraftList(items));
+    if (init.method === "PATCH") {
+      const body = asRecord(JSON.parse(String(init.body)));
+      return options.onPatch === undefined
+        ? jsonResponse(makeDraft({ id: "draft-1", scenario }))
+        : options.onPatch(body);
+    }
+    const id = url.slice(url.lastIndexOf("/") + 1);
+    return jsonResponse(options.details?.[id] ?? makeDraft({ id, scenario }));
+  };
+}
+
+async function slotButtons(): Promise<HTMLElement[]> {
+  const board = await screen.findByRole("group", { name: /战术板/ });
+  return within(board).getAllByRole("button");
+}
+
+async function startEditing(): Promise<HTMLElement[]> {
+  await screen.findByRole("group", { name: /战术板/ });
+  fireEvent.click(await screen.findByRole("button", { name: "编辑阵型" }));
+  await screen.findByRole("button", { name: "保存" });
+  return slotButtons();
+}
+
+function liveRegion(): HTMLElement {
+  const region = document.querySelector('[aria-live="polite"]');
+  if (region === null) throw new Error("aria-live region missing");
+  return region as HTMLElement;
+}
+
+function roleOptionValues(select: HTMLElement): string[] {
+  return within(select)
+    .getAllByRole("option")
+    .map((option) => option.getAttribute("value") ?? "");
 }
 
 describe("TacticsPage", () => {
@@ -817,5 +1031,324 @@ describe("TacticsPage", () => {
       jsonResponse({ error: { code: "http_error", message: "目录不可用" } }, 500),
     );
     await expect(getCatalog(connection)).resolves.toBeNull();
+  });
+
+  it("编辑阵型进入编辑后显示保存与放弃并可退出只读", async () => {
+    stubFetch(editableHandlers());
+    renderTacticsPage();
+    expect(await screen.findByRole("button", { name: "编辑阵型" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "保存" })).toBeNull();
+    const buttons = await startEditing();
+    expect(screen.getByRole("button", { name: "保存" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "放弃" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "编辑阵型" })).toBeNull();
+    expect(buttons).toHaveLength(11);
+    expect(buttons[0]).toHaveAttribute("aria-label", "槽位 01，GK，门将");
+    expect(buttons[3]).toHaveAttribute("aria-label", "槽位 04，DCL，中后卫");
+    expect(buttons.filter((button) => button.tabIndex === 0)).toEqual([buttons[0]]);
+    expect(buttons[1].tabIndex).toBe(-1);
+    fireEvent.click(screen.getByRole("button", { name: "放弃" }));
+    expect(screen.getByRole("button", { name: "编辑阵型" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "保存" })).toBeNull();
+  });
+
+  it("拖拽首发槽位交换 lineup 并高亮合法落点", async () => {
+    const scenario = makeNativeScenario();
+    stubFetch(editableHandlers({ scenario }));
+    renderTacticsPage();
+    await startEditing();
+    const slots = await pitchSlots();
+    fireEvent.dragStart(slots[2]);
+    fireEvent.dragOver(slots[5]);
+    expect(slots[2]).toHaveClass("is-dragging");
+    expect(slots[5]).toHaveClass("is-drop-target");
+    fireEvent.drop(slots[5]);
+    expect(slots[5]).not.toHaveClass("is-drop-target");
+    expect(screen.getByText("有未保存修改，保存或放弃后可切换草稿")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    expect(await screen.findByRole("status")).toHaveTextContent("已保存");
+    expect(patchedBodies()).toHaveLength(1);
+    expect(patchedBodies()[0]?.scenario).toEqual(withLineupSwap(scenario, 0, 2, 5));
+  });
+
+  it("同槽位拖放不交换且不标记未保存", async () => {
+    const scenario = makeNativeScenario();
+    stubFetch(editableHandlers({ scenario }));
+    renderTacticsPage();
+    await startEditing();
+    const slots = await pitchSlots();
+    fireEvent.dragStart(slots[2]);
+    fireEvent.dragOver(slots[2]);
+    expect(slots[2]).not.toHaveClass("is-drop-target");
+    fireEvent.drop(slots[2]);
+    expect(screen.queryByText("有未保存修改，保存或放弃后可切换草稿")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    expect(await screen.findByRole("status")).toHaveTextContent("已保存");
+    expect(patchedBodies()[0]?.scenario).toEqual(scenario);
+  });
+
+  it("键盘拿起槽位并交换后播报结果", async () => {
+    const scenario = makeNativeScenario();
+    stubFetch(editableHandlers({ scenario }));
+    renderTacticsPage();
+    const slots = await startEditing();
+    fireEvent.keyDown(slots[1], { key: "Enter" });
+    expect(liveRegion()).toHaveTextContent("已选择槽位 02");
+    fireEvent.keyDown(slots[4], { key: "Enter" });
+    expect(liveRegion()).toHaveTextContent("已与槽位 05 交换");
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    expect(await screen.findByRole("status")).toHaveTextContent("已保存");
+    expect(patchedBodies()[0]?.scenario).toEqual(withLineupSwap(scenario, 0, 1, 4));
+  });
+
+  it("方向键与 Home End 按坐标移动槽位焦点并维持单一 tabIndex", async () => {
+    stubFetch(editableHandlers());
+    renderTacticsPage();
+    const slots = await startEditing();
+    fireEvent.focusIn(slots[10]);
+    fireEvent.keyDown(slots[10], { key: "ArrowLeft" });
+    expect(slots[7]).toHaveFocus();
+    expect(slots[7].tabIndex).toBe(0);
+    expect(slots[10].tabIndex).toBe(-1);
+    fireEvent.keyDown(slots[7], { key: "ArrowRight" });
+    expect(slots[5]).toHaveFocus();
+    expect(slots[5].tabIndex).toBe(0);
+    fireEvent.keyDown(slots[5], { key: "Home" });
+    expect(slots[0]).toHaveFocus();
+    fireEvent.keyDown(slots[0], { key: "End" });
+    expect(slots[10]).toHaveFocus();
+    expect(slots.filter((slot) => slot.tabIndex === 0)).toEqual([slots[10]]);
+  });
+
+  it("Escape 取消拿起后再次确认只选择不交换", async () => {
+    const scenario = makeNativeScenario();
+    stubFetch(editableHandlers({ scenario }));
+    renderTacticsPage();
+    const slots = await startEditing();
+    fireEvent.keyDown(slots[1], { key: " " });
+    expect(liveRegion()).toHaveTextContent("已选择槽位 02");
+    fireEvent.keyDown(slots[1], { key: "Escape" });
+    expect(liveRegion()).toHaveTextContent("已取消选择");
+    fireEvent.keyDown(slots[4], { key: "Enter" });
+    expect(liveRegion()).toHaveTextContent("已选择槽位 05");
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    expect(await screen.findByRole("status")).toHaveTextContent("已保存");
+    expect(patchedBodies()[0]?.scenario).toEqual(scenario);
+  });
+
+  it("角色变更只写目标槽位并保留其余字段", async () => {
+    const scenario = makeNativeScenario();
+    stubFetch(editableHandlers({ scenario }));
+    renderTacticsPage();
+    const slots = await startEditing();
+    fireEvent.click(slots[3]);
+    const select = screen.getByRole("combobox", { name: "角色" });
+    expect(select).toHaveValue("CentreBack");
+    fireEvent.change(select, { target: { value: "FullBack" } });
+    expect(select).toHaveValue("FullBack");
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    expect(await screen.findByRole("status")).toHaveTextContent("已保存");
+    expect(patchedBodies()[0]?.scenario).toEqual(withNativeCellRole(scenario, 0, 0, 3, "FullBack"));
+  });
+
+  it("角色下拉按当前阶段过滤并排除未标阶段的角色", async () => {
+    stubFetch(editableHandlers());
+    renderTacticsPage();
+    const slots = await startEditing();
+    fireEvent.click(slots[0]);
+    const possessionOptions = roleOptionValues(screen.getByRole("combobox", { name: "角色" }));
+    expect(possessionOptions).toContain("Goalkeeper");
+    expect(possessionOptions).toContain("CentreForward");
+    expect(possessionOptions).not.toContain("OPGoalkeeper");
+    expect(possessionOptions).not.toContain("LegacyRole");
+    fireEvent.click(screen.getByRole("button", { name: "无球" }));
+    const outOfPossessionSelect = screen.getByRole("combobox", { name: "角色" });
+    expect(outOfPossessionSelect).toHaveValue("OPGoalkeeper");
+    const outOfPossessionOptions = roleOptionValues(outOfPossessionSelect);
+    expect(outOfPossessionOptions).toContain("OPGoalkeeper");
+    expect(outOfPossessionOptions).not.toContain("FullBack");
+    expect(outOfPossessionOptions).not.toContain("LegacyRole");
+  });
+
+  it("当前角色不在阶段选项中时仍显示为可选项", async () => {
+    const base = ROLE_PHASE_CATALOG.catalog;
+    const catalogBody = {
+      available: true,
+      catalog: {
+        ...base,
+        roles: base.roles.filter((role) => role.id !== "OPGoalkeeper"),
+      },
+    };
+    stubFetch(editableHandlers({ catalogBody }));
+    renderTacticsPage();
+    const slots = await startEditing();
+    fireEvent.click(slots[0]);
+    fireEvent.click(screen.getByRole("button", { name: "无球" }));
+    const select = screen.getByRole("combobox", { name: "角色" });
+    expect(select).toHaveValue("OPGoalkeeper");
+    expect(within(select).getByRole("option", { name: "OPGoalkeeper" })).toBeInTheDocument();
+  });
+
+  it("切换阶段与球队保留未保存的首发交换", async () => {
+    const scenario = makeNativeScenario();
+    stubFetch(editableHandlers({ scenario }));
+    renderTacticsPage();
+    const initial = await startEditing();
+    fireEvent.keyDown(initial[1], { key: "Enter" });
+    fireEvent.keyDown(initial[4], { key: "Enter" });
+    fireEvent.click(screen.getByRole("button", { name: "无球" }));
+    expect((await slotButtons())[1]).toHaveTextContent("北岸联球员 05");
+    fireEvent.click(screen.getByRole("button", { name: "客队" }));
+    expect((await slotButtons())[1]).toHaveTextContent("南港队球员 02");
+    fireEvent.click(screen.getByRole("button", { name: "主队" }));
+    expect((await slotButtons())[1]).toHaveTextContent("北岸联球员 05");
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    expect(await screen.findByRole("status")).toHaveTextContent("已保存");
+    expect(patchedBodies()[0]?.scenario).toEqual(withLineupSwap(scenario, 0, 1, 4));
+  });
+
+  it("存在未保存修改时禁用草稿切换并提示", async () => {
+    const scenario = makeNativeScenario();
+    stubFetch(
+      editableHandlers({
+        scenario,
+        items: [makeSummary(), makeSummary({ id: "draft-2", name: "草案二" })],
+        details: { "draft-2": makeDraft({ id: "draft-2", name: "草案二", scenario }) },
+      }),
+    );
+    renderTacticsPage();
+    const slots = await startEditing();
+    fireEvent.dragStart(slots[2]);
+    fireEvent.dragOver(slots[5]);
+    fireEvent.drop(slots[5]);
+    expect(screen.getByRole("combobox", { name: "选择草稿" })).toBeDisabled();
+    expect(screen.getByText("有未保存修改，保存或放弃后可切换草稿")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "放弃" }));
+    expect(screen.getByRole("combobox", { name: "选择草稿" })).toBeEnabled();
+    expect(screen.queryByText("有未保存修改，保存或放弃后可切换草稿")).toBeNull();
+    expect((await pitchSlots())[1]).toHaveTextContent("北岸联球员 02");
+    expect(patchedBodies()).toHaveLength(0);
+  });
+
+  it("保存成功后显示已保存并失效详情查询", async () => {
+    const scenario = makeNativeScenario();
+    stubFetch(editableHandlers({ scenario }));
+    const { client } = renderTacticsPage();
+    const invalidateSpy = vi.spyOn(client, "invalidateQueries");
+    const slots = await startEditing();
+    fireEvent.keyDown(slots[1], { key: "Enter" });
+    fireEvent.keyDown(slots[4], { key: "Enter" });
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    expect(await screen.findByRole("status")).toHaveTextContent("已保存");
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: ["draft", connection.url, "draft-1"],
+    });
+    expect(screen.getByRole("button", { name: "编辑阵型" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "保存" })).toBeNull();
+    expect(screen.queryByText("有未保存修改，保存或放弃后可切换草稿")).toBeNull();
+    expect(screen.getByRole("combobox", { name: "选择草稿" })).toBeEnabled();
+    expect(patchedBodies()[0]?.scenario).toEqual(withLineupSwap(scenario, 0, 1, 4));
+    await waitFor(() => expect(detailGets()).toHaveLength(2));
+  });
+
+  it("保存失败展示服务端消息并保留编辑可重试", async () => {
+    const scenario = makeNativeScenario();
+    let patchCount = 0;
+    stubFetch(
+      editableHandlers({
+        scenario,
+        onPatch: () => {
+          patchCount += 1;
+          if (patchCount === 1) {
+            return jsonResponse(
+              { error: { code: "validation_failed", message: "角色与阶段不匹配" } },
+              400,
+            );
+          }
+          return jsonResponse(makeDraft({ scenario }));
+        },
+      }),
+    );
+    renderTacticsPage();
+    const slots = await startEditing();
+    fireEvent.keyDown(slots[1], { key: "Enter" });
+    fireEvent.keyDown(slots[4], { key: "Enter" });
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("角色与阶段不匹配");
+    expect(screen.getByRole("button", { name: "保存" })).toBeEnabled();
+    expect(screen.queryByRole("button", { name: "编辑阵型" })).toBeNull();
+    expect(screen.getByRole("combobox", { name: "选择草稿" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    expect(await screen.findByRole("status")).toHaveTextContent("已保存");
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(patchCount).toBe(2);
+    expect(patchedBodies()).toHaveLength(2);
+  });
+
+  it("保存请求中禁用操作并阻止重复提交", async () => {
+    const pending = deferred<Response>();
+    stubFetch(editableHandlers({ onPatch: () => pending.promise }));
+    renderTacticsPage();
+    const slots = await startEditing();
+    fireEvent.keyDown(slots[1], { key: "Enter" });
+    fireEvent.keyDown(slots[4], { key: "Enter" });
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "保存" })).toBeDisabled());
+    expect(screen.getByRole("button", { name: "放弃" })).toBeDisabled();
+    expect(document.querySelector('[aria-busy="true"]')).not.toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    expect(patchedBodies()).toHaveLength(1);
+    pending.resolve(jsonResponse(makeDraft({ scenario: makeNativeScenario() })));
+    expect(await screen.findByRole("status")).toHaveTextContent("已保存");
+    await waitFor(() => expect(document.querySelector('[aria-busy="true"]')).toBeNull());
+    expect(patchedBodies()).toHaveLength(1);
+  });
+
+  it("引擎目录缺失时禁用角色下拉并保留降级说明", async () => {
+    stubFetch(editableHandlers({ catalogBody: CATALOG_UNAVAILABLE }));
+    renderTacticsPage();
+    await startEditing();
+    expect(screen.getByRole("combobox", { name: "角色" })).toBeDisabled();
+    expect(screen.getByText("未载入引擎目录，指令与角色显示原生编号")).toBeInTheDocument();
+  });
+
+  it("窄屏编辑槽位保持紧凑样式与可访问名称", async () => {
+    stubCompactViewport(true);
+    stubFetch(editableHandlers());
+    renderTacticsPage();
+    await startEditing();
+    const items = await pitchSlots();
+    expect(items[0]).toHaveClass("tactics-slot--compact");
+    expect(items[0]).toHaveClass("tactics-slot--editable");
+    const button = within(items[0]).getByRole("button");
+    expect(button).toHaveAttribute("aria-label", "槽位 01，GK，门将");
+    expect(within(items[0]).queryByText("门将")).toBeNull();
+  });
+
+  it("旧版 phase_plans 场景拖拽交换写回原形状", async () => {
+    const scenario = makeScenario();
+    stubFetch(editableHandlers({ scenario }));
+    renderTacticsPage();
+    const slots = await startEditing();
+    fireEvent.dragStart(slots[2]);
+    fireEvent.dragOver(slots[5]);
+    fireEvent.drop(slots[5]);
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    expect(await screen.findByRole("status")).toHaveTextContent("已保存");
+    expect(patchedBodies()[0]?.scenario).toEqual(withLineupSwap(scenario, 0, 2, 5));
+  });
+
+  it("旧版 phase_plans 场景角色变更写回对应槽位", async () => {
+    const scenario = makeScenario();
+    stubFetch(editableHandlers({ scenario }));
+    renderTacticsPage();
+    const slots = await startEditing();
+    fireEvent.click(slots[3]);
+    const select = screen.getByRole("combobox", { name: "角色" });
+    expect(select).toHaveValue("CentreBack");
+    fireEvent.change(select, { target: { value: "FullBack" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    expect(await screen.findByRole("status")).toHaveTextContent("已保存");
+    expect(patchedBodies()[0]?.scenario).toEqual(withLegacyCellRole(scenario, 0, 0, 3, "FullBack"));
   });
 });
