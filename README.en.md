@@ -164,4 +164,4 @@ The new version starts with an empty SQLite database and does not migrate older 
 
 ## License
 
-Tool code is licensed under MIT. Save reading depends on `fmsave 0.9.0` and compressed data on `backports.zstd 1.8.0`. Third-party components and font licenses are listed in [Third-party notices](THIRD_PARTY_NOTICES.md).
+Tool code is licensed under MIT. Save reading depends on `fmsave 0.12.4` and compressed data on `backports.zstd 1.8.0`. Third-party components and font licenses are listed in [Third-party notices](THIRD_PARTY_NOTICES.md).

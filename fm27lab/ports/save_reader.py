@@ -41,7 +41,10 @@ class SaveReader(Protocol):
     def read_squad(self, club_uid: int) -> list[dict[str, Any]]:
         """Return the players of one club sorted by source_uid.
 
-        Every item holds source_uid (the save's player Unique ID), name,
+        Every item holds source_uid (the save's player Unique ID, or a
+        save-unique identifier when the save reports colliding ids; players
+        that report no uid fall back to their unique id), name
+        (players whose name is unreadable get the label 未知球员 <source_uid>),
         attributes (the 69 native attributes: indices 0-14 are position ratings
         and 15-68 hidden attributes), left_foot, right_foot, position (canonical
         position name), ability (current ability), age, height_cm and, when

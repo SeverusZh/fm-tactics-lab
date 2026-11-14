@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+import tomllib
 from datetime import date
 from pathlib import Path
 from types import SimpleNamespace
@@ -116,6 +117,7 @@ LEFT_FOOT_ATTRIBUTE_INDEX = 39
 RIGHT_FOOT_ATTRIBUTE_INDEX = 40
 SAVE_DEPENDENCY_ERROR = "未安装存档读取依赖 fmsave"
 SAVE_INVALID_ERROR = "不是有效的 FM 存档"
+SAVE_UNSUPPORTED_ERROR = "存档来自暂不支持的游戏版本"
 SAVE_CHANGED_ERROR = "读取期间存档发生变化"
 PLAYER_ATTRIBUTES_ERROR = "球员属性不完整"
 _DEFAULT = object()
@@ -515,6 +517,44 @@ def test_missing_fmsave_dependency_reports_chinese_error(tmp_path: Path, monkeyp
         FmsaveReader(save_file(tmp_path)).read_info()
 
 
+def test_pinned_fmsave_supports_fm27_unverified_builds():
+    pyproject = Path(__file__).resolve().parents[2] / "pyproject.toml"
+    dependencies = tomllib.loads(pyproject.read_text(encoding="utf-8"))["project"]["dependencies"]
+    assert "fmsave==0.12.4" in dependencies
+
+
+def test_unsupported_game_reports_build_and_update_hint(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    error = fmsave.UnsupportedGameError(
+        "FM27: SaveSummaryLayout in 'save_game_summary' has no supported layout for build 27.0.2+9999999, schema 32."
+    )
+    install_open_error(monkeypatch, error)
+    with pytest.raises(ValueError) as caught:
+        FmsaveReader(save_file(tmp_path)).read_info()
+    assert str(caught.value) == "存档来自暂不支持的游戏版本（27.0.2+9999999），请更新应用后再试"
+
+
+def test_unsupported_game_without_build_reports_update_hint(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    install_open_error(monkeypatch, fmsave.UnsupportedGameError("不支持的 FM 版本"))
+    with pytest.raises(ValueError) as caught:
+        FmsaveReader(save_file(tmp_path)).read_info()
+    assert str(caught.value) == "存档来自暂不支持的游戏版本，请更新应用后再试"
+
+
+def test_read_failure_maps_unsupported_game(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    error = fmsave.UnsupportedGameError("no supported layout for build 27.0.2+9999999")
+    install_save(monkeypatch, FakeSave(read_error=error))
+    with pytest.raises(ValueError) as caught:
+        FmsaveReader(save_file(tmp_path)).read_clubs()
+    assert str(caught.value) == "存档来自暂不支持的游戏版本（27.0.2+9999999），请更新应用后再试"
+
+
+def test_read_failure_maps_save_changed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    install_save(monkeypatch, FakeSave(read_error=fmsave.SaveChangedError("读取期间存档发生变化")))
+    with pytest.raises(ValueError) as caught:
+        FmsaveReader(save_file(tmp_path)).read_clubs()
+    assert str(caught.value) == SAVE_CHANGED_ERROR
+
+
 @pytest.mark.parametrize(
     "error",
     [
@@ -651,6 +691,63 @@ def test_read_squad_ignores_other_clubs_before_mapping(tmp_path: Path, monkeypat
     squad = FmsaveReader(save_file(tmp_path)).read_squad(7)
     assert [entry["source_uid"] for entry in squad] == [505]
 
+def test_read_squad_disambiguates_unique_id_matching_another_uid(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    players = [
+        make_player(10, unique_id=20, name="甲", club_uid=7),
+        make_player(20, unique_id=None, name="乙", club_uid=7),
+    ]
+    install_save(monkeypatch, FakeSave(players=players))
+    squad = FmsaveReader(save_file(tmp_path)).read_squad(7)
+    assert [(entry["name"], entry["source_uid"]) for entry in squad] == [("甲", 10), ("乙", 20)]
+
+
+def test_read_squad_disambiguates_repeated_unique_ids(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    players = [
+        make_player(10, unique_id=99, name="甲", club_uid=7),
+        make_player(20, unique_id=99, name="乙", club_uid=7),
+    ]
+    install_save(monkeypatch, FakeSave(players=players))
+    squad = FmsaveReader(save_file(tmp_path)).read_squad(7)
+    assert [(entry["name"], entry["source_uid"]) for entry in squad] == [("甲", 10), ("乙", 20)]
+
+
+def test_read_squad_moves_colliding_player_past_taken_uids(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    players = [
+        make_player(10, unique_id=20, name="甲", club_uid=7),
+        make_player(20, unique_id=None, name="乙", club_uid=7),
+        make_player(50, unique_id=10, name="丙", club_uid=7),
+    ]
+    install_save(monkeypatch, FakeSave(players=players))
+    squad = FmsaveReader(save_file(tmp_path)).read_squad(7)
+    assert {entry["name"]: entry["source_uid"] for entry in squad} == {"甲": 51, "乙": 20, "丙": 10}
+
+
+def test_read_selection_uses_disambiguated_source_uids(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    players = [
+        make_player(10, unique_id=20, name="甲", club_uid=7),
+        make_player(20, unique_id=None, name="乙", club_uid=7),
+    ]
+    rows = [
+        selection_row(7, 10, substitute=False, slot=0),
+        selection_row(7, 20, substitute=True, slot=0),
+    ]
+    save = FakeSave(players=players, selections=rows)
+    assert selection_of(tmp_path, monkeypatch, save) == {
+        "club_uid": 7,
+        "team_id": 100,
+        "team_slot": 0,
+        "lineup": [10],
+        "substitutes": [20],
+    }
+
 
 def test_read_squad_derives_display_foot_from_raw_value(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     player = make_player(5, unique_id=505, club_uid=7, left_foot=None, right_foot=None)
@@ -658,3 +755,74 @@ def test_read_squad_derives_display_foot_from_raw_value(tmp_path: Path, monkeypa
     entry = FmsaveReader(save_file(tmp_path)).read_squad(7)[0]
     assert entry["left_foot"] == 19
     assert entry["right_foot"] == 12
+
+
+def test_read_squad_replaces_missing_name_with_uid_label(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    player = make_player(10, unique_id=None, club_uid=7)
+    player.name = None
+    install_save(monkeypatch, FakeSave(players=[player]))
+    squad = FmsaveReader(save_file(tmp_path)).read_squad(7)
+    assert squad[0]["name"] == "未知球员 10"
+
+
+def test_read_squad_replaces_blank_name_with_uid_label(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    player = make_player(10, unique_id=None, name="   ", club_uid=7)
+    install_save(monkeypatch, FakeSave(players=[player]))
+    squad = FmsaveReader(save_file(tmp_path)).read_squad(7)
+    assert squad[0]["name"] == "未知球员 10"
+
+
+def test_read_squad_keeps_readable_name_verbatim(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    player = make_player(10, unique_id=None, name=" 张三 ", club_uid=7)
+    install_save(monkeypatch, FakeSave(players=[player]))
+    squad = FmsaveReader(save_file(tmp_path)).read_squad(7)
+    assert squad[0]["name"] == " 张三 "
+
+
+def test_read_squad_uses_global_ids_when_clubs_collide(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    players = [
+        make_player(10, unique_id=20, name="甲", club_uid=7),
+        make_player(20, unique_id=None, name="乙", club_uid=8),
+    ]
+    install_save(monkeypatch, FakeSave(players=players))
+    reader = FmsaveReader(save_file(tmp_path))
+    assert [entry["source_uid"] for entry in reader.read_squad(7)] == [10]
+    assert [entry["source_uid"] for entry in reader.read_squad(8)] == [20]
+
+
+
+def test_read_squad_labels_placeholder_with_resolved_identifier(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    unnamed = make_player(10, unique_id=20, club_uid=7)
+    unnamed.name = None
+    players = [
+        unnamed,
+        make_player(20, unique_id=None, name="乙", club_uid=7),
+        make_player(50, unique_id=10, name="丙", club_uid=7),
+    ]
+    install_save(monkeypatch, FakeSave(players=players))
+    squad = FmsaveReader(save_file(tmp_path)).read_squad(7)
+    assert {entry["source_uid"]: entry["name"] for entry in squad} == {
+        10: "丙",
+        20: "乙",
+        51: "未知球员 51",
+    }
+
+
+def test_read_squad_uses_unique_id_when_uid_is_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    player = make_player(10, unique_id=30, name="甲", club_uid=7)
+    player.uid = None
+    install_save(monkeypatch, FakeSave(players=[player]))
+    squad = FmsaveReader(save_file(tmp_path)).read_squad(7)
+    assert [entry["source_uid"] for entry in squad] == [30]

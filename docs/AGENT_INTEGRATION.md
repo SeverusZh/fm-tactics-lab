@@ -627,7 +627,7 @@ python -m fm27lab --data-dir /absolute/path/data jobs runs <job_id> --limit 50
 | 接口版本 | fm27lab/v2 | fm27lab/__init__.py:4 |
 | 发现文件 schema | 1 | fm27lab/sidecar.py:19-30 |
 | Python | 3.12 | pyproject.toml |
-| 存档读取库 | fmsave 0.9.0 | pyproject.toml |
+| 存档读取库 | fmsave 0.12.4 | pyproject.toml |
 | MCP 协议 | 2024-11-05 | fm27lab/interfaces/mcp/protocol.py:8 |
 | 桌面壳 | Tauri 2 | src-tauri/tauri.conf.json |
 

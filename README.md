@@ -164,4 +164,4 @@ docs/       开发、接口、验证与一致性文档
 
 ## 许可
 
-工具代码采用 MIT 许可证。存档读取依赖 `fmsave 0.9.0`，压缩数据依赖 `backports.zstd 1.8.0`。第三方组件与字体许可见 [第三方说明](THIRD_PARTY_NOTICES.md)。
+工具代码采用 MIT 许可证。存档读取依赖 `fmsave 0.12.4`，压缩数据依赖 `backports.zstd 1.8.0`。第三方组件与字体许可见 [第三方说明](THIRD_PARTY_NOTICES.md)。

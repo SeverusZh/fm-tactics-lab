@@ -6,6 +6,8 @@ save reader dependency is absent; only reading a save then fails.
 
 from __future__ import annotations
 
+import re
+from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
 from datetime import date
 from pathlib import Path
@@ -13,6 +15,7 @@ from typing import Any
 
 SAVE_DEPENDENCY_ERROR = "未安装存档读取依赖 fmsave"
 SAVE_INVALID_ERROR = "不是有效的 FM 存档"
+SAVE_UNSUPPORTED_ERROR = "存档来自暂不支持的游戏版本"
 SAVE_CHANGED_ERROR = "读取期间存档发生变化"
 PLAYER_ATTRIBUTES_ERROR = "球员属性不完整"
 
@@ -128,6 +131,24 @@ def _load_fmsave() -> Any:
     return fmsave
 
 
+_UNSUPPORTED_BUILD = re.compile(r"build ([0-9][0-9A-Za-z.+]*)")
+
+
+def _unsupported_error(error: Exception) -> ValueError:
+    match = _UNSUPPORTED_BUILD.search(str(error))
+    if match is None:
+        return ValueError(f"{SAVE_UNSUPPORTED_ERROR}，请更新应用后再试")
+    return ValueError(f"{SAVE_UNSUPPORTED_ERROR}（{match.group(1)}），请更新应用后再试")
+
+
+def _reader_error(fmsave: Any, error: Exception) -> ValueError:
+    if isinstance(error, fmsave.SaveChangedError):
+        return ValueError(SAVE_CHANGED_ERROR)
+    if isinstance(error, fmsave.UnsupportedGameError):
+        return _unsupported_error(error)
+    return ValueError(SAVE_INVALID_ERROR)
+
+
 def _field(source: Any, name: str) -> Any:
     if source is _MISSING:
         return _MISSING
@@ -190,15 +211,16 @@ def _current_ability(player: Any) -> int | None:
     return None if ability is _MISSING or ability is None else _integer(ability, "current")
 
 
-def _player_entry(player: Any) -> dict[str, Any]:
+def _player_entry(player: Any, source_uid: int | None) -> dict[str, Any]:
     attributes = _attribute_values(player)
-    unique_id = _integer(player, "unique_id")
-    source_uid = unique_id if unique_id is not None else _integer(player, "uid")
     if source_uid is None:
         raise ValueError(SAVE_INVALID_ERROR)
+    name = _text(player, "name")
+    if name is None or not name.strip():
+        name = f"未知球员 {source_uid}"
     entry: dict[str, Any] = {
         "source_uid": source_uid,
-        "name": _text(player, "name") or "",
+        "name": name,
         "attributes": attributes,
         "left_foot": _display_foot(player, "left_foot", attributes[LEFT_FOOT_ATTRIBUTE_INDEX]),
         "right_foot": _display_foot(player, "right_foot", attributes[RIGHT_FOOT_ATTRIBUTE_INDEX]),
@@ -256,20 +278,54 @@ def _clubs(save: Any) -> list[dict[str, Any]]:
     return sorted((_club(entry) for entry in save.clubs()), key=lambda item: item["uid"])
 
 
+def _source_uid_map(players: Sequence[Any]) -> dict[int, int]:
+    """Map every player uid onto a save-unique source_uid.
+
+    Unverified builds can report a unique id that collides with another
+    player's uid; colliding players fall back to their uid and then to a fresh
+    identifier above every player uid and unique id in the save.
+    """
+    pairs = [(_integer(player, "uid"), _integer(player, "unique_id")) for player in players]
+    primaries = [unique_id if unique_id is not None else uid for uid, unique_id in pairs]
+    counts = Counter(value for value in primaries if value is not None)
+    mapping: dict[int, int] = {}
+    used = {value for value, count in counts.items() if count == 1}
+    known = [value for value in primaries if value is not None]
+    known += [uid for uid, _ in pairs if uid is not None]
+    ceiling = max(known, default=0) + 1
+    for (uid, _), primary in zip(pairs, primaries, strict=True):
+        if uid is None:
+            continue
+        if primary is not None and counts[primary] == 1:
+            mapping[uid] = primary
+            continue
+        if uid not in used:
+            mapping[uid] = uid
+            used.add(uid)
+            continue
+        while ceiling in used:
+            ceiling += 1
+        mapping[uid] = ceiling
+        used.add(ceiling)
+        ceiling += 1
+    return mapping
+
+
 def _squad(save: Any, club_uid: int) -> list[dict[str, Any]]:
-    players = [_player_entry(player) for player in save.players() if _integer(player, "club_uid") == club_uid]
-    return sorted(players, key=lambda entry: entry["source_uid"])
+    players = save.players()
+    mapping = _source_uid_map(players)
+    entries: list[dict[str, Any]] = []
+    for player in players:
+        if _integer(player, "club_uid") != club_uid:
+            continue
+        uid = _integer(player, "uid")
+        identifier = mapping.get(uid) if uid is not None else _integer(player, "unique_id")
+        entries.append(_player_entry(player, identifier))
+    return sorted(entries, key=lambda entry: entry["source_uid"])
 
 
 def _player_index(save: Any) -> dict[int, int]:
-    index: dict[int, int] = {}
-    for player in save.players():
-        uid = _integer(player, "uid")
-        if uid is None:
-            continue
-        unique_id = _integer(player, "unique_id")
-        index[uid] = uid if unique_id is None else unique_id
-    return index
+    return _source_uid_map(save.players())
 
 
 def _starter_flag(entry: Any) -> bool | None:
@@ -407,27 +463,18 @@ class FmsaveReader:
         try:
             handle = fmsave.open(self._path)
         except Exception as error:
-            raise ValueError(SAVE_INVALID_ERROR) from error
+            raise _reader_error(fmsave, error) from error
         try:
             with handle as save:
-                return self._translate(read, save)
+                return read(save)
         except ValueError:
             raise
         except Exception as error:
-            raise ValueError(SAVE_INVALID_ERROR) from error
+            raise _reader_error(fmsave, error) from error
         finally:
             after = self._signature(SAVE_CHANGED_ERROR)
             if after != before:
                 raise ValueError(SAVE_CHANGED_ERROR)
-
-    @staticmethod
-    def _translate(read: Callable[[Any], Any], save: Any) -> Any:
-        try:
-            return read(save)
-        except ValueError:
-            raise
-        except Exception as error:
-            raise ValueError(SAVE_INVALID_ERROR) from error
 
     def _signature(self, message: str) -> tuple[int, int]:
         try:
