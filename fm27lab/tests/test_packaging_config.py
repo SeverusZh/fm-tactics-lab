@@ -31,3 +31,6 @@ def test_ci_verifies_installer_payload_layout():
     workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
     assert "sidecar/_internal" in workflow
     assert "7-Zip" in workflow
+    assert any(
+        "Test-Path $installedInternal" in line for line in workflow.splitlines()
+    )
