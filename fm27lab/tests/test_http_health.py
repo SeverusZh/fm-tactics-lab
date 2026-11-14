@@ -126,6 +126,7 @@ def test_cors_and_origin_enforcement(tmp_path: Path):
     allowed = client.get("/api/health", headers={"Origin": "tauri://localhost"})
     assert allowed.status_code == 200
     assert allowed.headers["access-control-allow-origin"] == "tauri://localhost"
+    assert "access-control-allow-credentials" not in allowed.headers
     dev_origin = client.get("/api/health", headers={"Origin": "http://localhost:1420"})
     assert dev_origin.status_code == 403
     assert dev_origin.json()["error"]["code"] == "forbidden_origin"

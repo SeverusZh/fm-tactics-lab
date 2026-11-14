@@ -17,6 +17,8 @@ __pycache__/
 *.fm
 *.fmf
 *.jsonl
+*.db
+endpoint.json
 /src/tactics_ui/catalog.json
 engine_compat_profile.h
 engine_compat_profile.json

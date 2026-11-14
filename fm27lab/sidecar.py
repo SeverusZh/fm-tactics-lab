@@ -35,15 +35,17 @@ def write_endpoint(settings: Settings, port: int) -> None:
     target = settings.endpoint_path
     temporary = target.with_name(target.name + ".tmp")
     payload = endpoint_payload(settings, port)
-    descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
-        json.dump(payload, stream, ensure_ascii=False, indent=2)
-    os.replace(temporary, target)
+    try:
+        descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+            json.dump(payload, stream, ensure_ascii=False, indent=2)
+        os.replace(temporary, target)
+    finally:
+        temporary.unlink(missing_ok=True)
     try:
         restrict_permissions(target)
     except Exception:
         target.unlink(missing_ok=True)
-        temporary.unlink(missing_ok=True)
         raise
 
 

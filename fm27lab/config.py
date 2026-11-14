@@ -11,6 +11,12 @@ import fm27lab
 LOOPBACK_HOSTS = {"127.0.0.1", "localhost"}
 
 
+def _restrict_directory(path: Path) -> None:
+    if os.name == "nt":
+        return
+    path.chmod(0o700)
+
+
 def default_data_dir() -> Path:
     local = os.environ.get("LOCALAPPDATA")
     if local:
@@ -100,3 +106,5 @@ class Settings:
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.endpoint_path.parent.mkdir(parents=True, exist_ok=True)
         self.exports_dir.mkdir(parents=True, exist_ok=True)
+        for directory in (self.data_dir, self.endpoint_path.parent, self.exports_dir):
+            _restrict_directory(directory)
