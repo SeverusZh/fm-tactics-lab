@@ -240,7 +240,7 @@ def _player_order(players: Any, base_players: Sequence[Mapping[str, Any]]) -> li
     order: list[int] = []
     for player in players:
         native = player.get("native_id") if isinstance(player, Mapping) else None
-        if native is None or native not in positions:
+        if type(native) is not int or native not in positions:
             raise ValueError("球员顺序或标识不匹配")
         order.append(positions[native])
     if sorted(order) != list(range(len(order))):
@@ -257,6 +257,15 @@ def _remap_indices(values: Any, order: Sequence[int]) -> Any:
     ]
 
 
+def _squad_size(team: Mapping[str, Any], order: Sequence[int]) -> int:
+    if "roster_size" not in team:
+        return len(order)
+    players = team.get("players")
+    if not isinstance(players, list) or len(players) < 11:
+        raise ValueError("名单长度不匹配")
+    return integer(team.get("roster_size"), 11, len(players), "比赛名单人数")
+
+
 def _validate_team(
     side: int,
     source: Mapping[str, Any],
@@ -264,6 +273,7 @@ def _validate_team(
     assets: ScenarioAssets,
     *,
     order: Sequence[int],
+    opponent_squad: int,
 ) -> dict[str, Any]:
     normalized = copy.deepcopy(base)
     normalized["name"] = str(source.get("name", base["name"]))[:40]
@@ -292,6 +302,8 @@ def _validate_team(
     if not isinstance(players, list):
         raise ValueError("名单长度不匹配")
     if not roster_key and len(order) != len(base["players"]):
+        raise ValueError("名单长度不匹配")
+    if roster_key and len(players) < 11:
         raise ValueError("名单长度不匹配")
     if roster_key:
         roster_size = integer(requested_roster, 11, len(players), "比赛名单人数")
@@ -337,12 +349,12 @@ def _validate_team(
     )
     if (
         not isinstance(captains, list)
-        or len(captains) > len(base["players"])
+        or len(captains) > roster_size
         or len(set(captains)) != len(captains)
     ):
         raise ValueError("队长优先顺序无效")
     normalized["captains"] = [
-        integer(slot, 0, len(base["players"]) - 1, "队长") for slot in captains
+        integer(slot, 0, roster_size - 1, "队长") for slot in captains
     ]
     setpieces_source = source.get("setpieces")
     if setpieces_source is None:
@@ -357,7 +369,7 @@ def _validate_team(
     normalized["setpieces"] = setpieces.normalize(
         setpieces_source,
         side,
-        len(base["players"]),
+        roster_size,
         enums=assets.setpiece_enums,
         default_value=base["setpieces"],
     )
@@ -372,19 +384,22 @@ def _validate_team(
             values = _remap_indices(values, order)
         if (
             not isinstance(values, list)
-            or len(values) > len(base["players"])
+            or len(values) > roster_size
             or any(type(value) is not int for value in values)
             or len(set(values)) != len(values)
         ):
             raise ValueError("定位球主罚顺序无效")
         normalized_takers[key] = [
-            integer(value, 0, len(base["players"]) - 1, "主罚球员") for value in values
+            integer(value, 0, roster_size - 1, "主罚球员") for value in values
         ]
     normalized["takers"] = normalized_takers
     opposition = source.get("opposition", base["opposition"])
     rows = opposition.get("players") if isinstance(opposition, Mapping) else None
     if not isinstance(rows, list) or len(rows) != len(base["opposition"]["players"]):
         raise ValueError("针对性指令的对方名单长度不符")
+    for index, row in enumerate(rows):
+        if index >= opponent_squad and row != base["opposition"]["players"][index]:
+            raise ValueError("针对性指令只能设置进入比赛名单的对方球员")
     position_rows = opposition.get("positions") if isinstance(opposition, Mapping) else None
     if not isinstance(position_rows, Mapping) or set(assets.positions) - set(position_rows):
         raise ValueError("针对性指令的对方位置数据不符")
@@ -435,7 +450,7 @@ def _validate_team(
                 cell_instructions[str(group["id"])] = value
             normalized_cell["instructions"] = cell_instructions
             target = integer(cell.get("target_player"), 0, 255, "盯防球员")
-            if target != 255 and target >= len(assets.default_teams[1 - side]["players"]):
+            if target != 255 and target >= opponent_squad:
                 raise ValueError("盯防球员不存在")
             normalized_cell["target_player"] = target
             if cell.get("target_position") not in [0] + [
@@ -471,16 +486,26 @@ def validate_scenario(assets: ScenarioAssets, data: Any) -> dict[str, Any]:
         "fixture": FIXTURE,
         "teams": [],
     }
+    orders: list[list[int]] = []
     for side, team in enumerate(teams):
         if not isinstance(team, Mapping):
             raise ValueError("必须包含两支球队")
         try:
-            order = _player_order(team.get("players"), assets.default_teams[side]["players"])
+            orders.append(
+                _player_order(team.get("players"), assets.default_teams[side]["players"])
+            )
         except (KeyError, IndexError, TypeError):
             raise ValueError("方案格式或比赛样本不匹配") from None
+    squads = [_squad_size(teams[side], orders[side]) for side in range(2)]
+    for side, team in enumerate(teams):
         try:
             normalized_team = _validate_team(
-                side, team, assets.default_teams[side], assets, order=order
+                side,
+                team,
+                assets.default_teams[side],
+                assets,
+                order=orders[side],
+                opponent_squad=squads[1 - side],
             )
         except (KeyError, IndexError, TypeError):
             raise ValueError("方案格式或比赛样本不匹配") from None

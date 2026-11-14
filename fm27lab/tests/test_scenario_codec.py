@@ -707,6 +707,8 @@ def test_invalid_scenarios_raise_chinese_errors(assets):
 
 
 def extend_away_squad(assets) -> None:
+    if len(assets.default_teams[1]["players"]) > 23:
+        return
     assets.default_teams[1]["players"].append(
         {
             "name": "客队球员 24",
@@ -714,6 +716,9 @@ def extend_away_squad(assets) -> None:
             "attributes": [10] * 15 + [50] * 54,
             "native_profile": dict(CONTROLLED_START),
         }
+    )
+    assets.default_teams[0]["opposition"]["players"].append(
+        {"press": 0, "mark": 0, "tackle": 0, "foot": 0, "personal": True}
     )
 
 
@@ -742,5 +747,66 @@ def test_roster_must_map_onto_the_leading_match_squad(assets):
     players = scenario["teams"][1]["players"]
     scenario["teams"][1]["players"] = [player for index, player in enumerate(players) if index != 22]
     scenario["teams"][1]["roster_size"] = 23
+    with pytest.raises(ValueError, match="球员顺序或标识不匹配"):
+        encode_scenario(assets, scenario)
+
+
+def shorten_away_squad(assets) -> dict:
+    extend_away_squad(assets)
+    scenario = make_scenario(assets)
+    scenario["teams"][1]["players"] = scenario["teams"][1]["players"][:23]
+    scenario["teams"][1]["roster_size"] = 23
+    return scenario
+
+
+def test_short_squad_bounds_captains_and_takers(assets):
+    scenario = shorten_away_squad(assets)
+    scenario["teams"][1]["captains"] = [23]
+    with pytest.raises(ValueError, match="队长"):
+        encode_scenario(assets, scenario)
+    scenario = shorten_away_squad(assets)
+    scenario["teams"][1]["takers"]["penalties"] = [23]
+    with pytest.raises(ValueError, match="主罚球员"):
+        encode_scenario(assets, scenario)
+
+
+def test_short_squad_bounds_setpiece_priorities(assets):
+    scenario = shorten_away_squad(assets)
+    scenario["teams"][1]["setpieces"]["role_priorities"]["0"] = [23]
+    with pytest.raises(ValueError, match="定位球设置数值无效"):
+        encode_scenario(assets, scenario)
+
+
+def test_short_squad_rejects_unreachable_opposition_rows(assets):
+    scenario = shorten_away_squad(assets)
+    scenario["teams"][0]["opposition"]["players"][23]["press"] = 1
+    with pytest.raises(ValueError, match="针对性指令只能设置进入比赛名单的对方球员"):
+        encode_scenario(assets, scenario)
+
+
+def test_marking_target_must_exist_in_the_opponent_squad(assets):
+    scenario = shorten_away_squad(assets)
+    scenario["teams"][0]["phases"][0][0]["target_player"] = 23
+    with pytest.raises(ValueError, match="盯防球员不存在"):
+        encode_scenario(assets, scenario)
+    scenario = shorten_away_squad(assets)
+    scenario["teams"][0]["phases"][0][0]["target_player"] = 22
+    assert (7, 0, 0, 0, 22) in absolute_records(assets, scenario)
+
+
+def test_empty_roster_is_rejected(assets):
+    scenario = make_scenario(assets)
+    scenario["teams"][1]["players"] = []
+    scenario["teams"][1]["roster_size"] = 23
+    with pytest.raises(ValueError, match="名单长度不匹配"):
+        encode_scenario(assets, scenario)
+
+
+def test_boolean_native_ids_are_rejected(assets):
+    for side in range(2):
+        for index, player in enumerate(assets.default_teams[side]["players"]):
+            player["native_id"] = index
+    scenario = make_scenario(assets)
+    scenario["teams"][0]["players"][1]["native_id"] = True
     with pytest.raises(ValueError, match="球员顺序或标识不匹配"):
         encode_scenario(assets, scenario)
