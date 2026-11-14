@@ -53,6 +53,7 @@ const ALIASES: AliasCase[] = [
     importAs: "GeneratedSaveFileImportInput",
   },
   { name: "SaveFileImportResult", generated: "SaveFileImportOutput" },
+  { name: "FmfFileImportInput", generated: "FmfFileImportInput", importAs: "GeneratedFmfFileImportInput" },
   { name: "ImportedClub", generated: "ImportedClubOutput" },
   { name: "RosterApplyInput", generated: "RosterApplyInput", importAs: "GeneratedRosterApplyInput" },
   { name: "RosterApplyResult", generated: "RosterApplyOutput" },
@@ -146,9 +147,9 @@ describe("api.ts 类型映射", () => {
   it("顶部摘要与映射表计数一致", () => {
     const summary = `// API 类型映射：生成别名 ${ALIASES.length} 项；保留手写类型 ${RETAINED.length} 项；字段派生 ${DERIVED.length} 项；ApiError 类保留；明细见 api-types.test.ts。`;
     expect(apiSource.split("\n")[0]).toBe(summary);
-    expect(mappedNames()).toHaveLength(67);
-    expect(new Set(mappedNames()).size).toBe(67);
-    expect(ALIASES).toHaveLength(40);
+    expect(mappedNames()).toHaveLength(68);
+    expect(new Set(mappedNames()).size).toBe(68);
+    expect(ALIASES).toHaveLength(41);
     expect(RETAINED).toHaveLength(25);
     expect(DERIVED).toHaveLength(2);
   });

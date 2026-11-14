@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { App } from "../App";
@@ -20,6 +20,23 @@ import {
   type Save,
 } from "../lib/api";
 import { LibraryPage } from "./LibraryPage";
+
+const { isDesktopShellMock, chooseLocalFileMock } = vi.hoisted(() => ({
+  isDesktopShellMock: vi.fn(),
+  chooseLocalFileMock: vi.fn(),
+}));
+
+vi.mock("../lib/file-dialog", () => ({
+  isDesktopShell: isDesktopShellMock,
+  chooseLocalFile: chooseLocalFileMock,
+}));
+
+beforeEach(() => {
+  isDesktopShellMock.mockReset();
+  isDesktopShellMock.mockReturnValue(false);
+  chooseLocalFileMock.mockReset();
+  chooseLocalFileMock.mockResolvedValue(null);
+});
 
 const connection = { url: "http://127.0.0.1:43210", token: "test-token", api: "fm27lab/v2" };
 const health: Health = {
@@ -96,21 +113,36 @@ function makeList(items: Save[], total = items.length, nextOffset: number | null
   return { items, total, next_offset: nextOffset };
 }
 
-function renderLibraryPage(activeConnection: typeof connection | null = connection) {
+function TacticsPlaceholder() {
+  const location = useLocation();
+  return (
+    <div data-testid="tactics-placeholder">{`${location.pathname}${location.search}`}</div>
+  );
+}
+
+function renderLibraryPage(
+  activeConnection: typeof connection | null = connection,
+  initialEntries: string[] = ["/library"],
+) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={client}>
-      <AppContext.Provider
-        value={{
-          connection: activeConnection,
-          health,
-          connectionError: null,
-          refreshing: false,
-          refresh: vi.fn(),
-        }}
-      >
-        <LibraryPage />
-      </AppContext.Provider>
+      <MemoryRouter initialEntries={initialEntries}>
+        <AppContext.Provider
+          value={{
+            connection: activeConnection,
+            health,
+            connectionError: null,
+            refreshing: false,
+            refresh: vi.fn(),
+          }}
+        >
+          <Routes>
+            <Route path="/library" element={<LibraryPage />} />
+            <Route path="/tactics" element={<TacticsPlaceholder />} />
+          </Routes>
+        </AppContext.Provider>
+      </MemoryRouter>
     </QueryClientProvider>,
   );
 }
@@ -155,7 +187,7 @@ describe("LibraryPage", () => {
     expect(await screen.findByText("尚未导入存档")).toBeInTheDocument();
     expect(
       screen.getByText(
-        "这是唯一的存档导入入口。导入后可以浏览联赛战术、生成真实 AI 计划、导出 FMF 或加入客队战术池。",
+        "这是唯一的存档导入入口。导入后可以浏览联赛战术、生成真实 AI 计划、导出 FMF 或加入客队战术池。没有存档也可以导入 FMF 战术文件使用战术板与固定对手实验。",
       ),
     ).toBeInTheDocument();
   });
@@ -998,5 +1030,495 @@ describe("存档文件导入与阵容 API 客户端", () => {
     await expect(
       importSaveFile(connection, { source_path: "/saves/a.fm", replace: false }),
     ).rejects.toMatchObject({ status: 409, code: "conflict", message: "存档内容重复" });
+  });
+});
+
+function fmfDraft(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "draft-fmf",
+    name: "导入战术",
+    scenario: { schema: 4, teams: [] },
+    source: { kind: "fmf" },
+    created_at: "2026-11-13T10:00:00+00:00",
+    updated_at: "2026-11-13T10:00:00+00:00",
+    ...overrides,
+  };
+}
+
+const SAVE_DIALOG_REQUEST = {
+  title: "选择存档文件",
+  filters: [{ name: "FM 存档", extensions: ["fm"] }],
+};
+
+const FMF_DIALOG_REQUEST = {
+  title: "选择 FMF 战术文件",
+  filters: [{ name: "FMF 战术文件", extensions: ["fmf"] }],
+};
+
+function openSaveForm(): HTMLElement {
+  fireEvent.click(screen.getByRole("button", { name: "导入存档文件" }));
+  return screen.getByRole("form", { name: "导入存档文件" });
+}
+
+function openFmfForm(): HTMLElement {
+  fireEvent.click(screen.getByRole("button", { name: "导入 FMF 战术文件" }));
+  return screen.getByRole("form", { name: "导入 FMF 战术文件" });
+}
+
+describe("存档导入桌面选择", () => {
+  beforeEach(() => {
+    fetchMock.mockReset();
+    vi.stubGlobal("fetch", fetchMock);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it("工具栏按钮在桌面环境拉起存档选择器并预填路径", async () => {
+    stubFetch(() => jsonResponse(makeList([])));
+    isDesktopShellMock.mockReturnValue(true);
+    chooseLocalFileMock.mockResolvedValue("/saves/desktop-pick.fm");
+    renderLibraryPage();
+    await screen.findByText("尚未导入存档");
+
+    const form = openSaveForm();
+
+    expect(chooseLocalFileMock).toHaveBeenCalledWith(SAVE_DIALOG_REQUEST);
+    await waitFor(() =>
+      expect(within(form).getByLabelText("存档文件路径")).toHaveValue("/saves/desktop-pick.fm"),
+    );
+  });
+
+  it("取消选择时保留表单且路径为空", async () => {
+    stubFetch(() => jsonResponse(makeList([])));
+    isDesktopShellMock.mockReturnValue(true);
+    chooseLocalFileMock.mockResolvedValue(null);
+    renderLibraryPage();
+    await screen.findByText("尚未导入存档");
+
+    const form = openSaveForm();
+
+    await waitFor(() => expect(chooseLocalFileMock).toHaveBeenCalledTimes(1));
+    expect(within(form).getByLabelText("存档文件路径")).toHaveValue("");
+    expect(screen.getByRole("form", { name: "导入存档文件" })).toBeInTheDocument();
+  });
+
+  it("选择器失败时保留表单并展示错误", async () => {
+    stubFetch(() => jsonResponse(makeList([])));
+    isDesktopShellMock.mockReturnValue(true);
+    chooseLocalFileMock.mockRejectedValue(new Error("dialog failed"));
+    renderLibraryPage();
+    await screen.findByText("尚未导入存档");
+
+    openSaveForm();
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("dialog failed");
+    expect(screen.getByRole("form", { name: "导入存档文件" })).toBeInTheDocument();
+  });
+
+  it("表单浏览按钮选择文件后填入路径", async () => {
+    stubFetch(() => jsonResponse(makeList([])));
+    isDesktopShellMock.mockReturnValue(true);
+    chooseLocalFileMock
+      .mockResolvedValueOnce("/saves/toolbar-pick.fm")
+      .mockResolvedValueOnce("/saves/browse-pick.fm");
+    renderLibraryPage();
+    await screen.findByText("尚未导入存档");
+
+    const form = openSaveForm();
+    await waitFor(() =>
+      expect(within(form).getByLabelText("存档文件路径")).toHaveValue("/saves/toolbar-pick.fm"),
+    );
+
+    fireEvent.click(within(form).getByRole("button", { name: "浏览…" }));
+
+    await waitFor(() =>
+      expect(within(form).getByLabelText("存档文件路径")).toHaveValue("/saves/browse-pick.fm"),
+    );
+    expect(chooseLocalFileMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("提交体使用 trim 后的路径", async () => {
+    let posted: unknown = null;
+    stubFetch((_url, init) => {
+      if (init.method === "POST") {
+        posted = JSON.parse(String(init.body));
+        return jsonResponse(FILE_IMPORT_RESULT, 201);
+      }
+      return jsonResponse(makeList([]));
+    });
+    renderLibraryPage();
+    await screen.findByText("尚未导入存档");
+
+    const form = openSaveForm();
+    fireEvent.change(within(form).getByLabelText("存档文件路径"), {
+      target: { value: "  /saves/trimmed.fm  " },
+    });
+    fireEvent.click(within(form).getByRole("button", { name: "导入文件" }));
+
+    await waitFor(() =>
+      expect(posted).toEqual({ source_path: "/saves/trimmed.fm", replace: false }),
+    );
+  });
+
+  it("非桌面环境不渲染浏览按钮", async () => {
+    stubFetch(() => jsonResponse(makeList([])));
+    renderLibraryPage();
+    await screen.findByText("尚未导入存档");
+
+    const form = openSaveForm();
+
+    expect(within(form).queryByRole("button", { name: "浏览…" })).not.toBeInTheDocument();
+    expect(chooseLocalFileMock).not.toHaveBeenCalled();
+  });
+
+  it("存档导入请求中禁用浏览按钮", async () => {
+    const pending = deferred<Response>();
+    stubFetch((_url, init) =>
+      init.method === "POST" ? pending.promise : jsonResponse(makeList([])),
+    );
+    isDesktopShellMock.mockReturnValue(true);
+    chooseLocalFileMock.mockResolvedValue(null);
+    renderLibraryPage();
+    await screen.findByText("尚未导入存档");
+
+    const form = openSaveForm();
+    fireEvent.change(within(form).getByLabelText("存档文件路径"), {
+      target: { value: "/saves/pending.fm" },
+    });
+    const browse = within(form).getByRole("button", { name: "浏览…" });
+    expect(browse).toBeEnabled();
+    fireEvent.click(within(form).getByRole("button", { name: "导入文件" }));
+
+    await waitFor(() => expect(browse).toBeDisabled());
+
+    pending.resolve(jsonResponse(FILE_IMPORT_RESULT, 201));
+    await waitFor(() =>
+      expect(screen.queryByRole("form", { name: "导入存档文件" })).not.toBeInTheDocument(),
+    );
+  });
+});
+
+describe("FMF 战术文件导入", () => {
+  beforeEach(() => {
+    fetchMock.mockReset();
+    vi.stubGlobal("fetch", fetchMock);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it("工具栏在桌面环境拉起 FMF 选择器并填入路径与派生名称", async () => {
+    stubFetch(() => jsonResponse(makeList([])));
+    isDesktopShellMock.mockReturnValue(true);
+    chooseLocalFileMock.mockResolvedValue("/tactics/4-4-2-press.fmf");
+    renderLibraryPage();
+    await screen.findByText("尚未导入存档");
+
+    const form = openFmfForm();
+
+    expect(chooseLocalFileMock).toHaveBeenCalledWith(FMF_DIALOG_REQUEST);
+    expect(within(form).getByText(/FMF 文件自带双队场景/)).toBeInTheDocument();
+    await waitFor(() =>
+      expect(within(form).getByLabelText("战术文件路径")).toHaveValue("/tactics/4-4-2-press.fmf"),
+    );
+    expect(within(form).getByLabelText("名称")).toHaveValue("4-4-2-press");
+  });
+
+  it("提交精确请求体并在成功后跳转战术页", async () => {
+    const posts: unknown[] = [];
+    stubFetch((_url, init) => {
+      if (init.method === "POST") {
+        posts.push(JSON.parse(String(init.body)));
+        return jsonResponse(fmfDraft({ name: "北岸联战术" }), 201);
+      }
+      return jsonResponse(makeList([]));
+    });
+    renderLibraryPage();
+    await screen.findByText("尚未导入存档");
+
+    const form = openFmfForm();
+    fireEvent.change(within(form).getByLabelText("战术文件路径"), {
+      target: { value: "/tactics/北岸联战术.fmf" },
+    });
+    expect(within(form).getByLabelText("名称")).toHaveValue("北岸联战术");
+    fireEvent.click(within(form).getByRole("button", { name: "导入 FMF" }));
+
+    await waitFor(() =>
+      expect(posts).toEqual([{ source_path: "/tactics/北岸联战术.fmf", name: "北岸联战术" }]),
+    );
+    expect(callsTo("/api/drafts/import-fmf-file")[0].url).toBe(
+      "http://127.0.0.1:43210/api/drafts/import-fmf-file",
+    );
+    expect(callsTo("/api/drafts/import-fmf-file")[0].init.method).toBe("POST");
+    const placeholder = await screen.findByTestId("tactics-placeholder");
+    expect(placeholder).toHaveTextContent("/tactics?draft=draft-fmf");
+  });
+
+  it("空路径显示错误且不发起请求", async () => {
+    stubFetch(() => jsonResponse(makeList([])));
+    renderLibraryPage();
+    await screen.findByText("尚未导入存档");
+
+    const form = openFmfForm();
+    fireEvent.click(within(form).getByRole("button", { name: "导入 FMF" }));
+
+    expect(within(form).getByText("战术文件路径不能为空")).toBeInTheDocument();
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 25);
+    });
+    expect(callsTo("/api/drafts/import-fmf-file")).toHaveLength(0);
+  });
+
+  it("服务端 400 展示后端消息并可在重试后成功", async () => {
+    const posts: unknown[] = [];
+    stubFetch((_url, init) => {
+      if (init.method === "POST") {
+        posts.push(JSON.parse(String(init.body)));
+        if (posts.length === 1) {
+          return jsonResponse(
+            { error: { code: "invalid_request", message: "FMF 文件缺少双队场景" } },
+            400,
+          );
+        }
+        return jsonResponse(fmfDraft(), 201);
+      }
+      return jsonResponse(makeList([]));
+    });
+    renderLibraryPage();
+    await screen.findByText("尚未导入存档");
+
+    const form = openFmfForm();
+    fireEvent.change(within(form).getByLabelText("战术文件路径"), {
+      target: { value: "/tactics/retry.fmf" },
+    });
+    fireEvent.click(within(form).getByRole("button", { name: "导入 FMF" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("FMF 文件缺少双队场景");
+    expect(within(form).getByLabelText("战术文件路径")).toHaveValue("/tactics/retry.fmf");
+
+    fireEvent.click(within(form).getByRole("button", { name: "导入 FMF" }));
+
+    expect(await screen.findByTestId("tactics-placeholder")).toHaveTextContent(
+      "/tactics?draft=draft-fmf",
+    );
+    expect(posts).toHaveLength(2);
+  });
+
+  it("请求中表单标记 aria-busy 且提交按钮禁用", async () => {
+    const pending = deferred<Response>();
+    stubFetch((_url, init) =>
+      init.method === "POST" ? pending.promise : jsonResponse(makeList([])),
+    );
+    renderLibraryPage();
+    await screen.findByText("尚未导入存档");
+
+    const form = openFmfForm();
+    fireEvent.change(within(form).getByLabelText("战术文件路径"), {
+      target: { value: "/tactics/slow.fmf" },
+    });
+    fireEvent.click(within(form).getByRole("button", { name: "导入 FMF" }));
+
+    await waitFor(() => expect(form).toHaveAttribute("aria-busy", "true"));
+    expect(within(form).getByRole("button", { name: "导入中…" })).toBeDisabled();
+
+    pending.resolve(jsonResponse(fmfDraft(), 201));
+    expect(await screen.findByTestId("tactics-placeholder")).toBeInTheDocument();
+  });
+
+  it("用户改写名称后切换路径不覆盖名称", async () => {
+    stubFetch(() => jsonResponse(makeList([])));
+    renderLibraryPage();
+    await screen.findByText("尚未导入存档");
+
+    const form = openFmfForm();
+    fireEvent.change(within(form).getByLabelText("名称"), {
+      target: { value: "自定义名称" },
+    });
+    fireEvent.change(within(form).getByLabelText("战术文件路径"), {
+      target: { value: "/tactics/other-file.fmf" },
+    });
+
+    expect(within(form).getByLabelText("名称")).toHaveValue("自定义名称");
+  });
+
+  it("名称派生超过 80 字符时截断", async () => {
+    stubFetch(() => jsonResponse(makeList([])));
+    renderLibraryPage();
+    await screen.findByText("尚未导入存档");
+
+    const form = openFmfForm();
+    fireEvent.change(within(form).getByLabelText("战术文件路径"), {
+      target: { value: `/tactics/${"a".repeat(100)}.fmf` },
+    });
+
+    expect(within(form).getByLabelText("名称")).toHaveValue("a".repeat(80));
+  });
+
+  it("名称清空后提交仅携带路径", async () => {
+    const posts: unknown[] = [];
+    stubFetch((_url, init) => {
+      if (init.method === "POST") {
+        posts.push(JSON.parse(String(init.body)));
+        return jsonResponse(fmfDraft(), 201);
+      }
+      return jsonResponse(makeList([]));
+    });
+    renderLibraryPage();
+    await screen.findByText("尚未导入存档");
+
+    const form = openFmfForm();
+    fireEvent.change(within(form).getByLabelText("战术文件路径"), {
+      target: { value: "/tactics/plain.fmf" },
+    });
+    fireEvent.change(within(form).getByLabelText("名称"), { target: { value: "" } });
+    fireEvent.click(within(form).getByRole("button", { name: "导入 FMF" }));
+
+    await waitFor(() => expect(posts).toEqual([{ source_path: "/tactics/plain.fmf" }]));
+  });
+
+  it("取消关闭表单并清空错误", async () => {
+    stubFetch(() => jsonResponse(makeList([])));
+    renderLibraryPage();
+    await screen.findByText("尚未导入存档");
+
+    const form = openFmfForm();
+    fireEvent.click(within(form).getByRole("button", { name: "导入 FMF" }));
+    expect(within(form).getByText("战术文件路径不能为空")).toBeInTheDocument();
+
+    fireEvent.click(within(form).getByRole("button", { name: "取消" }));
+
+    expect(screen.queryByRole("form", { name: "导入 FMF 战术文件" })).not.toBeInTheDocument();
+    const reopened = openFmfForm();
+    expect(within(reopened).queryByText("战术文件路径不能为空")).not.toBeInTheDocument();
+  });
+
+  it("非桌面环境不渲染浏览按钮", async () => {
+    stubFetch(() => jsonResponse(makeList([])));
+    renderLibraryPage();
+    await screen.findByText("尚未导入存档");
+
+    const form = openFmfForm();
+
+    expect(within(form).queryByRole("button", { name: "浏览…" })).not.toBeInTheDocument();
+    expect(chooseLocalFileMock).not.toHaveBeenCalled();
+  });
+
+  it("工具栏按钮顺序为导入存档文件、导入 FMF 战术文件、新建存档", async () => {
+    stubFetch(() => jsonResponse(makeList([])));
+    renderLibraryPage();
+    await screen.findByText("尚未导入存档");
+
+    const refresh = screen.getByRole("button", { name: "刷新" });
+    const toolbar = refresh.parentElement;
+    if (toolbar === null) throw new Error("工具栏缺失");
+    const labels = within(toolbar)
+      .getAllByRole("button")
+      .map((button) => button.textContent?.trim());
+
+    expect(labels).toEqual(["刷新", "导入存档文件", "导入 FMF 战术文件", "新建存档"]);
+  });
+
+  it("路径不含文件名时名称兜底为导入战术", async () => {
+    stubFetch(() => jsonResponse(makeList([])));
+    renderLibraryPage();
+    await screen.findByText("尚未导入存档");
+
+    const form = openFmfForm();
+    fireEvent.change(within(form).getByLabelText("战术文件路径"), {
+      target: { value: "/tactics/" },
+    });
+
+    expect(within(form).getByLabelText("名称")).toHaveValue("导入战术");
+  });
+
+  it("名称被清空后修改路径重新派生名称", async () => {
+    stubFetch(() => jsonResponse(makeList([])));
+    renderLibraryPage();
+    await screen.findByText("尚未导入存档");
+
+    const form = openFmfForm();
+    fireEvent.change(within(form).getByLabelText("战术文件路径"), {
+      target: { value: "/tactics/first.fmf" },
+    });
+    expect(within(form).getByLabelText("名称")).toHaveValue("first");
+    fireEvent.change(within(form).getByLabelText("名称"), { target: { value: "" } });
+    expect(within(form).getByLabelText("名称")).toHaveValue("");
+    fireEvent.change(within(form).getByLabelText("战术文件路径"), {
+      target: { value: "/tactics/second.fmf" },
+    });
+
+    expect(within(form).getByLabelText("名称")).toHaveValue("second");
+  });
+
+  it("FMF 导入成功使草稿查询失效", async () => {
+    stubFetch((_url, init) =>
+      init.method === "POST" ? jsonResponse(fmfDraft(), 201) : jsonResponse(makeList([])),
+    );
+    const invalidateSpy = vi.spyOn(QueryClient.prototype, "invalidateQueries");
+    renderLibraryPage();
+    await screen.findByText("尚未导入存档");
+
+    const form = openFmfForm();
+    fireEvent.change(within(form).getByLabelText("战术文件路径"), {
+      target: { value: "/tactics/invalidate.fmf" },
+    });
+    fireEvent.click(within(form).getByRole("button", { name: "导入 FMF" }));
+
+    await screen.findByTestId("tactics-placeholder");
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: ["drafts", connection.url],
+    });
+  });
+
+  it("提交 FMF 时裁剪路径前后空白", async () => {
+    const posts: unknown[] = [];
+    stubFetch((_url, init) => {
+      if (init.method === "POST") {
+        posts.push(JSON.parse(String(init.body)));
+        return jsonResponse(fmfDraft(), 201);
+      }
+      return jsonResponse(makeList([]));
+    });
+    renderLibraryPage();
+    await screen.findByText("尚未导入存档");
+
+    const form = openFmfForm();
+    fireEvent.change(within(form).getByLabelText("战术文件路径"), {
+      target: { value: "  /tactics/trimmed.fmf  " },
+    });
+    fireEvent.click(within(form).getByRole("button", { name: "导入 FMF" }));
+
+    await waitFor(() =>
+      expect(posts).toEqual([{ source_path: "/tactics/trimmed.fmf", name: "trimmed" }]),
+    );
+  });
+
+  it("FMF 导入请求中禁用浏览按钮", async () => {
+    const pending = deferred<Response>();
+    stubFetch((_url, init) =>
+      init.method === "POST" ? pending.promise : jsonResponse(makeList([])),
+    );
+    isDesktopShellMock.mockReturnValue(true);
+    chooseLocalFileMock.mockResolvedValue(null);
+    renderLibraryPage();
+    await screen.findByText("尚未导入存档");
+
+    const form = openFmfForm();
+    fireEvent.change(within(form).getByLabelText("战术文件路径"), {
+      target: { value: "/tactics/pending.fmf" },
+    });
+    const browse = within(form).getByRole("button", { name: "浏览…" });
+    expect(browse).toBeEnabled();
+    fireEvent.click(within(form).getByRole("button", { name: "导入 FMF" }));
+
+    await waitFor(() => expect(browse).toBeDisabled());
+
+    pending.resolve(jsonResponse(fmfDraft(), 201));
+    expect(await screen.findByTestId("tactics-placeholder")).toBeInTheDocument();
   });
 });

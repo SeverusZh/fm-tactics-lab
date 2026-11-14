@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Archive, ArrowClockwise, Plus } from "@phosphor-icons/react";
 import { useState, type FormEvent, type ReactNode } from "react";
+import { useNavigate } from "react-router-dom";
 
 import { useAppContext } from "../app-context";
 import { EmptyState } from "../components/EmptyState";
@@ -11,11 +12,13 @@ import {
   createSave,
   deleteSave,
   getSaveSquad,
+  importFmfFile,
   importSave,
   importSaveFile,
   listDrafts,
   listSaves,
   undoRoster,
+  type FmfFileImportInput,
   type RosterScope,
   type RosterSide,
   type Save,
@@ -24,6 +27,7 @@ import {
   type SaveImport,
   type SaveStatus,
 } from "../lib/api";
+import { chooseLocalFile, isDesktopShell } from "../lib/file-dialog";
 
 const PAGE_SIZE = 20;
 const SHA256_PATTERN = /^[0-9a-fA-F]{64}$/;
@@ -144,9 +148,23 @@ function SaveStatusFilter({
   );
 }
 
+const FMF_NAME_MAX_LENGTH = 80;
+
+function deriveFmfName(path: string): string {
+  const normalized = path.trim();
+  const separator = Math.max(normalized.lastIndexOf("\\"), normalized.lastIndexOf("/"));
+  const basename = normalized.slice(separator + 1);
+  const withoutExtension = basename.toLowerCase().endsWith(".fmf")
+    ? basename.slice(0, -".fmf".length)
+    : basename;
+  const trimmed = withoutExtension.trim();
+  return (trimmed === "" ? "导入战术" : trimmed).slice(0, FMF_NAME_MAX_LENGTH);
+}
+
 export function LibraryPage() {
   const { connection } = useAppContext();
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const [status, setStatus] = useState<SaveStatus | "">("");
   const [offset, setOffset] = useState(0);
   const [createOpen, setCreateOpen] = useState(false);
@@ -173,6 +191,12 @@ export function LibraryPage() {
   const [fileError, setFileError] = useState<string | null>(null);
   const [fileConflict, setFileConflict] = useState(false);
   const [fileResult, setFileResult] = useState<SaveFileImportResult | null>(null);
+  const [fmfFormOpen, setFmfFormOpen] = useState(false);
+  const [fmfSourcePath, setFmfSourcePath] = useState("");
+  const [fmfName, setFmfName] = useState("");
+  const [fmfNameEdited, setFmfNameEdited] = useState(false);
+  const [fmfTouched, setFmfTouched] = useState(false);
+  const [fmfError, setFmfError] = useState<string | null>(null);
   const [squadSaveId, setSquadSaveId] = useState<string | null>(null);
   const [squadClubUid, setSquadClubUid] = useState<number | null>(null);
   const [rosterDraftId, setRosterDraftId] = useState("");
@@ -231,6 +255,10 @@ export function LibraryPage() {
         ? `存档文件路径最多 ${MAX_SOURCE_PATH} 个字符`
         : null;
 
+  const fmfPathTrimmed = fmfSourcePath.trim();
+  const fmfPathError = fmfPathTrimmed === "" ? "战术文件路径不能为空" : null;
+  const fmfNameTrimmed = fmfName.trim();
+
   const resetForm = () => {
     setSourcePath("");
     setSourceSha("");
@@ -288,6 +316,26 @@ export function LibraryPage() {
       setFileResult(null);
       setFileError(errorMessage(error));
       setFileConflict(error instanceof ApiError && error.status === 409);
+    },
+  });
+
+  const fmfImport = useMutation({
+    mutationFn: (input: FmfFileImportInput) => importFmfFile(connection!, input),
+    retry: false,
+    onSuccess: (draft) => {
+      setFmfFormOpen(false);
+      setFmfTouched(false);
+      setFmfError(null);
+      setFmfSourcePath("");
+      setFmfName("");
+      setFmfNameEdited(false);
+      setActionError(null);
+      setNotice(null);
+      void queryClient.invalidateQueries({ queryKey: ["drafts", connection?.url] });
+      navigate(`/tactics?draft=${draft.id}`);
+    },
+    onError: (error) => {
+      setFmfError(errorMessage(error));
     },
   });
 
@@ -365,6 +413,7 @@ export function LibraryPage() {
 
   const openCreate = () => {
     setCreateOpen((open) => !open);
+    setFmfFormOpen(false);
     setImportTargetId(null);
     setImportError(null);
     setFileFormOpen(false);
@@ -374,6 +423,7 @@ export function LibraryPage() {
 
   const openImport = (saveId: string) => {
     setImportTargetId(saveId);
+    setFmfFormOpen(false);
     setImportText("");
     setImportError(null);
     setCreateOpen(false);
@@ -383,16 +433,33 @@ export function LibraryPage() {
     setNotice(null);
   };
 
+  const pickSaveFile = async () => {
+    try {
+      const selected = await chooseLocalFile({
+        title: "选择存档文件",
+        filters: [{ name: "FM 存档", extensions: ["fm"] }],
+      });
+      if (selected === null) return;
+      setFileSourcePath(selected);
+      setFileTouched(true);
+    } catch (error) {
+      setFileError(errorMessage(error));
+    }
+  };
+
   const openFileImport = () => {
-    setFileFormOpen((open) => !open);
+    setFileFormOpen(true);
     setFileTouched(false);
     setFileError(null);
     setFileConflict(false);
     setFileResult(null);
+    setFmfFormOpen(false);
     setCreateOpen(false);
     setImportTargetId(null);
     setActionError(null);
     setNotice(null);
+    if (!isDesktopShell()) return;
+    void pickSaveFile();
   };
 
   const closeFileImport = () => {
@@ -402,8 +469,53 @@ export function LibraryPage() {
     setFileConflict(false);
   };
 
+  const applyFmfPath = (path: string) => {
+    setFmfSourcePath(path);
+    setFmfTouched(true);
+    if (!fmfNameEdited || fmfName.trim() === "") {
+      setFmfName(deriveFmfName(path));
+    }
+  };
+
+  const pickFmfFile = async () => {
+    try {
+      const selected = await chooseLocalFile({
+        title: "选择 FMF 战术文件",
+        filters: [{ name: "FMF 战术文件", extensions: ["fmf"] }],
+      });
+      if (selected === null) return;
+      applyFmfPath(selected);
+    } catch (error) {
+      setFmfError(errorMessage(error));
+    }
+  };
+
+  const openFmfImport = () => {
+    setFmfFormOpen(true);
+    setFmfTouched(false);
+    setFmfError(null);
+    setFileFormOpen(false);
+    setFileTouched(false);
+    setFileError(null);
+    setFileConflict(false);
+    setFileResult(null);
+    setCreateOpen(false);
+    setImportTargetId(null);
+    setActionError(null);
+    setNotice(null);
+    if (!isDesktopShell()) return;
+    void pickFmfFile();
+  };
+
+  const closeFmfImport = () => {
+    setFmfFormOpen(false);
+    setFmfTouched(false);
+    setFmfError(null);
+  };
+
   const openSquad = (saveId: string) => {
     setSquadSaveId(saveId);
+    setFmfFormOpen(false);
     setSquadClubUid(null);
     setRosterError(null);
     setRosterNotice(null);
@@ -494,6 +606,16 @@ export function LibraryPage() {
     fileImport.mutate({ source_path: filePathTrimmed, replace: true });
   };
 
+  const submitFmfImport = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setFmfTouched(true);
+    if (connection === null || fmfPathError !== null || fmfImport.isPending) return;
+    setFmfError(null);
+    const input: FmfFileImportInput = { source_path: fmfPathTrimmed };
+    if (fmfNameTrimmed !== "") input.name = fmfNameTrimmed;
+    fmfImport.mutate(input);
+  };
+
   const submitRoster = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (
@@ -575,7 +697,7 @@ export function LibraryPage() {
           title={status === "" ? "尚未导入存档" : "没有符合条件的存档"}
           description={
             status === ""
-              ? "这是唯一的存档导入入口。导入后可以浏览联赛战术、生成真实 AI 计划、导出 FMF 或加入客队战术池。"
+              ? "这是唯一的存档导入入口。导入后可以浏览联赛战术、生成真实 AI 计划、导出 FMF 或加入客队战术池。没有存档也可以导入 FMF 战术文件使用战术板与固定对手实验。"
               : "当前筛选条件下没有存档，切换状态或新建存档。"
           }
         />
@@ -887,6 +1009,14 @@ export function LibraryPage() {
             导入存档文件
           </button>
           <button
+            className="button"
+            type="button"
+            onClick={openFmfImport}
+            disabled={connection === null}
+          >
+            导入 FMF 战术文件
+          </button>
+          <button
             className="button primary"
             type="button"
             onClick={openCreate}
@@ -991,18 +1121,30 @@ export function LibraryPage() {
         >
           <div className="field">
             <label htmlFor="file-import-path">存档文件路径</label>
-            <input
-              id="file-import-path"
-              value={fileSourcePath}
-              aria-invalid={fileTouched && filePathError !== null}
-              aria-describedby={
-                fileTouched && filePathError !== null ? "file-import-path-error" : undefined
-              }
-              onChange={(event) => {
-                setFileSourcePath(event.target.value);
-                setFileTouched(true);
-              }}
-            />
+            <div className="field-row">
+              <input
+                id="file-import-path"
+                value={fileSourcePath}
+                aria-invalid={fileTouched && filePathError !== null}
+                aria-describedby={
+                  fileTouched && filePathError !== null ? "file-import-path-error" : undefined
+                }
+                onChange={(event) => {
+                  setFileSourcePath(event.target.value);
+                  setFileTouched(true);
+                }}
+              />
+              {isDesktopShell() ? (
+                <button
+                  className="button small"
+                  type="button"
+                  disabled={fileImport.isPending}
+                  onClick={() => void pickSaveFile()}
+                >
+                  浏览…
+                </button>
+              ) : null}
+            </div>
             {fileTouched && filePathError !== null ? (
               <span id="file-import-path-error" className="field-error">
                 {filePathError}
@@ -1042,6 +1184,81 @@ export function LibraryPage() {
                   覆盖导入
                 </button>
               ) : null}
+            </div>
+          )}
+        </form>
+      ) : null}
+      {fmfFormOpen ? (
+        <form
+          className="saves-import saves-fmf-import"
+          aria-label="导入 FMF 战术文件"
+          aria-busy={fmfImport.isPending ? true : undefined}
+          onSubmit={submitFmfImport}
+        >
+          <p className="field-hint">
+            FMF 文件自带双队场景，无需存档即可直接用于战术板与固定对手实验。
+          </p>
+          <div className="field">
+            <label htmlFor="fmf-import-path">战术文件路径</label>
+            <div className="field-row">
+              <input
+                id="fmf-import-path"
+                value={fmfSourcePath}
+                aria-invalid={fmfTouched && fmfPathError !== null}
+                aria-describedby={
+                  fmfTouched && fmfPathError !== null ? "fmf-import-path-error" : undefined
+                }
+                onChange={(event) => {
+                  setFmfSourcePath(event.target.value);
+                  setFmfTouched(true);
+                  if (!fmfNameEdited || fmfName.trim() === "") {
+                    setFmfName(deriveFmfName(event.target.value));
+                  }
+                }}
+              />
+              {isDesktopShell() ? (
+                <button
+                  className="button small"
+                  type="button"
+                  disabled={fmfImport.isPending}
+                  onClick={() => void pickFmfFile()}
+                >
+                  浏览…
+                </button>
+              ) : null}
+            </div>
+            {fmfTouched && fmfPathError !== null ? (
+              <span id="fmf-import-path-error" className="field-error">
+                {fmfPathError}
+              </span>
+            ) : null}
+          </div>
+          <div className="field">
+            <label htmlFor="fmf-import-name">名称</label>
+            <input
+              id="fmf-import-name"
+              value={fmfName}
+              onChange={(event) => {
+                setFmfName(event.target.value);
+                setFmfNameEdited(true);
+              }}
+            />
+          </div>
+          <div className="saves-import-actions">
+            <button
+              className="button primary"
+              type="submit"
+              disabled={connection === null || fmfImport.isPending}
+            >
+              {fmfImport.isPending ? "导入中…" : "导入 FMF"}
+            </button>
+            <button className="button" type="button" onClick={closeFmfImport}>
+              取消
+            </button>
+          </div>
+          {fmfError === null ? null : (
+            <div className="inline-alert" role="alert">
+              <span>{fmfError}</span>
             </div>
           )}
         </form>

@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, useNavigate, useSearchParams } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AppContext } from "../app-context";
@@ -314,11 +314,30 @@ function makeDraftList(items: DraftSummary[], total = items.length): DraftList {
   return { items, total, next_offset: null };
 }
 
-function renderTacticsPage(activeConnection: Connection | null = connection) {
+function DraftQueryNavigator({ draftId }: { draftId: string }) {
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  return (
+    <>
+      <button type="button" onClick={() => navigate(`/tactics?draft=${draftId}`)}>
+        跳转草稿参数
+      </button>
+      <button type="button" onClick={() => navigate("/tactics")}>
+        清除草稿参数
+      </button>
+      <span aria-label="当前草稿参数">{searchParams.get("draft") ?? ""}</span>
+    </>
+  );
+}
+
+function renderTacticsPage(
+  activeConnection: Connection | null = connection,
+  initialEntries: string[] = ["/tactics"],
+) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const result = render(
     <QueryClientProvider client={client}>
-      <MemoryRouter initialEntries={["/tactics"]}>
+      <MemoryRouter initialEntries={initialEntries}>
         <AppContext.Provider
           value={{
             connection: activeConnection,
@@ -328,6 +347,7 @@ function renderTacticsPage(activeConnection: Connection | null = connection) {
             refresh: vi.fn(),
           }}
         >
+          <DraftQueryNavigator draftId="draft-2" />
           <TacticsPage />
         </AppContext.Provider>
       </MemoryRouter>
@@ -1350,5 +1370,189 @@ describe("TacticsPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "保存" }));
     expect(await screen.findByRole("status")).toHaveTextContent("已保存");
     expect(patchedBodies()[0]?.scenario).toEqual(withLegacyCellRole(scenario, 0, 0, 3, "FullBack"));
+  });
+});
+
+describe("TacticsPage 初始草稿参数", () => {
+  beforeEach(() => {
+    fetchMock.mockReset();
+    vi.stubGlobal("fetch", fetchMock);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  function parameterHandlers() {
+    return (url: string) => {
+      if (url.endsWith("/api/catalog")) return jsonResponse(CATALOG_UNAVAILABLE);
+      if (url.endsWith("/api/drafts")) {
+        return jsonResponse(
+          makeDraftList([makeSummary(), makeSummary({ id: "draft-2", name: "草案二" })]),
+        );
+      }
+      if (url.endsWith("/api/drafts/draft-2")) {
+        return jsonResponse(
+          makeDraft({ id: "draft-2", name: "草案二", scenario: makeScenario("西城队", "东城队") }),
+        );
+      }
+      return jsonResponse(makeDraft());
+    };
+  }
+
+  it("按地址栏 draft 参数选中对应草稿", async () => {
+    stubFetch(parameterHandlers());
+    renderTacticsPage(connection, ["/tactics?draft=draft-2"]);
+
+    const slots = await pitchSlots();
+
+    expect(within(slots[0]).getByText("西城队球员 01")).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "选择草稿" })).toHaveValue("draft-2");
+    expect(callsTo("/api/drafts/draft-2")).toHaveLength(1);
+    expect(callsTo("/api/drafts/draft-1")).toHaveLength(0);
+  });
+
+  it("draft 参数无效时回退首个草稿", async () => {
+    stubFetch(parameterHandlers());
+    renderTacticsPage(connection, ["/tactics?draft=missing"]);
+
+    const slots = await pitchSlots();
+
+    expect(within(slots[0]).getByText("北岸联球员 01")).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "选择草稿" })).toHaveValue("draft-1");
+    expect(callsTo("/api/drafts/draft-1")).toHaveLength(1);
+    expect(callsTo("/api/drafts/missing")).toHaveLength(0);
+  });
+
+  it("地址栏参数变化后更新选中草稿", async () => {
+    stubFetch(parameterHandlers());
+    renderTacticsPage();
+
+    expect(await screen.findByRole("combobox", { name: "选择草稿" })).toHaveValue("draft-1");
+
+    fireEvent.click(screen.getByRole("button", { name: "跳转草稿参数" }));
+
+    await waitFor(() =>
+      expect(screen.getByRole("combobox", { name: "选择草稿" })).toHaveValue("draft-2"),
+    );
+    const slots = await pitchSlots();
+    expect(within(slots[0]).getByText("西城队球员 01")).toBeInTheDocument();
+  });
+
+  it("参数移除后重新加入同一草稿参数仍会应用", async () => {
+    stubFetch(parameterHandlers());
+    renderTacticsPage(connection, ["/tactics?draft=draft-2"]);
+
+    expect(await screen.findByRole("combobox", { name: "选择草稿" })).toHaveValue("draft-2");
+
+    fireEvent.click(screen.getByRole("button", { name: "清除草稿参数" }));
+    await waitFor(() =>
+      expect(screen.getByLabelText("当前草稿参数")).toHaveTextContent(""),
+    );
+    fireEvent.change(screen.getByRole("combobox", { name: "选择草稿" }), {
+      target: { value: "draft-1" },
+    });
+
+    await waitFor(() =>
+      expect(screen.getByRole("combobox", { name: "选择草稿" })).toHaveValue("draft-1"),
+    );
+    const before = await pitchSlots();
+    expect(within(before[0]).getByText("北岸联球员 01")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "跳转草稿参数" }));
+
+    await waitFor(() =>
+      expect(screen.getByRole("combobox", { name: "选择草稿" })).toHaveValue("draft-2"),
+    );
+    const slots = await pitchSlots();
+    expect(within(slots[0]).getByText("西城队球员 01")).toBeInTheDocument();
+  });
+
+  it("切换参数时重置编辑态并加载新草稿场景", async () => {
+    stubFetch(parameterHandlers());
+    renderTacticsPage();
+
+    await startEditing();
+    fireEvent.click(screen.getByRole("button", { name: "跳转草稿参数" }));
+
+    await waitFor(() =>
+      expect(screen.getByRole("combobox", { name: "选择草稿" })).toHaveValue("draft-2"),
+    );
+    expect(screen.queryByRole("button", { name: "保存" })).toBeNull();
+    expect(screen.queryByText("编辑阵型中，修改后请保存或放弃")).toBeNull();
+    expect(screen.getByRole("button", { name: "编辑阵型" })).toBeInTheDocument();
+    const slots = await pitchSlots();
+    expect(within(slots[0]).getByText("西城队球员 01")).toBeInTheDocument();
+    expect(callsTo("/api/drafts/draft-2")).toHaveLength(1);
+    expect(patchedBodies()).toHaveLength(0);
+  });
+
+  it("存在未保存修改时参数变化不抢占当前草稿", async () => {
+    stubFetch(parameterHandlers());
+    renderTacticsPage();
+
+    const slots = await startEditing();
+    fireEvent.dragStart(slots[2]);
+    fireEvent.dragOver(slots[5]);
+    fireEvent.drop(slots[5]);
+    expect(screen.getByText("有未保存修改，保存或放弃后可切换草稿")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "跳转草稿参数" }));
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 25);
+    });
+
+    expect(screen.getByRole("combobox", { name: "选择草稿" })).toHaveValue("draft-1");
+    expect(screen.getByRole("button", { name: "保存" })).toBeInTheDocument();
+    expect(screen.getByText("有未保存修改，保存或放弃后可切换草稿")).toBeInTheDocument();
+    const items = await pitchSlots();
+    expect(items[2]).toHaveTextContent("北岸联球员 06");
+    expect(items[5]).toHaveTextContent("北岸联球员 03");
+    expect(callsTo("/api/drafts/draft-2")).toHaveLength(0);
+  });
+
+  it("放弃未保存修改后应用待切换的草稿参数", async () => {
+    stubFetch(parameterHandlers());
+    renderTacticsPage();
+
+    const slots = await startEditing();
+    fireEvent.dragStart(slots[2]);
+    fireEvent.dragOver(slots[5]);
+    fireEvent.drop(slots[5]);
+
+    fireEvent.click(screen.getByRole("button", { name: "跳转草稿参数" }));
+    expect(screen.getByRole("button", { name: "放弃" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "放弃" }));
+
+    await waitFor(() =>
+      expect(screen.getByRole("combobox", { name: "选择草稿" })).toHaveValue("draft-2"),
+    );
+    expect(screen.queryByRole("button", { name: "保存" })).toBeNull();
+    const items = await pitchSlots();
+    expect(within(items[0]).getByText("西城队球员 01")).toBeInTheDocument();
+    expect(callsTo("/api/drafts/draft-2")).toHaveLength(1);
+    expect(patchedBodies()).toHaveLength(0);
+  });
+
+  it("保存成功后应用待切换的草稿参数", async () => {
+    stubFetch(parameterHandlers());
+    renderTacticsPage();
+
+    const slots = await startEditing();
+    fireEvent.dragStart(slots[2]);
+    fireEvent.dragOver(slots[5]);
+    fireEvent.drop(slots[5]);
+
+    fireEvent.click(screen.getByRole("button", { name: "跳转草稿参数" }));
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+
+    await waitFor(() =>
+      expect(screen.getByRole("combobox", { name: "选择草稿" })).toHaveValue("draft-2"),
+    );
+    expect(screen.queryByRole("button", { name: "保存" })).toBeNull();
+    const items = await pitchSlots();
+    expect(within(items[0]).getByText("西城队球员 01")).toBeInTheDocument();
+    expect(patchedBodies()[0]?.scenario).toEqual(withLineupSwap(makeScenario(), 0, 2, 5));
   });
 });

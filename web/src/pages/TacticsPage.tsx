@@ -8,7 +8,7 @@ import {
   type KeyboardEvent,
   type ReactNode,
 } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 
 import { useAppContext } from "../app-context";
 import { EmptyState } from "../components/EmptyState";
@@ -452,7 +452,9 @@ function useCompactSlots(): boolean {
 export function TacticsPage() {
   const { connection } = useAppContext();
   const queryClient = useQueryClient();
-  const [selectedDraftId, setSelectedDraftId] = useState<string | null>(null);
+  const [searchParams] = useSearchParams();
+  const draftParam = searchParams.get("draft");
+  const [selectedDraftId, setSelectedDraftId] = useState<string | null>(draftParam);
   const [side, setSide] = useState<0 | 1>(0);
   const [phase, setPhase] = useState<0 | 1>(0);
   const compact = useCompactSlots();
@@ -468,6 +470,7 @@ export function TacticsPage() {
   const [dragFrom, setDragFrom] = useState<number | null>(null);
   const [dragOver, setDragOver] = useState<number | null>(null);
   const slotRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const appliedDraftParam = useRef<string | null>(draftParam);
 
   const drafts = useQuery({
     queryKey: ["drafts", connection?.url],
@@ -678,7 +681,7 @@ export function TacticsPage() {
     setDragOver(null);
   };
 
-  const handleDraftChange = (draftId: string) => {
+  const applyDraftParam = (draftId: string) => {
     setSelectedDraftId(draftId);
     setEditing(false);
     setBaselineScenario(null);
@@ -690,6 +693,17 @@ export function TacticsPage() {
     resetInteraction();
   };
 
+  useEffect(() => {
+    if (draftParam === null || draftParam === "") {
+      appliedDraftParam.current = null;
+      return;
+    }
+    if (dirty) return;
+    if (draftParam === appliedDraftParam.current) return;
+    appliedDraftParam.current = draftParam;
+    applyDraftParam(draftParam);
+  }, [draftParam, dirty]);
+
   const toolbar =
     draftItems.length === 0 ? null : (
       <div className="tactics-toolbar" aria-busy={saving ? true : undefined}>
@@ -699,7 +713,7 @@ export function TacticsPage() {
             aria-label="选择草稿"
             value={activeDraftId ?? ""}
             disabled={dirty}
-            onChange={(event) => handleDraftChange(event.target.value)}
+            onChange={(event) => applyDraftParam(event.target.value)}
           >
             {draftItems.map((item) => (
               <option key={item.id} value={item.id}>

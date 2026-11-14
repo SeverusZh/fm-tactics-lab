@@ -688,6 +688,21 @@
   min-width: 320px;
 }
 
+.field-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.field-row input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.saves-fmf-import .field-hint {
+  margin: 0;
+}
+
 .saves-import-result {
   display: grid;
   gap: var(--space-3);

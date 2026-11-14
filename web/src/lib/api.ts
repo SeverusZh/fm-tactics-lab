@@ -1,4 +1,4 @@
-// API 类型映射：生成别名 40 项；保留手写类型 25 项；字段派生 2 项；ApiError 类保留；明细见 api-types.test.ts。
+// API 类型映射：生成别名 41 项；保留手写类型 25 项；字段派生 2 项；ApiError 类保留；明细见 api-types.test.ts。
 
 import type { Connection } from "./connection";
 import type {
@@ -14,6 +14,7 @@ import type {
   DraftSummary as GeneratedDraftSummary,
   DraftUpdateInput,
   ExperimentSubmitInput as GeneratedExperimentSubmitInput,
+  FmfFileImportInput as GeneratedFmfFileImportInput,
   ImportedClubOutput,
   JobBatchDeleteFailureOutput,
   JobBatchDeleteOutput,
@@ -356,6 +357,8 @@ export type DraftCreate = DraftCreateInput;
 
 export type DraftUpdate = DraftUpdateInput;
 
+export type FmfFileImportInput = GeneratedFmfFileImportInput;
+
 // 草案查询参数未在 OpenAPI 中单独建模，保留手写。
 export type DraftQuery = {
   limit?: number;
@@ -369,6 +372,16 @@ export function listDrafts(connection: Connection, query: DraftQuery = {}): Prom
 
 export function createDraft(connection: Connection, input: DraftCreate): Promise<Draft> {
   return apiJson<Draft>(connection, "/api/drafts", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export function importFmfFile(
+  connection: Connection,
+  input: FmfFileImportInput,
+): Promise<Draft> {
+  return apiJson<Draft>(connection, "/api/drafts/import-fmf-file", {
     method: "POST",
     body: JSON.stringify(input),
   });
