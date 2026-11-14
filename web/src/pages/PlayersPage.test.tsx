@@ -105,10 +105,21 @@ function makeTeam(
   uidBase: number,
   firstOverrides: Record<number, number>,
   ability: unknown,
+  generatedIndexes: readonly number[] = [],
+  generatedOverrides: Readonly<Record<number, unknown>> = {},
 ): Record<string, unknown> {
   return {
     name,
     players: Array.from({ length: 23 }, (_, index) => {
+      if (generatedIndexes.includes(index)) {
+        return {
+          source_uid: `generated:${index + 1}`,
+          name: `占位球员 ${index + 1}`,
+          attributes: makeAttributes(),
+          ability: 10,
+          generated: index in generatedOverrides ? generatedOverrides[index] : true,
+        };
+      }
       if (index === 0) {
         return makePlayer(uidBase + index, `${name}球员 01`, firstOverrides, ability);
       }
@@ -119,6 +130,21 @@ function makeTeam(
     }),
     roster_size: 23,
   };
+}
+
+type TrimScenarioOptions = {
+  home?: Record<string, unknown>;
+  away?: Record<string, unknown>;
+  homeGenerated?: readonly number[];
+  awayGenerated?: readonly number[];
+};
+
+function makeTrimScenario(options: TrimScenarioOptions = {}): Record<string, unknown> {
+  const home = makeTeam("主队", 100, HOME_FIRST, 88, options.homeGenerated ?? []);
+  const away = makeTeam("客队", 200, AWAY_FIRST, { current: 70 }, options.awayGenerated ?? []);
+  if (options.home !== undefined) home.roster_trim = options.home;
+  if (options.away !== undefined) away.roster_trim = options.away;
+  return { schema: 4, teams: [home, away] };
 }
 
 function makeScenario(homeName = "主队", awayName = "客队"): Record<string, unknown> {
@@ -200,6 +226,10 @@ function renderPlayersPage(activeConnection: Connection | null = connection) {
 
 function roster(name: "主队球员名单" | "客队球员名单"): HTMLElement {
   return screen.getByRole("complementary", { name });
+}
+
+function rosterNotice(): HTMLElement | null {
+  return screen.queryByRole("status", { name: "名单兼容提示" });
 }
 
 function detailRegion(): HTMLElement {
@@ -627,6 +657,297 @@ describe("PlayersPage", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("属性显示值必须在 1–20 之间");
     expect(screen.queryByText(/已更新/)).not.toBeInTheDocument();
     expect(detailCalls()).toHaveLength(1);
+  });
+});
+
+describe("球员名单兼容与占位提示", () => {
+  beforeEach(() => {
+    fetchMock.mockReset();
+    vi.stubGlobal("fetch", fetchMock);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("原始名单超过 23 人时提示裁剪人数与移除人数", async () => {
+    stubFetch(
+      draftHandlers(
+        makeDraft({
+          scenario: makeTrimScenario({
+            home: {
+              source_size: 26,
+              removed: [
+                { source_uid: 1, name: "离队球员 1" },
+                { source_uid: 2, name: "离队球员 2" },
+                { source_uid: 3, name: "离队球员 3" },
+                "invalid-entry",
+                7,
+              ],
+              generated: [],
+            },
+          }),
+        }),
+      ),
+    );
+    renderPlayersPage();
+
+    const notice = await screen.findByRole("status", { name: "名单兼容提示" });
+    expect(notice).toHaveTextContent("原始名单 26 人，已按 23 人裁剪，移除 3 人");
+
+    const homeRoster = roster("主队球员名单");
+    expect(within(homeRoster).getAllByRole("button")).toHaveLength(23);
+    const panel = screen.getByRole("region", { name: "批量属性编辑" });
+    expect(
+      notice.compareDocumentPosition(homeRoster) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      notice.compareDocumentPosition(panel) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  it("原始名单不足 23 人时提示占位球员补足 23 人", async () => {
+    stubFetch(
+      draftHandlers(
+        makeDraft({
+          scenario: makeTrimScenario({
+            home: {
+              source_size: 20,
+              removed: [],
+              generated: ["generated:1", "generated:2", "generated:3"],
+            },
+          }),
+        }),
+      ),
+    );
+    renderPlayersPage();
+
+    expect(await screen.findByRole("status", { name: "名单兼容提示" })).toHaveTextContent(
+      "原始名单 20 人，已用 3 名占位球员补足 23 人",
+    );
+  });
+
+  it("缺少原始人数时提示占位球员数量", async () => {
+    stubFetch(
+      draftHandlers(
+        makeDraft({
+          scenario: makeTrimScenario({
+            home: { generated: ["generated:1", "generated:2"] },
+            homeGenerated: [0, 1],
+          }),
+        }),
+      ),
+    );
+    renderPlayersPage();
+
+    expect(await screen.findByRole("status", { name: "名单兼容提示" })).toHaveTextContent(
+      "名单含 2 名占位球员",
+    );
+    expect(within(roster("主队球员名单")).getAllByRole("button")).toHaveLength(23);
+  });
+
+  it("原始名单为 23 人的真实名单不渲染兼容提示区", async () => {
+    stubFetch(
+      draftHandlers(
+        makeDraft({
+          scenario: makeTrimScenario({
+            home: { source_size: 23, removed: [], generated: [] },
+          }),
+        }),
+      ),
+    );
+    renderPlayersPage();
+
+    await screen.findByRole("complementary", { name: "主队球员名单" });
+    expect(rosterNotice()).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "客队" }));
+    await screen.findByRole("complementary", { name: "客队球员名单" });
+    expect(rosterNotice()).toBeNull();
+  });
+
+  it("原始人数为 23 但含占位球员时不渲染兼容提示区", async () => {
+    stubFetch(
+      draftHandlers(
+        makeDraft({
+          scenario: makeTrimScenario({
+            home: { source_size: 23, removed: [], generated: ["generated:1"] },
+          }),
+        }),
+      ),
+    );
+    renderPlayersPage();
+
+    await screen.findByRole("complementary", { name: "主队球员名单" });
+    expect(rosterNotice()).toBeNull();
+  });
+
+  it("roster_trim 畸形时名单正常渲染且不显示兼容提示", async () => {
+    stubFetch(
+      draftHandlers(
+        makeDraft({
+          scenario: makeTrimScenario({
+            home: { source_size: "26", removed: "invalid", generated: "invalid" },
+            away: { source_size: -5, removed: { invalid: true }, generated: { invalid: true } },
+          }),
+        }),
+      ),
+    );
+    renderPlayersPage();
+
+    const homeRoster = await screen.findByRole("complementary", { name: "主队球员名单" });
+    expect(within(homeRoster).getAllByRole("button")).toHaveLength(23);
+    expect(rosterNotice()).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "客队" }));
+    const awayRoster = await screen.findByRole("complementary", { name: "客队球员名单" });
+    expect(within(awayRoster).getAllByRole("button")).toHaveLength(23);
+    expect(rosterNotice()).toBeNull();
+  });
+
+  it("主客切换后兼容提示跟随当前球队数据", async () => {
+    stubFetch(
+      draftHandlers(
+        makeDraft({
+          scenario: makeTrimScenario({
+            home: {
+              source_size: 26,
+              removed: [
+                { source_uid: 1, name: "离队球员 1" },
+                { source_uid: 2, name: "离队球员 2" },
+              ],
+              generated: [],
+            },
+            away: { source_size: 21, removed: [], generated: ["generated:1", "generated:2"] },
+          }),
+        }),
+      ),
+    );
+    renderPlayersPage();
+
+    expect(await screen.findByRole("status", { name: "名单兼容提示" })).toHaveTextContent(
+      "原始名单 26 人，已按 23 人裁剪，移除 2 人",
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "客队" }));
+    expect(await screen.findByRole("status", { name: "名单兼容提示" })).toHaveTextContent(
+      "原始名单 21 人，已用 2 名占位球员补足 23 人",
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "主队" }));
+    expect(await screen.findByRole("status", { name: "名单兼容提示" })).toHaveTextContent(
+      "原始名单 26 人，已按 23 人裁剪，移除 2 人",
+    );
+  });
+
+  it("占位球员在名单行与选中标题显示占位标识", async () => {
+    stubFetch(
+      draftHandlers(
+        makeDraft({
+          scenario: makeTrimScenario({ homeGenerated: [0, 1] }),
+        }),
+      ),
+    );
+    renderPlayersPage();
+
+    const homeRoster = await screen.findByRole("complementary", { name: "主队球员名单" });
+    expect(within(homeRoster).getAllByText("占位")).toHaveLength(2);
+
+    const generatedRow = within(homeRoster).getByRole("button", { name: /占位球员 1/ });
+    expect(within(generatedRow).getByText("占位")).toBeInTheDocument();
+
+    const realRow = within(homeRoster).getByRole("button", { name: /主队球员 03/ });
+    expect(within(realRow).queryByText("占位")).toBeNull();
+
+    const detail = detailRegion();
+    expect(within(detail).getByText("占位球员 1")).toBeInTheDocument();
+    expect(within(detail).getByText("占位")).toBeInTheDocument();
+  });
+
+  it("原始名单超过 23 人且含占位球员时追加占位数量说明", async () => {
+    stubFetch(
+      draftHandlers(
+        makeDraft({
+          scenario: makeTrimScenario({
+            home: {
+              source_size: 26,
+              removed: [
+                { source_uid: 1, name: "离队球员 1" },
+                { source_uid: 2, name: "离队球员 2" },
+              ],
+              generated: ["generated:1", "generated:2"],
+            },
+            homeGenerated: [0, 1],
+          }),
+        }),
+      ),
+    );
+    renderPlayersPage();
+
+    const notice = await screen.findByRole("status", { name: "名单兼容提示" });
+    expect(notice.textContent).toBe(
+      "原始名单 26 人，已按 23 人裁剪，移除 2 人，其中 2 名为占位球员",
+    );
+  });
+
+  it("原始人数不是整数时降级且不渲染兼容提示", async () => {
+    stubFetch(
+      draftHandlers(
+        makeDraft({
+          scenario: makeTrimScenario({
+            home: { source_size: 23.5, removed: [], generated: [] },
+          }),
+        }),
+      ),
+    );
+    renderPlayersPage();
+
+    const homeRoster = await screen.findByRole("complementary", { name: "主队球员名单" });
+    expect(within(homeRoster).getAllByRole("button")).toHaveLength(23);
+    expect(rosterNotice()).toBeNull();
+    expect(screen.queryByText(/23\.5/)).toBeNull();
+  });
+
+  it("占位标识仅在球员 generated 严格为真时显示", async () => {
+    const home = makeTeam("主队", 100, HOME_FIRST, 88, [0, 1, 2], { 0: 1, 1: "yes" });
+    const away = makeTeam("客队", 200, AWAY_FIRST, { current: 70 });
+    stubFetch(draftHandlers(makeDraft({ scenario: { schema: 4, teams: [home, away] } })));
+    renderPlayersPage();
+
+    const homeRoster = await screen.findByRole("complementary", { name: "主队球员名单" });
+    expect(within(homeRoster).getAllByText("占位")).toHaveLength(1);
+
+    const truthyRow = within(homeRoster).getByRole("button", { name: /占位球员 1/ });
+    expect(within(truthyRow).queryByText("占位")).toBeNull();
+
+    const strictRow = within(homeRoster).getByRole("button", { name: /占位球员 3/ });
+    expect(within(strictRow).getByText("占位")).toBeInTheDocument();
+
+    expect(within(detailRegion()).queryByText("占位")).toBeNull();
+  });
+
+  it("主客切换后占位标识跟随当前球队数据", async () => {
+    stubFetch(
+      draftHandlers(
+        makeDraft({
+          scenario: makeTrimScenario({ homeGenerated: [0, 1], awayGenerated: [0] }),
+        }),
+      ),
+    );
+    renderPlayersPage();
+
+    const homeRoster = await screen.findByRole("complementary", { name: "主队球员名单" });
+    expect(within(homeRoster).getAllByText("占位")).toHaveLength(2);
+    expect(within(detailRegion()).getByText("占位")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "客队" }));
+    const awayRoster = await screen.findByRole("complementary", { name: "客队球员名单" });
+    expect(within(awayRoster).getAllByText("占位")).toHaveLength(1);
+    expect(within(detailRegion()).getByText("占位")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "主队" }));
+    const homeAgain = await screen.findByRole("complementary", { name: "主队球员名单" });
+    expect(within(homeAgain).getAllByText("占位")).toHaveLength(2);
   });
 });
 

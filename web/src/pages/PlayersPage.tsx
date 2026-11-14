@@ -200,11 +200,19 @@ type ScenarioPlayer = {
   position: number;
   ability: number | null;
   attributes: number[];
+  generated: boolean;
+};
+
+type RosterTrim = {
+  sourceSize: number | null;
+  removedCount: number;
+  generatedUids: string[];
 };
 
 type ScenarioTeam = {
   name: string | null;
   players: ScenarioPlayer[];
+  roster: RosterTrim;
 };
 
 type Scenario = {
@@ -253,7 +261,46 @@ function parsePlayer(value: unknown, index: number): ScenarioPlayer | null {
     position: strongestPosition(attributes),
     ability: readAbility(value.ability),
     attributes,
+    generated: value.generated === true,
   };
+}
+
+const EMPTY_ROSTER_TRIM: RosterTrim = {
+  sourceSize: null,
+  removedCount: 0,
+  generatedUids: [],
+};
+
+function parseRosterTrim(value: unknown): RosterTrim {
+  if (!isRecord(value)) return EMPTY_ROSTER_TRIM;
+  const sourceSize =
+    typeof value.source_size === "number" &&
+    Number.isInteger(value.source_size) &&
+    value.source_size >= 0
+      ? value.source_size
+      : null;
+  const removedCount = Array.isArray(value.removed)
+    ? value.removed.filter((entry) => isRecord(entry)).length
+    : 0;
+  const generatedUids = Array.isArray(value.generated)
+    ? value.generated.map((entry) => String(entry))
+    : [];
+  return { sourceSize, removedCount, generatedUids };
+}
+
+function rosterNoticeText(roster: RosterTrim): string | null {
+  const generatedCount = roster.generatedUids.length;
+  if (roster.sourceSize !== null && roster.sourceSize > 23) {
+    const base = `原始名单 ${roster.sourceSize} 人，已按 23 人裁剪，移除 ${roster.removedCount} 人`;
+    return generatedCount > 0 ? `${base}，其中 ${generatedCount} 名为占位球员` : base;
+  }
+  if (roster.sourceSize !== null && roster.sourceSize < 23) {
+    return `原始名单 ${roster.sourceSize} 人，已用 ${23 - roster.sourceSize} 名占位球员补足 23 人`;
+  }
+  if (roster.sourceSize === null && generatedCount > 0) {
+    return `名单含 ${generatedCount} 名占位球员`;
+  }
+  return null;
 }
 
 function parseTeam(value: unknown): ScenarioTeam | null {
@@ -267,7 +314,7 @@ function parseTeam(value: unknown): ScenarioTeam | null {
     players.push(player);
   }
   const name = typeof value.name === "string" && value.name.trim() !== "" ? value.name.trim() : null;
-  return { name, players };
+  return { name, players, roster: parseRosterTrim(value.roster_trim) };
 }
 
 function parseScenario(scenario: Record<string, unknown>): Scenario | null {
@@ -367,6 +414,7 @@ export function PlayersPage() {
   const players = team?.players ?? [];
   const playerIndex = selectedPlayer < players.length ? selectedPlayer : 0;
   const player = players[playerIndex];
+  const rosterNotice = team === null ? null : rosterNoticeText(team.roster);
   const visibleGroups = ATTRIBUTE_GROUPS.filter(
     (group) => group.id !== "hidden" || showHidden,
   );
@@ -645,7 +693,10 @@ export function PlayersPage() {
                     aria-pressed={index === playerIndex}
                     onClick={() => setSelectedPlayer(index)}
                   >
-                    <span className="players-row-name">{item.name}</span>
+                    <span className="players-row-name">
+                      <span className="players-row-label">{item.name}</span>
+                      {item.generated ? <span className="badge">占位</span> : null}
+                    </span>
                     <span
                       className="players-row-position"
                       title={ATTRIBUTE_LABELS[item.position]}
@@ -661,6 +712,7 @@ export function PlayersPage() {
           <section className="players-detail" aria-label="选中球员属性">
             <div className="players-selected">
               <strong>{selected.name}</strong>
+              {selected.generated ? <span className="badge">占位</span> : null}
               <span className="badge" title={ATTRIBUTE_LABELS[selected.position]}>
                 {POSITION_CODES[selected.position]}
               </span>
@@ -727,6 +779,11 @@ export function PlayersPage() {
             显示隐藏属性
           </label>
         </div>
+        {rosterNotice === null ? null : (
+          <p className="players-roster-notice" role="status" aria-label="名单兼容提示">
+            {rosterNotice}
+          </p>
+        )}
         {attributeEditor}
         {content}
       </>
