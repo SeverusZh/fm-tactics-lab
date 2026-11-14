@@ -42,6 +42,8 @@ def run_script(
         cwd=ROOT,
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=180,
         check=False,
         env=env,
@@ -326,6 +328,25 @@ def test_broken_simulator_exits_with_chinese_reason(tmp_path: Path) -> None:
     assert "基准失败" in completed.stderr
     assert "Traceback" not in completed.stderr
     assert "Traceback" not in completed.stdout
+
+
+def test_script_writes_utf8_when_locale_cannot_represent_chinese() -> None:
+    environment = dict(os.environ)
+    environment["PYTHONIOENCODING"] = "cp1252"
+    completed, _ = run_script("--quick", env=environment)
+    assert completed.returncode == 0, completed.stderr
+    assert "并发通道" in completed.stdout
+    assert "加速比" in completed.stdout
+
+
+def test_error_reason_survives_locale_encoding(tmp_path: Path) -> None:
+    environment = dict(os.environ)
+    environment["PYTHONIOENCODING"] = "cp1252"
+    missing = tmp_path / "missing.py"
+    completed, _ = run_script("--quick", "--json", "--simulator", str(missing), env=environment)
+    assert completed.returncode != 0
+    assert "模拟器" in completed.stderr
+    assert "Traceback" not in completed.stderr
 
 
 def test_performance_document_documents_concurrency_section() -> None:

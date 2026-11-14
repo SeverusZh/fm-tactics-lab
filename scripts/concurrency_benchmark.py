@@ -211,7 +211,19 @@ def format_table(report: Mapping[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def _configure_streams() -> None:
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is None:
+            continue
+        try:
+            reconfigure(encoding="utf-8")
+        except (OSError, ValueError):
+            continue
+
+
 def main(argv: list[str] | None = None) -> int:
+    _configure_streams()
     parser = argparse.ArgumentParser(description="并发通道对比基准")
     profiles = parser.add_mutually_exclusive_group()
     profiles.add_argument("--quick", action="store_true", help="快速档位：2 场，通道 1 与 2")
