@@ -137,10 +137,10 @@ native/                C++17 适配器
 - 错误统一为 `{"error":{"code","message","details","retriable","retry_after_seconds"}}`。
 - 列表统一支持 `limit`、`offset`，返回 `items`、`total`、`next_offset`。
 - 写操作支持 `Idempotency-Key`；同键同载荷返回首次响应，同键异载荷返回 409。
-- 长任务通过 `GET /api/events` 的 SSE 推送进度；React 使用 fetch 流式读取并携带 `Authorization: Bearer`、`Accept: text/event-stream` 与 `Last-Event-ID`，不使用 EventSource 或 URL token；CORS preflight 允许 `Authorization` 与 `Last-Event-ID`。轮询保留为降级路径。当前 Phase 0 切片只发送 ready 事件，`Last-Event-ID` 在 Phase 3 接入。
-- `registry.py` 为每个能力定义名称、输入模型、输出模型、幂等性、破坏性与处理器。
-- HTTP 路由、CLI 命令与 MCP 工具全部从同一注册表生成；除 `/api/health`、`/api/version`、`/api/openapi.json`、`/api/docs`、静态资源与显式系统路由 `/api/shutdown`、`/api/events` 外，不允许手写业务路由。
-- 契约测试必须验证每个能力在 HTTP、CLI、MCP 三个入口都存在，且输入/输出 schema 一致。
+- 长任务通过 `GET /api/events` 的 SSE 推送进度；React 使用 fetch 流式读取并携带 `Authorization: Bearer`、`Accept: text/event-stream` 与 `Last-Event-ID`，不使用 EventSource 或 URL token；CORS preflight 允许 `Authorization` 与 `Last-Event-ID`。服务端先发送 ready 事件并支持按 `Last-Event-ID` 重放，客户端仅在重连时携带最后事件 id，断开后按 1s 起、30s 封顶的指数退避重连；事件驱动的查询失效按 300ms 窗口合并，页面保留手动刷新作为降级路径，未实现自动轮询。
+- `registry.py` 声明每个能力的名称、HTTP 方法与路径、CLI 命令路径与 MCP 工具名；三入口适配层当前手写并保持薄，`fm27lab/tests/test_registry_contract.py` 校验 OpenAPI 业务操作、CLI 叶子命令与 MCP 工具名同注册表一致，并检测名称、方法与路径约定漂移。输入/输出模型尚未纳入注册表。
+- 业务路由只允许在 `fm27lab/interfaces/http/routes/` 的模块中声明并登记到 `registry.py`；除 `/api/health`、`/api/version`、`/api/openapi.json`、`/api/docs`、静态资源与显式系统路由 `/api/shutdown`、`/api/events` 外，不得在其他位置新增业务路由。
+- 契约测试验证每个能力在 HTTP、CLI、MCP 三个入口都存在，并校验 OpenAPI 操作、CLI 命令与 MCP 工具名一致；输入/输出 schema 快照尚未建立。
 - MCP 提供 tools、resources、prompts，并保留 stdio 传输。
 
 ## 存储
@@ -199,7 +199,7 @@ native/                C++17 适配器
 ## 测试与审核
 
 - TDD Route: strict。每个行为先写失败测试，再写最小实现。
-- Python 使用 pytest；前端使用 Vitest、React Testing Library 与 Playwright；Rust 核心模块使用 cargo test。
+- Python 使用 pytest；前端使用 Vitest 与 React Testing Library；Rust 核心模块使用 cargo test。Playwright 主流程与可访问性检查为待补项。
 - 契约测试覆盖 OpenAPI、CLI 帮助、MCP 工具 schema、三入口能力对齐，以及由 OpenAPI 生成的 TypeScript 类型快照。
 - 集成测试使用 fake engine；真实原生比赛测试需要 Windows + FM27，作为发布前人工/CI 门槛。
 - 每个切片由独立审核子代理只读审查，给出 findings 与明确 PASS/FAIL；未通过不得进入下一阶段。

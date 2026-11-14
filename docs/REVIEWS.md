@@ -149,6 +149,13 @@
 | 2026-11-14 | 安全审计 Minor 收口 | docs/SECURITY.md、fm27lab/sidecar.py、tests/test_security_boundaries.py、tests/test_http_health.py、.gitignore | PASS | endpoint.json 写入与替换失败改 try/finally 清理并补两条失败路径用例、隐私测试扩到 9 条忽略规则与跟踪清单负向断言、CORS 补 allow_credentials 断言、.gitignore 补 *.db 与 endpoint.json、文档引用与 umask 措辞修正；M9/M10/M11 全部被杀；2096 项 pytest。 |
 | 2026-11-14 | README 中英文重写 | README.md、README.en.md | PASS | 删除 v1 语义（EXE 打包与自带 Python 启动、--headless 与启动器命令、存档战术库批量导出与覆盖名单、自由推演模式、托盘菜单、旧截图引用），改写为 v2 架构、CLI/MCP/HTTP 三入口、实验与结果流程、构建与测试、版本状态；26 项数字与常量逐条核对一致（51 能力、54 CLI 叶子命令、49 MCP 工具、55 OpenAPI 操作、1–256 并行、10000 场与种子、23 人 69 属性 15 位置、14 指标、1–32 对比候选与 20000 重抽样）；两文件各 167 行、17 标题对称、无图片引用、v1 残留词 0 命中；3 项 Minor 为鉴权例外、引擎能力措辞与版本字符串。 |
 | 2026-11-14 | README 措辞修正复核 | README.md、README.en.md | PASS | 补公开文档路由的鉴权例外、把引擎能力为空改为运行时目录 available=false、源码版本改为 2.0.0.dev0 并注明前端包版本；三条与代码事实一致、中英对称、恰六行变化无其他行被误改、167 行与 7 个二级标题不变；残余 Minor 为 catalog.json 也可能来自数据目录，已改为“没有可用的 catalog.json”；node 两测试与 281 项 unittest 通过。 |
+| 2026-11-14 | 页面错误边界 | web/src/components/ErrorBoundary.tsx、ErrorBoundary.test.tsx、App.tsx、App.test.tsx | PASS | 按路由 key 复位、渲染失败显示回退与重试、单页错误不影响导航；6 条组件用例与 3 条集成用例，10 变异 9 杀且空 componentDidCatch 判等价；273 项 Vitest、typecheck 与 build 通过。 |
+| 2026-11-14 | 性能基准脚本与文档 | scripts/benchmark.py、fm27lab/tests/test_benchmark.py、docs/PERFORMANCE.md | PASS | HTTP 只读路径、场景归一化与客队池展开、bootstrap 重抽样三类指标与 quick/json 输出；quick 子进程实测 0.63–0.67 秒、full 2.78 秒，无鉴权请求 401；13 变异 11 杀，quick 档位与 p95 取整两条为测试保真缺口；2099 项 pytest。 |
+| 2026-11-14 | 性能基准测试补强复核 | fm27lab/tests/test_benchmark.py | PASS | 新增 quick 迭代常量精确断言与线性插值百分位单测，quick 档位与 p95 取整两条变异由存活转为被杀且各只被目标用例杀死；实现与文档零改动；2101 项 pytest。 |
+| 2026-11-14 | 前端 SSE 事件订阅 | web/src/lib/events.ts、events.test.ts、useAppEvents.ts、JobsPage.tsx、ExperimentsPage.tsx、ResultsPage.tsx 及测试 | PASS | fetch 流解析与畸形帧容错、Last-Event-ID 仅重连带、指数退避与断线提示、三页面事件到查询失效映射、手动刷新降级；36 条新增用例，29 变异 23 杀；309 项 Vitest、typecheck 与 build 通过。 |
+| 2026-11-14 | SSE 事件刷新合并 | web/src/lib/useEventRefresh.ts、useEventRefresh.test.ts、三页面与测试 | PASS | 300ms 尾沿窗口按键合并失效、卸载清理、事件语义与订阅切片等价；318 项 Vitest 连跑两次、12 变异 10 杀；2 条存活为等待窗口短于合并窗口与 keysRef 刷新缺测试。 |
+| 2026-11-14 | SSE 刷新合并测试补强复核 | web/src/pages/ResultsPage.test.tsx、web/src/lib/useEventRefresh.test.ts | PASS | 等待改为合并窗口加余量、新增重渲染后按最新查询键失效用例，两条存活变异被杀且附加四条变异全部被杀；仅测试变化、319 项 Vitest 两次与 typecheck 通过。 |
+| 2026-11-14 | 跨平台测试与场景快照修复 | fm27lab/application/experiment_material.py、fm27lab/adapters/host_resources.py、tests/test_experiments_service.py、test_host_resources.py、test_cli_commands.py | PASS | 场景与 provenance 按 UTF-8 字节写出、实验夹具改用临时目录、sysconf 探测可注入且 Windows 分支保留、CLI 帮助断言不依赖富文本；2101 项 pytest 与 ruff 通过，Linux 与 Windows CI 对应用例转绿；残留 Minor 为 manifest 待重建与跨平台计时阈值。 |
 
 ## 审核规则
 
@@ -157,6 +164,6 @@
 - 先列 findings，再列已验证项，最后给结论。
 - Critical 或 Important 未闭环时不得标记 PASS。
 - 审核通过不等于整体发布就绪；发布仍需最终验收与 Windows 真机验证。
-- 旧 `tests/` 当前 281 项通过，覆盖 legacy UI/HTTP/CLI/MCP、存档战术库、池与名单；新 `fm27lab/tests` 当前 2096 项通过，覆盖包版本、CLI 环境继承、配置/路径边界、SQLite 迁移/事务与池/草案/任务/存档/产物/幂等仓储、HTTP 健康/池/草案/任务 CRUD、鉴权、错误封套、Origin、ACL 失败清理、sidecar serve、23 人名单、真实名单应用、scenario 归一化、原生场景编码与定位球记录、场景物化与实验接线、原生宿主按需构造与按任务并行配置、宿主资源探测、catalog/双阶段战术与草案写入校验、客队战术池选择与整批展开、结果指标与跨任务对比、任务状态机与输出状态枚举、存档状态机与应用服务、安全边界与数据目录权限、README 中英文一致；Vitest 当前 264 项。
+- 旧 `tests/` 当前 281 项通过，覆盖 legacy UI/HTTP/CLI/MCP、存档战术库、池与名单；新 `fm27lab/tests` 当前 2101 项通过，覆盖包版本、CLI 环境继承、配置/路径边界、SQLite 迁移/事务与池/草案/任务/存档/产物/幂等仓储、HTTP 健康/池/草案/任务 CRUD、鉴权、错误封套、Origin、ACL 失败清理、sidecar serve、23 人名单、真实名单应用、scenario 归一化、原生场景编码与定位球记录、场景物化与实验接线、原生宿主按需构造与按任务并行配置、宿主资源探测、catalog/双阶段战术与草案写入校验、客队战术池选择与整批展开、结果指标与跨任务对比、任务状态机与输出状态枚举、存档状态机与应用服务、安全边界与数据目录权限、事件流前端订阅与刷新合并、页面错误边界、性能基准、跨平台测试、README 中英文一致；Vitest 当前 319 项。
 - Tauri sidecar supervisor 的静态实现已存在，但 Linux 无 WebKitGTK，Windows CI 的 `cargo build`/`cargo test`/安装包构建是唯一编译证据。PyInstaller onedir sidecar 已在 Linux 构建并通过 ready/health/shutdown 冒烟测试。
-- Rust 核心 crate 当前 4 项 cargo test 通过；前端当前 264 项 Vitest（10 个文件）通过、类型检查与生产构建通过。Windows CI 已通过 cargo build/test、NSIS 安装包与 sidecar 资源断言；Linux 本机仍无 WebKitGTK。合并、设计、sidecar、壳层、名单五个审核门均已 PASS。
+- Rust 核心 crate 当前 4 项 cargo test 通过；前端当前 319 项 Vitest（13 个文件）通过、类型检查与生产构建通过。Windows CI 已通过 cargo build/test、NSIS 安装包与 sidecar 资源断言；Linux 本机仍无 WebKitGTK。合并、设计、sidecar、壳层、名单五个审核门均已 PASS。
