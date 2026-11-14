@@ -6,168 +6,162 @@
 
 **Test your tactics locally with the original FM27 match engine.**
 
-Configure both squads in Free Simulation. Import an FM27 career save through the Save Tactic Library to read league tactics, real AI plans and real squads, then test them with the away tactic pool. Compare scores, xG, shots, possession and passing statistics across complete matches.
+FM Tactics Lab v2 is a Tauri 2 desktop app with a Python sidecar: the shell starts a local sidecar, a React 19 frontend calls it over loopback HTTP, and the sidecar drives your local FM27 engine through batches of complete matches. Manage a 23-player squad, two-phase tactics and player attributes, compare setups with the away tactic pool or same-seed A/B runs, and keep results in local SQLite. The same service is available to automation through a CLI and MCP.
 
-Use it to explore which formation suits your players, how pressing or role changes affect performance, and whether an advantage holds across repeated matches.
+Use it to answer:
 
-## Interface preview
+- Which formation suits a given group of players?
+- How do pressing, defensive line or role changes affect attack and defence?
+- Does an advantage hold across seeds, opponents and home or away fixtures?
 
-Edit possession and out-of-possession formations, team instructions and player roles side by side.
-
-![Dual-phase tactical boards and team instructions](docs/screenshots/tactics.png)
-
-The screenshots show Free Simulation with the included example players. The interface is in Chinese.
-
-Save tactics: read a career save, browse any loaded league's coaches by primary and secondary preference preset, then export or add them to the away tactic pool.
-
-![Save tactics page](docs/screenshots/save-tactics.png)
-
-Away tactic pool: open the pool button beside Run matches to draw away tactics by weight or rotate through every candidate, using uniform attributes or save squads.
-
-![Away tactic pool page](docs/screenshots/away-pool.png)
-
-## How it works
-
-The tool loads the original match engine from your local FM27 installation. It supplies player and tactical inputs, then runs the original code for decisions, movement, passing, challenges, shooting and match rules until the match finishes naturally.
+## Architecture
 
 ```text
-Players and tactics → Original engine runs a complete match → Scores, events and statistics → Batch comparison
+Desktop shell Tauri 2 + React 19 ─┐
+CLI                              ─┼── loopback HTTP + Bearer token ──> Python sidecar (fm27lab)
+MCP client                       ─┘                                          │
+                                                                             ├─ SQLite results
+                                                                             └─ native engine workspace
 ```
 
-**Match calculation and visual presentation are separate layers.** The engine advances players, the ball and match events; the match view presents those states. FM Tactics Lab runs detailed matches in the background and collects their results without displaying the pitch.
+- The sidecar only listens on loopback. After binding, it writes the url, port, token, pid, data_dir and engine_root to `<data_dir>/agent/endpoint.json` and removes the file on exit. Business `/api` requests require a Bearer token except `/api/health` and `/api/version`; `/api/docs` and `/api/openapi.json` are public documentation routes.
+- The engine is constructed lazily. Without an available `catalog.json`, the runtime catalog returns `available=false` and experiment submission returns `400 validation_failed`; when engine execution raises, `POST /api/experiments/start` returns `503 engine_unavailable`. An engine workspace contains `fm27_native/FM27Simulator.exe` and `catalog.json`.
+- Experiment pipeline: a draft and an optional baseline draft are materialized under `<data_dir>/agent/experiments/<job_id>/`, executed in parallel by the native engine thread pool, and stored in SQLite. The match count is seeds times variants, capped at 10000 matches and 10000 seeds.
 
-### Is this a played match, a holiday simulation, or Instant Result?
+## What works today
 
-The tool runs the **original detailed match calculation**, corresponding to the detailed simulation layer used when entering a match. Set your inputs before kickoff, let the engine finish, then inspect the results. Live player interventions such as changing tactics or giving touchline instructions belong to the normal game interface.
+- Domain model: two-phase tactics with 11 players in each phase, a 23-player squad, 69 player attributes including 15 position attributes, and an away tactic pool with random or rotation draws and uniform or real-roster players.
+- Experiment execution: same-seed A/B comparison, 1–256 workers, a resource pre-check that rejects submissions by default when less than 2 GiB of memory or insufficient disk is available, with an explicit override, and 14 metrics per job.
+- Result analysis: per-match records, CSV export, home-side aggregation; job comparison over 1–32 candidates and 1–20000 resamples with paired deltas and bootstrap confidence intervals.
+- Interfaces: 51 capabilities in 11 groups; OpenAPI lists 55 operations; the CLI has 54 leaf commands; MCP exposes 49 tools, 4 read-only resources and 2 prompts.
+- Desktop: seven pages for tactics, players, saved-tactic library, experiments, results, jobs and settings. The bottom run bar is not wired to submission yet; experiments are submitted from the Experiments page.
 
-A complete background simulation can also use detailed match logic. Holiday and Instant Result additionally involve game-level task scheduling and assistant management. Think of this project as a way to run the original detailed engine repeatedly for tactical experiments.
+## Quick start
 
-### Comparing results
+### Requirements
 
-Player actions and match rules use the original implementation. Scores, xG, shots and passing statistics are read from native match objects.
+- Desktop build and run: Windows x64, Python 3.12 x64, Node 22+, pnpm 11, Rust stable, MSVC C++17 with the Windows SDK, and WebView2.
+- Python, frontend and Rust core tests run on Linux.
+- A local FM27 installation; the adapter reference build is `27.0.1+2494687`.
+- An engine workspace containing `fm27_native/FM27Simulator.exe` and `catalog.json`; the catalog may sit at the workspace root or under `fm27_native/`.
 
-Each batch uses a sequence of random seeds. When comparing a saved reference with an edited setup, both variants run with the same seed sequence. Repeated matches help show average changes and variability.
+### Install dependencies
 
-## v2.0.0 in progress
+```powershell
+py -3.12 -m venv .venv
+.venv\Scripts\Activate.ps1
+python -m pip install -e ".[dev]"
+pnpm --dir web install
+npm install --global @tauri-apps/cli@^2
+```
 
-`refactor/v2-modular` moves the desktop shell to Tauri 2 + Rust, with a Python sidecar owning the domain, engine, SQLite, CLI and MCP, and a React 19 + TypeScript frontend. Target behavior is described in [DESIGN.md](DESIGN.md); progress is tracked in [TODO.md](TODO.md).
+### Start the sidecar
 
-This refactor removes Career-save Matches, keeps the Save Tactic Library as the only save import entry, standardizes match squads at 23 players, and supports 1–256 manual workers. Upstream v1112 worker reuse is merged. Stable builds remain on the upstream Releases page.
+```powershell
+python -m fm27lab serve --data-dir data --engine-root <engine workspace> --dev
+```
 
-## Download and launch
+The sidecar listens on loopback and takes its port from `--port`; the examples below use 18765. On Windows the default data directory is `%LOCALAPPDATA%\FM27TacticsDesktop`; `--data-dir` or `FM27LAB_DATA` overrides it.
 
-The current refactor branch is **v2.0.0-dev**; the existing executable still uses the v1112 label and the new Tauri build is not released yet. Download stable desktop builds from [GitHub Releases](https://github.com/lqf0624/fm-tactics-lab/releases). Exit the previous app from its tray menu before launching an update.
+### Desktop dev shell
 
-Install FM27, open Steam and sign in to the account that owns the game, then launch the EXE. The tool looks for your installation automatically. You can also select the game root containing `fm_Data` and `shared` in the engine settings at the top.
+```powershell
+$env:FM27LAB_PYTHON="$PWD\.venv\Scripts\python.exe"
+$env:FM27_ENGINE_ROOT="<absolute engine workspace path>"
+tauri dev
+```
 
-The EXE includes its Python runtime. Players do not need Python or a compiler. The interface follows the Windows display language and supports Chinese and English. Source setup is described in the [developer guide](docs/DEVELOPMENT.md).
+- Run from the repository root; Tauri locates `src-tauri` by itself.
+- A debug build starts `python -m fm27lab serve` from the shell; without `FM27LAB_PYTHON`, the python on PATH is used.
+- The shell uses the app-local data directory, not the repository `data/`. Setting `FM27LAB_SIDECAR` makes the shell launch an existing sidecar executable instead.
 
-## Save tactic library
+### Browser frontend
 
-The Save Tactic Library is the only save import entry. Read a save there, then pick any loaded league in the game world to list every opponent head coach's preferences, excluding your club. Each coach produces up to two original game presets: one for his primary preferred formation and one for his secondary formation (tactic 1 and 2; a single preset remains when the secondary preference is missing or identical). Export the league's tactics into a local folder or add them to the away tactic pool in one click; pool imports are not deduplicated, so the same tactic may be added more than once and keep the club's current squad and attributes for real-roster mode. The per-row **覆盖主队名单** (Overwrite home squad) button copies that save club's squad and attributes onto the home team on the player attributes page. Exported files follow `club-coach-第1套战术.fmf` / `club-coach-第2套战术.fmf` (the tactic suffix is Chinese). League and country names are read from the local FM27 game database and follow the interface language (Chinese or English); each league is listed once, using the active or nearest schedule, and unavailable names fall back to league numbers. Exported files are preset approximations, not the actual match-day tactics.
+```powershell
+python -m fm27lab serve --data-dir data --engine-root <engine workspace> --dev --port 18765
+$env:VITE_API_URL="http://127.0.0.1:18765"
+$env:VITE_API_TOKEN=(Get-Content data\agent\endpoint.json | ConvertFrom-Json).token
+pnpm --dir web dev
+```
 
-Opponents in your current league can also batch-generate **real AI tactics**: for each club the tool reads its current head coach, current squad and your own coach, runs the original engine's zero-tick match preparation, and reads back the AI-generated two-phase plan (mentality, team instructions, roles and duties, player instructions and phase mapping). Every opponent produces two plans - tactic 1 for the opponent at home and tactic 2 for the opponent away - and they replace the two list columns (shown as `club home tactic` / `club away tactic`). Generation shows a progress bar, caches finished variants and only fills missing clubs and contexts on later full runs, while a single-club button rebuilds both of that club's plans; the cache is bound to the generation engine identity, so a changed original engine or native adapter invalidates it and regenerates. Export as `club-coach-主场战术.fmf` or `club-coach-客场战术.fmf` or import straight into the away tactic pool; export and pool import merge generated plans with still-available manager presets per club and variant, keep presets for clubs without generated plans and report them as omitted. This is the original AI's output in a controlled preview context (current save squad, fixed preview seed 0 and the tool's default player-side template), not a recording of a finished match; a real fixture is generated by the in-game AI from its own squad and context, and this tool never recalculates per match - the away tactic pool stores this fixed plan. Clubs whose coach profile falls outside the engine's supported range keep their presets and show the failure reason.
+Vite listens on port 1420. In development, a browser without the Tauri shell uses `VITE_API_URL` and `VITE_API_TOKEN` to reach the sidecar.
 
-![Batch real AI tactic generation progress](docs/screenshots/save-tactics-progress.png)
+### MCP setup
 
-## Free Simulation
+```json
+{
+  "mcpServers": {
+    "fm27lab": {
+      "command": "python",
+      "args": ["-m", "fm27lab", "mcp"],
+      "env": { "FM27LAB_DATA": "<absolute sidecar data_dir>" }
+    }
+  }
+}
+```
 
-### 1. Configure both squads
+- Start the sidecar first; the MCP subcommand checks `/api/health` before connecting.
+- `FM27LAB_DATA` must match the sidecar `--data-dir`.
+- Put the global `--data-dir` before the subcommand, for example `python -m fm27lab --data-dir data mcp`.
 
-Start with the included player inputs and choose each side's starting lineup. Both sides can be edited independently. In **球员属性** (Player Attributes), adjust abilities and positional familiarity. Export a full JSON setup to keep your experiment.
+### Build the desktop installer
 
-![Player attributes and whole-squad editing](docs/screenshots/players.png)
+```powershell
+python scripts/build_sidecar.py
+tauri build --bundles nsis
+```
 
-### 2. Import or edit a tactic
+`tauri build` runs `pnpm --dir web build` and `scripts/build_sidecar.py` first, then writes the installer to `src-tauri/target/release/bundle/nsis/`.
 
-Open **战术板** (Tactics Board):
+### Source edition browser UI
 
-- Use **导入主队／客队比赛战术 FMF** to import a home or away tactic.
-- Edit **有球阶段** (In Possession) and **无球阶段** (Out of Possession) separately; both phases share the starting lineup.
-- Drag shirts to swap players while keeping roles, duties and instructions attached to their positions. Moving to an empty position prompts for confirmation if any settings need to change.
-- Adjust mentality, passing, pressing and other team instructions.
-- Configure or import set-piece routines separately in **定位球与职责** (Set Pieces and Responsibilities).
-- **Away tactic pool**: open the pool button beside Run matches to enable it, manage candidates, import FMF and choose the draw mode and away squad source. Save tactics can add candidates without enabling the pool. Disabling it retains candidates and settings and uses the currently selected opponent tactic.
-- Draw modes: random draws by weight for each match; rotation plays every candidate in order for the configured number of rounds, and matches per variant automatically equal candidates times rounds. Both modes are derived from the task seed and reproduce within the same experiment.
-- Away squads: uniform sets every away player's ability attributes to the configured panel value (15 by default) and gives starters maximum positional familiarity 20 for the tactic's positions; real roster uses the saved club's current squad and attributes and requires every candidate to come from Save tactics. FMF-imported tactics have no saved squad and therefore only support uniform attributes. Saved squads stay inside the local setup; saved-squad candidates are capped at about 1.5 MB in total, so reduce or clear candidates when the limit is hit.
+Windows x64 only; it needs CPython 3.12 and MSVC. Prepare the private assets and compile the native adapter as described in the Source edition section of the [build guide](docs/DEVELOPMENT.md).
 
-Imported tactics remain editable. The dice button beside the starting seed generates a random seed.
+```powershell
+.venv\Scripts\python.exe scripts/run.py --game-root "D:\Games\Football Manager 27"
+```
 
-### 3. Run matches
+The launcher prints a loopback address; press Ctrl+C to stop.
 
-At the bottom, set the starting seed, matches per variant and worker count, then select **运行比赛** (Run Matches). Start with a small batch to check your setup.
+### Tests
 
-| Setting | Purpose |
-| --- | --- |
-| 起始种子 — Starting seed | Controls the batch's seed sequence for later comparison; the dice button generates a random value |
-| 每方案场数 — Matches per variant | Number of matches for each setup; in rotation mode this equals candidates times rounds |
-| 并行数 — Workers | Number of concurrent native workers |
-| 快速模式 — Quick mode | Complete detailed matches, scores and team statistics, with reduced player-event collection |
-| 完整模式 — Full mode | Also collects and checks scorer, assist and card details |
+```powershell
+python -m pytest
+pnpm --dir web test
+cargo test --manifest-path rust/Cargo.toml -p fm27lab-core
+```
 
-**Quick mode still runs complete detailed matches.** The difference is the scope of event collection and validation.
+## Repository layout
 
-### 4. Read the results
+```text
+fm27lab/    Python sidecar: domain, application, interfaces and adapters
+web/        React 19 and Vite frontend
+src-tauri/  Tauri 2 desktop shell
+rust/       Rust core library
+native/     Native adapter sources
+src/        Source edition browser UI entry
+scripts/    Build, packaging and source export scripts
+docs/       Development, interface, verification and fidelity docs
+```
 
-Open **实验结果** (Results) for batch summaries, averages and individual matches. Full mode includes player-event details. Export individual results as CSV to keep your own comparisons.
+## Version status
 
-Failed matches are listed separately. Aggregates use completed matches that passed validation.
+The current branch is `refactor/v2-modular`, the source version `2.0.0.dev0` (the frontend package version is `2.0.0-dev`), and the API version `fm27lab/v2`. No v2 installer has been released yet; remaining release items are tracked in [TODO](TODO.md). For stable versions, use the upstream Releases.
 
-![Paired tactical comparison and native team statistics](docs/screenshots/results.png)
+The new version starts with an empty SQLite database and does not migrate older experiment data; view or resume older jobs in the previous version. The supported platform is Windows x64, the adapter reference build is `27.0.1+2494687`, and the game engine and resources come from your local installation.
 
-Example: six completed matches per variant, showing the comparison, xG, shots, possession and passing statistics.
+## Documentation
 
-## Example: does stronger pressing help?
+- [Design](DESIGN.md)
+- [Build and development](docs/DEVELOPMENT.md)
+- [Agent quick start](docs/AGENT_QUICKSTART.md)
+- [Agent integration interface](docs/AGENT_INTEGRATION.md)
+- [Agent verification](docs/AGENT_VERIFICATION.md)
+- [Security boundaries](docs/SECURITY.md)
+- [Troubleshooting](docs/TROUBLESHOOTING.md)
+- [Simulation fidelity](docs/SIMULATION_FIDELITY.md)
+- [Contributing](CONTRIBUTING.md)
 
-1. Load your original tactic, confirm both squads and set pieces, and save it as the reference.
-2. Increase pressing while keeping the other inputs unchanged.
-3. Enable **与已保存战术对比** (Compare with Saved Tactic), choose the seed and batch size, then run.
-4. Compare goals for and against, xG, shots and possession.
-5. Try another seed sequence or opponent setup, or swap home and away, to examine stability.
+## License
 
-With 100 matches per variant, the tool runs 100 reference matches and 100 edited matches: 200 in total. The saved reference contains the entire setup, so changing one thing at a time makes the comparison easier to interpret.
-
-## Reading the numbers
-
-| Question | Look at |
-| --- | --- |
-| Is attack improving? | Goals, xG, shots and shots on target |
-| Is defence improving? | Opponent goals, xG, shots and shots on target |
-| Is the playing style changing? | Possession, passes and completed passes |
-| Is the advantage stable? | Multiple seed sequences, opponent setups and home/away comparisons |
-
-For example, after increasing possession, check whether the side also creates more or better shooting opportunities.
-
-### Starting conditions
-
-Both full squads start with condition and match sharpness at 100%, accumulated fatigue at 0, morale at 20/20, team cohesion at 80 and club cohesion at 100. States evolve normally after kickoff. Match squads are standardized at 23 players; a 26-player saved squad is truncated to 23 with a visible notice. This makes repeated tactical comparisons easier; consider actual fatigue, morale, cohesion and injuries when applying findings in your season.
-
-### Tactical effectiveness experiment
-
-Set tactical understanding, player buy-in and opposition information separately for each team on a 0–100 scale. The native engine calculates player ability contributions from each player's CA and suitability for both phase roles. The experiment is off by default. Saved-tactic effectiveness values are not read from the save.
-
-The away tactic pool can be combined with experimental tactical execution. Each side retains its three manual scores, while the native engine computes ability contribution from the current away players' CA and the assigned tactic's two-phase roles. New native hosts reuse workers for the whole lane; older hosts fall back to isolated processes. Higher parallelism is not guaranteed to improve throughput. The pool changes tactics; uniform mode retains the current away squad, real-roster mode uses the saved club's squad. Native-generated tactics remain incompatible with the pool.
-
-## Save and export
-
-- **Full setup JSON:** save both sides and reopen the setup for later experiments.
-- **Tactic FMF:** export the selected side's tactic; set pieces have separate export controls.
-- **Match CSV:** save individual results for analysis.
-- **Experiment history:** name, find, rename or delete experiments. Confirming deletion removes their local results and logs.
-- **Tray menu:** open the local results directory or exit the desktop tool.
-
-## Version and project information
-
-The current source version is **v2.0.0-dev**, for Windows x64. The adapter reference build is `27.0.1+2494687`. Tool code is licensed under MIT; the engine and game resources come from your local installation.
-
-Original engine code and a career match's complete conditions are separate considerations. This tool standardizes starting states; inputs, random states and in-match interventions affect results. Evidence and validation scope are described in [Simulation Fidelity](docs/SIMULATION_FIDELITY.md).
-
-For startup, path or version issues, see [Troubleshooting](docs/TROUBLESHOOTING.md). Developers can read the [build guide](docs/DEVELOPMENT.md), [contribution guide](CONTRIBUTING.md) and [third-party notices](THIRD_PARTY_NOTICES.md).
-
-The interface and system tray follow the Windows display language. Simplified Chinese and English are supported, with English as the fallback. Player names, club names, tactic data and raw logs retain their original text.
-
-## v2.0.0 compatibility
-
-This refactor keeps the v1112 batch performance work. Each supported native worker remains alive until its assigned batch finishes instead of restarting every 64 matches, including execution experiments and random-opponent A/B batches. Match objects are released and execution inputs are reset after every match. Save parsing and the Save Tactic Library remain available; Career-save Matches are removed. Official FM27 27.0.1+2494687 support remains available. The new version starts with an empty SQLite database; use the previous version to view or resume unfinished older jobs.
-
-Parallel workers 1–256 are always valid input; hardware estimates only set the default recommendation and values above it only warn. With less than 2 GiB available memory or insufficient disk, submission is rejected by default unless explicitly overridden. Counts above eight have not been benchmarked and higher parallelism is not guaranteed to improve throughput.
+Tool code is licensed under MIT. Save reading depends on `fmsave 0.9.0` and compressed data on `backports.zstd 1.8.0`. Third-party components and font licenses are listed in [Third-party notices](THIRD_PARTY_NOTICES.md).
