@@ -1,756 +1,666 @@
 # AI Agent 接入规格
 
-v2 已删除存档对战与 `career_*` 接口；本文只描述自由推演、战术文件、战术池与存档战术库。
-
-
-状态：设计草案 v1，待评审
-适用范围：本机 Windows 部署；MCP 为主、CLI 为辅；首期核心能力
-快速启动：[AGENT_QUICKSTART.md](AGENT_QUICKSTART.md)
-依据：v1112 源码静态分析；控制面与推演内核的逐行证据来自本机只读分析，不随仓库分发。
-
-## 决策基线
-
-| 决策 | 结论 |
-| --- | --- |
-| 形态 | MCP 为主、CLI 为辅，共用客户端库 |
-| 改造 | 允许服务端增量改造 |
-| 部署 | 仅本机 Windows |
-| 并发 | 单任务串行；UI 忙时报 409，Agent 提交进入 FIFO 队列 |
-| 草案 | draftId 与文件化草案 |
+状态：v2 实现事实。本文按本仓库 2.0.0.dev0 代码与实测行为核对，核对日期 2026-11-14。历史上以启动器 EXE 与 fm27lab/v1 命名空间为前提的设计章节已删除，替代事实见各节代码位置。
 
 ## 1. 目标与非目标
 
-目标：
+目标
 
-- 让 AI Agent 发现本机应用、校验引擎、创建草案、提交批次、等待进度、读取结果、导出战术文件。
-- 契约可版本化、可 schema 化、可测试；CLI 与 MCP 行为一致。
-- 保持现有 Web UI、原生兼容门禁与完赛校验不变。
+- 同一台机器上的 Agent 客户端通过回环 HTTP 调用 sidecar，完成战术池、草案、实验、结果、存档与产物的读写。
+- 提供两种稳定封装：fm27lab CLI 与 fm27lab MCP 服务，二者都只依赖发现文件，不自行拉起进程。
+- 契约以代码为唯一事实来源：参数字段见 fm27lab/interfaces/http/routes，能力映射见 fm27lab/registry.py，OpenAPI 见 GET /api/openapi.json。
 
-非目标：
+非目标
 
-- 远程或局域网访问；默认仅本机 loopback。
-- 多租户并发；单条 FIFO 提交队列由服务端串行执行，取消与排队位置可见。
-- 定位球片段实验、实验执行力、原生 AI 生成对手；后续版本。
-- 绕过原生兼容检查、DLL 指纹门禁或完赛校验。
-- 游戏资源提取、再分发或替代原生引擎。
-- 比赛中实时指挥。
+- 不提供远程访问、多用户隔离、Cookie 会话或浏览器登录态。
+- 不提供 Agent 专用命名空间；全部接口位于 /api 下。
+- 不提供推送式进度通知；长任务靠轮询任务与运行接口。
 
 ## 2. 术语
 
 | 术语 | 含义 |
 | --- | --- |
-| App | 桌面应用进程，含 Launcher、Python 控制面与原生宿主 |
-| Engine workspace | FM27_ENGINE_ROOT，含 fm27_native、默认编辑快照与 match.pkm |
-| Game root | 本机 FM27 安装目录 |
-| Scenario | schema 3 为权威，schema 4 为双阶段视图，含双方球队、球员、战术与定位球 |
-| Draft | Agent 侧文件化场景草案，带 id 与来源 |
-| Job | 一次批次实验 |
-| Run | 批次内单场，含比分、统计、事件与校验信息 |
-| Agent layer | src/fm27_agent 客户端库、fm27lab CLI、fm27lab-mcp sidecar |
+| App | Tauri 2 桌面壳，负责启动、守护与展示 sidecar |
+| Sidecar | fm27lab Python 进程，监听回环地址随机端口，暴露 /api 接口 |
+| 发现文件 | 数据目录下 agent/endpoint.json，客户端只读 |
+| 数据目录 | 平台默认或 FM27LAB_DATA 指定；存 SQLite、发现文件、产物与实验材料 |
+| 引擎工作区 | FM27_ENGINE_ROOT；含 fm27_native 目录与 catalog 数据 |
+| 草案 | 存于 SQLite drafts 表的场景记录 |
+| 池条目 | 存于 SQLite 的战术池条目库；实验用的 away_tactic_pool 是草案场景内嵌配置 |
+| 任务与运行 | Job 一次实验批次，Run 为其中一场比赛 |
+| 能力 | fm27lab/registry.py 的 Capability，统一映射 HTTP、CLI、MCP 三个入口 |
 
 ## 3. 部署与生命周期
 
 ### 3.1 拓扑
 
+客户端到 sidecar 的单跳链路
+
 ```text
-Agent client  ──stdio──  fm27lab-mcp sidecar ──HTTP loopback──  App
-     │                        │                                  ├─ Python 控制面
-     └──shell──  fm27lab CLI ─┘                                  └─ FM27Simulator.exe
+Agent client / CLI / MCP
+        |
+        | HTTP 127.0.0.1:<port>，Authorization: Bearer <token>
+        v
+fm27lab sidecar  ->  SQLite fm27lab.db
+        |        ->  agent/ 发现文件与产物
+        v
+原生引擎宿主  ->  fm27_native/FM27Simulator.exe
 ```
 
-- App 与 sidecar 运行在同一台 Windows 机器；CLI 同机运行。
-- sidecar 与 CLI 都不直接调用原生宿主，只调用 Agent 命名空间 HTTP 接口。
-- App 未运行时，sidecar 可选自动拉起 headless 实例；默认关闭自动拉起。
+- sidecar 只能由两方启动：Tauri 壳的 start_sidecar_inner，或人工执行 python -m fm27lab serve。证据 src-tauri/src/lib.rs:209-300、fm27lab/cli.py:66-87。
+- CLI 与 MCP 启动时只读 discovery 文件并探测 GET /api/health，不创建 sidecar 进程。证据 fm27lab/cli.py:121-140、fm27lab/client.py:101-141。
+- 同一时刻最多一个任务处于 running；再次启动返回 409 invalid_transition，消息为「已有任务在运行」。证据 fm27lab/application/experiments.py:257-299。
+- 桌面壳单实例运行；重启 sidecar 上限 3 次，每次重启生成新 token。证据 src-tauri/src/lib.rs:24-27、src-tauri/src/lib.rs:209-300。
 
 ### 3.2 发现文件
 
-路径：%FM27_DESKTOP_DATA%/agent/endpoint.json
-写入时机：Python 服务启动完成后原子写入；退出时删除。
-权限：当前用户可读写；建议启动时用 icacls 收紧到当前用户。
+路径为数据目录下 agent/endpoint.json，由 sidecar 启动时写入，退出时删除。证据 fm27lab/config.py:92-93、fm27lab/sidecar.py:33-66。
 
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
-| schema | int | 文件格式版本，首期 1 |
-| api | string | fm27lab/v1 |
-| url | string | http://127.0.0.1:<port> |
-| token | string | 32 字节随机数的 64 位十六进制，每次启动轮换 |
-| pid | int | Python 服务进程号 |
-| data_dir | string | 数据根目录 |
-| engine_root | string | 引擎工作区 |
-| game_root | string | 游戏安装目录，可为空 |
-| created_at | string | ISO 8601 本地时间 |
-| versions | object | server、adapter、engine_build、scenario_schema、batch_schema |
-| capabilities | array | free_run、comparison、fmf、repair、resume、cancel、idempotency |
-| limits | object | 与 manifest 中 limits 相同 |
+| schema | integer | 发现文件版本，当前为 1 |
+| api | string | 接口版本，当前为 fm27lab/v2 |
+| url | string | 形如 http://127.0.0.1:<port> 的回环根地址 |
+| port | integer | 实际监听端口；请求 0 时由系统分配 |
+| token | string | Bearer token；任意非空 ASCII 字符串，缺省时由 sidecar 生成 64 位小写十六进制（fm27lab/config.py:31-66） |
+| pid | integer | sidecar 进程号 |
+| data_dir | string | 数据目录绝对路径 |
+| engine_root | string 或 null | 引擎工作区；未配置时为 null |
+| created_at | string | 本地时区的 ISO 8601 时间 |
 
-### 3.3 无头模式与关闭
+```json
+{
+  "schema": 1,
+  "api": "fm27lab/v2",
+  "url": "http://127.0.0.1:54321",
+  "port": 54321,
+  "token": "<令牌；缺省生成为 64 位小写十六进制>",
+  "pid": 24680,
+  "data_dir": "/home/user/.fm27lab",
+  "engine_root": "/home/user/.fm27lab/engine",
+  "created_at": "2026-11-14T07:00:00.123456+08:00"
+}
+```
 
-Launcher 新增参数：
+写入与权限
 
-| 参数 | 行为 |
+- 先写 endpoint.json.tmp 再原子替换，权限 0600；Windows 上用 icacls 去掉继承。证据 fm27lab/sidecar.py:33-59。
+- 退出时删除发现文件；Tauri 壳停止 sidecar 后还会兜底删除 endpoint.json 与 .json.tmp。证据 fm27lab/sidecar.py:62-66、src-tauri/src/lib.rs:151-155。
+
+客户端校验与错误码
+
+- url 必须是 http 协议、回环主机且为根地址；token 必须非空 ASCII。证据 fm27lab/client.py:64-98。
+- 错误码：endpoint_missing 找不到发现文件、endpoint_unreadable 无法读取、endpoint_invalid 字段不合法。证据 fm27lab/client.py:106-141。
+- 本实现不生成 fm27lab.cmd，也不生成 mcp.json；客户端配置由用户自行编写，见 8.6。
+
+### 3.3 启动与关闭
+
+手工启动
+
+```bash
+python -m fm27lab serve \
+  --data-dir /absolute/path/data \
+  --engine-root /absolute/path/engine \
+  --host 127.0.0.1 \
+  --port 0
+```
+
+serve 选项
+
+| 选项 | 说明 |
 | --- | --- |
-| --headless | 不显示托盘、不打开浏览器，服务持续运行直到 shutdown 或进程结束 |
-| --port N | 固定端口，默认沿用 18765，被占用时仍回退临时端口 |
-| --data-dir PATH | 数据目录，默认 %LOCALAPPDATA%/FM27TacticsDesktop |
-| --game-root PATH | 游戏根目录，可省略，之后通过 engine select 设置 |
+| --data-dir | 数据目录；相对路径会被解析为绝对路径，不得为空且不得等于当前工作目录 |
+| --engine-root | 引擎工作区；可省略，省略时发现文件里 engine_root 为 null |
+| --host | 回环主机，默认 127.0.0.1 |
+| --port | 端口；默认 0 表示由系统分配 |
+| --token | 固定 Bearer token；省略时生成 32 字节随机数的十六进制 |
+| --dev 与 --no-dev | 是否允许 Vite 开发源 http://localhost:1420 |
 
-关闭流程：
+证据 fm27lab/cli.py:66-87、fm27lab/config.py:29-56。
 
-- 新增 POST /api/agent/v1/shutdown，要求 token。
-- 收到请求后取消活动任务，等待原生会话清理，最长 15 秒，然后退出。
-- 响应 202 后进程退出；sidecar 若自动拉起过实例则一并停止。
+环境变量
+
+| 变量 | 作用 |
+| --- | --- |
+| FM27LAB_DATA | 数据目录 |
+| FM27_ENGINE_ROOT | 引擎工作区 |
+| FM27LAB_TOKEN | 固定 token |
+| FM27LAB_PORT | 监听端口 |
+| FM27LAB_HOST | 监听主机 |
+| FM27LAB_DEV | 值为 1 时开启开发模式 |
+
+证据 fm27lab/config.py:69-85。
+
+桌面壳启动注入
+
+- 数据目录取 app_local_data_dir；引擎工作区取环境变量 FM27_ENGINE_ROOT，缺省为数据目录下 engine。
+- 注入 FM27LAB_DATA、FM27LAB_TOKEN、FM27_ENGINE_ROOT、FM27LAB_PORT=0、PYTHONUTF8=1；debug 构建追加 FM27LAB_DEV=1。
+- sidecar 标准错误写入数据目录 logs/sidecar-<pid>.stderr.log。
+- 就绪判定：标准输出出现 ready 行，随后 GET /api/health 返回 200；启动超时 30 秒，健康轮询间隔 5 秒。
+- 证据 src-tauri/src/lib.rs:24-27、src-tauri/src/lib.rs:209-300。
+
+ready 行
+
+```json
+{"event":"ready","port":54321,"pid":24680}
+```
+
+证据 fm27lab/sidecar.py:69-95。
+
+关闭
+
+- 调用 POST /api/shutdown，需 Bearer；成功返回 202 与 {"status":"shutting_down"}，进程随后退出并删除发现文件。证据 fm27lab/interfaces/http/routes/system.py:90-94、fm27lab/sidecar.py:69-95。
+- 桌面壳停止流程：先 POST /api/shutdown 探测 202，最多等待 10 秒，超时强制结束进程，最后清理发现文件。证据 src-tauri/src/lib.rs:119-155、src-tauri/src/lib.rs:433-463。
+- 人工前台运行时可 Ctrl+C 停止，同样走退出清理。
 
 ### 3.4 打包与启动脚本
 
-新增 Python 包：
-
-```text
-src/fm27_agent/__init__.py
-src/fm27_agent/client.py       HTTP 客户端、发现、鉴权、错误映射
-src/fm27_agent/drafts.py       草案存储与编辑
-src/fm27_agent/schemas.py      MCP 工具与资源 schema
-src/fm27_agent/cli.py          fm27lab 命令
-src/fm27_agent/mcp.py          stdio MCP sidecar
-src/fm27_agent/__main__.py     python -m fm27_agent
-```
-
-App 启动时生成稳定入口，避免 release 哈希路径变化：
-
-```text
-<dataDir>/agent/fm27lab.cmd    set PYTHONPATH=<release>/source，调用 <release>/python/python.exe -m fm27_agent
-fm27lab mcp                    以 stdio 启动 MCP sidecar
-<dataDir>/agent/mcp.json       MCP 客户端配置片段
-```
-
-源码版由 scripts/run.py 在 build/source 与 data/agent 下生成同样的入口。
+- 前端构建命令为 pnpm --dir web build && python scripts/build_sidecar.py，产物 sidecar-dist/fm27lab-sidecar 作为 Tauri 资源映射到安装目录 sidecar/。证据 src-tauri/tauri.conf.json。
+- release 启动可执行文件为资源目录 sidecar/fm27lab-sidecar，Windows 为 .exe；debug 构建用 FM27LAB_PYTHON 或 python 加参数 -m fm27lab serve，工作目录为项目根。证据 src-tauri/src/lib.rs:49-82。
+- 环境变量 FM27LAB_SIDECAR 可覆盖可执行文件路径，主要用于本地联调。证据 src-tauri/src/lib.rs:49-82。
+- 不再存在打包脚本生成 fm27lab.cmd 或 mcp.json 的逻辑；v1 的 src/fm27_agent 启动垫片未接入 v2 打包链路。
 
 ## 4. HTTP 契约
 
 ### 4.1 命名空间与兼容
 
-- 新增 Agent 命名空间 /api/agent/v1/，现有 /api/ 端点保持不变。
-- 新命名空间返回结构化错误、分页与幂等语义；旧端点继续服务 Web UI。
-- 旧端点与新端点共享内部实现与状态，不复制任务模型。
+- 全部接口位于 /api 下；registry 定义的系统与文档路径为 /api/health、/api/version、/api/events、/api/shutdown、/api/docs、/api/openapi.json。证据 fm27lab/registry.py:10-19。
+- 不存在 /api/agent/v1 命名空间；实测 GET /api/agent/v1/manifest 返回 404 not_found。
+- 文档端点 /api/docs 与 /api/openapi.json 由 FastAPI 直接提供，redoc 关闭。证据 fm27lab/interfaces/http/app.py:107-113。
 
-### 4.2 鉴权与 Host
+### 4.2 鉴权与来源校验
 
-所有请求先校验 Host，再判定鉴权：
-
-- Host 只允许 127.0.0.1:<port>、localhost:<port>、[::1]:<port>，否则 403 forbidden_host。
-- 鉴权方式二选一：Authorization: Bearer <token>，或 Cookie fm27_session=<token>。
-- Cookie 在 GET / 返回页面时设置，HttpOnly、SameSite=Strict、Path=/；Web UI 无需改动。
-- 仅以下路径免鉴权：GET /、静态资源白名单、GET /api/agent/v1/health、GET /api/status、GET /api/desktop-presence。
-- 保留现有 Origin 同源检查，作为纵深防御。
-- 不启用 CORS；不提供跨域预检。
+- 鉴权为 Authorization: Bearer <token>。缺失或非 Bearer 返回 401 unauthorized 与消息 missing bearer token；不匹配返回 401 与消息 invalid bearer token，并带 WWW-Authenticate: Bearer。证据 fm27lab/interfaces/http/common.py:38-51。
+- 免鉴权端点仅 GET /api/health 与 GET /api/version；/api/docs 与 /api/openapi.json 不属于业务路由，也不经过 token 依赖。
+- 不提供 Cookie 鉴权，历史设计中的 fm27_session 会话不存在；也不做 Host 白名单校验，历史设计中的 forbidden_host 不存在。
+- CORS 允许源为 tauri://localhost 与 http://tauri.localhost；开发模式追加 http://localhost:1420。允许头为 Authorization、Content-Type、Last-Event-ID、Idempotency-Key，方法为 GET、POST、PUT、PATCH、DELETE、OPTIONS，不携带凭据。证据 fm27lab/interfaces/http/app.py:47-48、fm27lab/interfaces/http/app.py:149-158。
+- Origin 头存在且不在白名单时返回 403 forbidden_origin，消息 origin is not allowed。证据 fm27lab/interfaces/http/app.py:161-169。
+- 安全边界：以上校验只保证本机回环与来源约束，不构成多用户隔离；token 泄露即等效于本机用户权限。
 
 ### 4.3 响应与错误
 
-成功：HTTP 2xx，JSON body 为数据本身。
-失败：
+所有错误响应为统一封套
 
 ```json
 {
   "error": {
-    "code": "engine_busy",
-    "message": "已有比赛运行中",
-    "details": {"active_job": "ab12cd34ef56"},
-    "retriable": true,
-    "retry_after_seconds": 30
+    "code": "validation_failed",
+    "message": "request body or query is invalid",
+    "details": null,
+    "retriable": false,
+    "retry_after_seconds": null
   }
 }
 ```
 
-| 错误码 | HTTP | 可重试 | 说明 |
-| --- | --- | --- | --- |
-| unauthorized | 401 | 否 | 缺少或错误 token |
-| forbidden_host | 403 | 否 | Host 不在白名单 |
-| forbidden_origin | 403 | 否 | Origin 与 Host 不符 |
-| unknown_endpoint | 404 | 否 | 路径不存在 |
-| not_found | 404 | 否 | 资源不存在 |
-| validation_failed | 400 | 否 | 参数或场景校验失败，details 带 field 或 side/slot |
-| engine_unavailable | 409 | 否 | 引擎资源缺失或不可用 |
-| engine_incompatible | 409 | 否 | 兼容检查失败 |
-| engine_busy | 409 | 是 | 控制面操作与活动任务冲突；Agent 自由模式 /runs 进入 FIFO 队列，不返回此错误；UI /api/run 忙时仍返回 409 |
-| conflict | 409 | 否 | 状态不允许，如运行中删除 |
-| idempotency_conflict | 409 | 否 | 同一幂等键载荷不同 |
-| storage_insufficient | 507 | 是 | 磁盘空间不足 |
-| unsupported | 501 | 否 | 首期不支持的能力 |
-| internal_error | 500 | 是 | 未预期异常 |
+retriable 默认在状态码不小于 500 或等于 409 时为 true。证据 fm27lab/interfaces/http/common.py:19-37。
+
+| 状态码 | code | 触发 |
+| --- | --- | --- |
+| 400 | validation_failed | 请求体或查询参数校验失败 |
+| 400 | invalid_idempotency_key | Idempotency-Key 格式非法 |
+| 400 | invalid_last_event_id | Last-Event-ID 不是非负整数 |
+| 401 | unauthorized | 缺失或无效 Bearer |
+| 403 | forbidden_origin | Origin 不在白名单 |
+| 404 | not_found | 资源不存在或路径未知 |
+| 405 | method_not_allowed | 方法不允许，响应带 Allow 头 |
+| 409 | conflict | 唯一约束冲突，如池条目 ID 重复 |
+| 409 | invalid_transition | 状态机不允许该流转 |
+| 409 | idempotency_conflict | 同一幂等键对应不同载荷 |
+| 409 | insufficient_memory | 资源预检内存不足 |
+| 409 | insufficient_disk | 资源预检磁盘不足 |
+| 413 | payload_too_large | 产物内容超过 16 MiB |
+| 500 | internal_error | 未捕获异常 |
+| 503 | database_unavailable | 数据库未就绪 |
+| 503 | resource_probe_failed | 宿主资源探测失败 |
+| 503 | engine_unavailable | 原生引擎未配置或启动失败 |
+
+证据 fm27lab/interfaces/http/app.py:171-212、fm27lab/interfaces/http/routes/*.py。
 
 ### 4.4 分页
 
-- 列表接口统一支持 limit 与 offset。
-- limit 默认 50，范围 1 到 200；offset 大于等于 0。
-- 响应统一为：
+列表接口统一返回 items、total、next_offset；next_offset 为 null 表示已到末页。证据 fm27lab/application/results.py、fm27lab/interfaces/http/routes/*.py。
 
-```json
-{"items": [], "total": 0, "limit": 50, "offset": 0, "next_offset": null}
-```
-
-- 通用列表字段名为 items；任务列表用 jobs，任务详情中的 runs 分页用 runs，字段含义相同。
-- run 分页按 sequence 升序，保证追加期间的偏移稳定。
-- 任务详情带 progress 参数时走增量模式，返回 runs_delta；与 runs_offset 同时出现时以增量模式为准。
+| 端点 | limit 默认 | limit 上限 | offset |
+| --- | --- | --- | --- |
+| GET /api/pools、GET /api/drafts | 128 | 128 | 默认 0 |
+| GET /api/jobs、GET /api/saves、GET /api/artifacts | 50 | 256 | 默认 0 |
+| GET /api/jobs/{job_id}/runs | 50 | 200 | 默认 0 |
 
 ### 4.5 幂等
 
-- 请求头 Idempotency-Key，长度 8 到 128，字符限可见 ASCII。
-- 同键同载荷返回首次响应，并带响应头 Idempotency-Replayed: true。
-- 同键不同载荷返回 409 idempotency_conflict。
-- 键保存在内存，有效期 24 小时；App 重启后清空。
+- 请求头为 Idempotency-Key，只对 POST、PATCH、DELETE 且路径以 /api/ 开头的请求生效；未带该头时直接放行。证据 fm27lab/interfaces/http/idempotency.py:17-24。
+- 带 key 时先鉴权；指纹为 sha256 覆盖方法、路径、规范化查询串与请求体；同键同载荷回放首次 2xx 响应的状态码与响应体，不做 Idempotency-Replayed 标记。证据 fm27lab/application/idempotency.py:38-56。
+- 只缓存 2xx 响应；同键不同载荷返回 409 idempotency_conflict，消息「幂等键已被不同载荷使用」；键格式非法返回 400 invalid_idempotency_key。
+- 幂等记录持久化在数据目录的 SQLite idempotency 表中，进程重启后仍然有效，同一数据库的多进程共享；进程内 asyncio.Lock 只串行单进程内的同键请求，跨进程并发由表的主键与事务裁决。证据 fm27lab/interfaces/http/app.py:148、fm27lab/adapters/storage_sqlite/idempotency.py:35-103、fm27lab/adapters/storage_sqlite/migrations/001_init.sql:97-102。
 
 ### 4.6 端点总表
 
-| 方法 | 路径 | 请求 | 响应 |
+系统端点
+
+| 方法与路径 | 鉴权 | 说明 |
+| --- | --- | --- |
+| GET /api/health | 否 | 数据库就绪时 200，未就绪 503 database_unavailable |
+| GET /api/version | 否 | 返回 api、version、capabilities、limits |
+| POST /api/shutdown | 是 | 202 shutting_down |
+| GET /api/events | 是 | SSE 事件流 |
+
+证据 fm27lab/interfaces/http/routes/system.py、fm27lab/registry.py:10-19。GET /api/system/resources 与 GET /api/catalog 属于普通能力（system_resources、catalog_snapshot），需要 Bearer，已列入下方能力表；/api/docs 与 /api/openapi.json 见 4.7。
+
+能力端点与三入口映射
+
+| 能力 | HTTP | CLI | MCP |
 | --- | --- | --- | --- |
-| GET | /api/agent/v1/manifest | 无 | manifest |
-| GET | /api/agent/v1/status | 无 | 引擎兼容、活动任务、存档活动状态 |
-| GET | /api/agent/v1/health | 无 | ok、pid、server_version；免鉴权 |
-| GET | /api/agent/v1/catalog | 无 | 领域枚举与配置 |
-| GET | /api/agent/v1/defaults | 无 | 默认场景 schema 4 |
-| GET | /api/agent/v1/schemas | 无 | JSON Schema 包 |
-| POST | /api/agent/v1/shutdown | 无 | 202 accepted |
-| GET | /api/agent/v1/jobs | limit、offset、status | 任务分页 |
-| GET | /api/agent/v1/jobs/{id} | runs_offset、runs_limit、variant、progress | 任务详情与 runs 分页 |
-| GET | /api/agent/v1/jobs/{id}/export | 无 | summary、scenarios、provenance |
-| POST | /api/agent/v1/jobs/{id}/cancel | 无 | accepted |
-| POST | /api/agent/v1/jobs/{id}/resume | workers | 202 id |
-| POST | /api/agent/v1/jobs/{id}/rename | name | id、name |
-| POST | /api/agent/v1/jobs/{id}/delete | 无 | id |
-| POST | /api/agent/v1/runs | scenario、reference、seeds、workers、event_details、name | 202 id、total、workers、mode、queued、queue_position |
-| POST | /api/agent/v1/engine/select | game_root | 引擎兼容状态 |
-| POST | /api/agent/v1/validate | scenario | scenario、records |
-| POST | /api/agent/v1/selection | scenario、lineup、bench | scenario |
-| POST | /api/agent/v1/repair | scenario | scenario、changes |
-| POST | /api/agent/v1/phase-plan | scenario | schema 4 |
-| GET | /api/agent/v1/jobs/{id}/logs/{name} | 无 | 原始 JSONL，供诊断 |
-| POST | /api/agent/v1/fmf/import | side、scenario、file_base64、setpiece_target | scenario、report |
-| POST | /api/agent/v1/fmf/export | side、scenario、name | filename、path、sha256、report |
-| POST | /api/agent/v1/setpiece/export | side、scenario、type、variant | filename、path、sha256、report |
+| pools_list | GET /api/pools | pools list | pools_list |
+| pools_get | GET /api/pools/{entry_id} | pools get | pools_get |
+| pools_create | POST /api/pools | pools create | pools_create |
+| pools_delete | DELETE /api/pools/{entry_id} | pools delete | pools_delete |
+| drafts_list | GET /api/drafts | drafts list | drafts_list |
+| drafts_get | GET /api/drafts/{draft_id} | drafts get | drafts_get |
+| drafts_create | POST /api/drafts | drafts create | drafts_create |
+| drafts_update | PATCH /api/drafts/{draft_id} | drafts update | drafts_update |
+| drafts_delete | DELETE /api/drafts/{draft_id} | drafts delete | drafts_delete |
+| drafts_attributes | POST /api/drafts/{draft_id}/attributes | drafts attributes | drafts_attributes |
+| drafts_export_fmf | GET /api/drafts/{draft_id}/export.fmf | drafts export-fmf | drafts_export_fmf |
+| drafts_import_fmf | POST /api/drafts/import-fmf | drafts import-fmf | drafts_import_fmf |
+| drafts_apply_roster | POST /api/drafts/{draft_id}/apply-roster | drafts apply-roster | drafts_apply_roster |
+| drafts_undo_roster | POST /api/drafts/{draft_id}/undo-roster | drafts undo-roster | drafts_undo_roster |
+| jobs_list | GET /api/jobs | jobs list | jobs_list |
+| jobs_get | GET /api/jobs/{job_id} | jobs get | jobs_get |
+| jobs_create | POST /api/jobs | jobs create | jobs_create |
+| jobs_update | PATCH /api/jobs/{job_id} | jobs update | jobs_update |
+| jobs_cancel | POST /api/jobs/{job_id}/cancel | jobs cancel | jobs_cancel |
+| jobs_delete | DELETE /api/jobs/{job_id} | jobs delete | jobs_delete |
+| jobs_batch_actions | POST /api/jobs/actions | jobs batch-action | jobs_batch_actions |
+| jobs_batch_delete | DELETE /api/jobs | jobs batch-delete | jobs_batch_delete |
+| jobs_runs | GET /api/jobs/{job_id}/runs | jobs runs | jobs_runs |
+| jobs_summary | GET /api/jobs/{job_id}/summary | jobs summary | 无 |
+| jobs_export | GET /api/jobs/{job_id}/export.csv | jobs export | jobs_export |
+| jobs_pool_summary | GET /api/jobs/{job_id}/pool-summary | jobs pool-summary | jobs_pool_summary |
+| saves_list | GET /api/saves | saves list | saves_list |
+| saves_get | GET /api/saves/{save_id} | saves get | saves_get |
+| saves_create | POST /api/saves | saves create | saves_create |
+| saves_update | PATCH /api/saves/{save_id} | saves update | saves_update |
+| saves_delete | DELETE /api/saves/{save_id} | saves delete | saves_delete |
+| saves_import | POST /api/saves/import | saves import-file | saves_import_file |
+| saves_squad | GET /api/saves/{save_id}/squad | saves squad | saves_squad |
+| saves_import_payload | POST /api/saves/{save_id}/import | saves import | saves_import |
+| artifacts_list | GET /api/artifacts | artifacts list | artifacts_list |
+| artifacts_get | GET /api/artifacts/{artifact_id} | artifacts get | artifacts_get |
+| artifacts_content | GET /api/artifacts/{artifact_id}/content | artifacts content | artifacts_content |
+| artifacts_create | POST /api/artifacts | artifacts create | artifacts_create |
+| artifacts_delete | DELETE /api/artifacts/{artifact_id} | artifacts delete | artifacts_delete |
+| settings_list | GET /api/settings | settings list | settings_list |
+| settings_get | GET /api/settings/{key} | settings get | settings_get |
+| settings_put | PUT /api/settings/{key} | settings put | settings_put |
+| settings_delete | DELETE /api/settings/{key} | settings delete | settings_delete |
+| concurrency_check | GET /api/concurrency/check | concurrency check | concurrency_check |
+| experiments_submit | POST /api/experiments | experiments submit | experiments_submit |
+| experiments_start | POST /api/experiments/start | experiments start | experiments_start |
+| experiments_cancel | POST /api/experiments/{job_id}/cancel | experiments cancel | experiments_cancel |
+| experiments_resume | POST /api/experiments/{job_id}/resume | experiments resume | experiments_resume |
+| catalog_snapshot | GET /api/catalog | catalog show | catalog_snapshot |
+| results_compare | POST /api/results/compare | results compare | results_compare |
+| system_resources | GET /api/system/resources | system resources | 无 |
 
-### 4.7 清单与 Schema
+证据 fm27lab/registry.py:96-101、fm27lab/registry.py:104-421。共 51 项能力，其中 jobs_summary 与 system_resources 没有 MCP 工具。
 
-manifest 示例：
+### 4.7 文档端点
 
-```json
-{
-  "api": "fm27lab/v1",
-  "server_version": "1112",
-  "adapter_version": "27.0.1+2494687",
-  "engine_build": null,
-  "scenario_schema": 3,
-  "scenario_view_schema": 4,
-  "batch_schema": 1,
-  "capabilities": ["free_run", "comparison", "fmf", "repair", "resume", "cancel", "idempotency"],
-  "limits": {
-    "max_seeds": 10000,
-    "max_workers": 256,
-    "max_body_bytes": 8000000,
-    "max_import_bytes": 8000000,
-    "max_draft_bytes": 5242880
-  },
-  "schemas": "/api/agent/v1/schemas"
-}
-```
-
-Schema 包包含：
-
-- scenario_v3、scenario_v4、job、run、metrics、save_progress、catalog、manifest。
-- 由服务端维护，字段名与校验规则同源；MCP 工具 inputSchema 从同一份定义生成。
-
-### 4.8 复用映射
-
-| Agent 端点 | 复用现有实现 |
-| --- | --- |
-| runs | 与 UI 共用的 start_run 校验、pool 展开、任务创建与 execute；Agent 路径允许 FIFO 排队 |
-| jobs 查询与操作 | JOBS、persist、resume_job、cancel |
-| validate、repair、phase-plan | validate_scenario、repair_saved_scenario、phase_inputs.pack |
-| fmf/import、fmf/export、setpiece/export | import_fmf、export_fmf、export_setpiece |
-| status | ENGINE_COMPATIBILITY 与 /api/status |
+- GET /api/docs 返回 Swagger UI，GET /api/openapi.json 返回 OpenAPI 文档；二者无 token 依赖，仅供本机调试。证据 fm27lab/interfaces/http/app.py:107-113。
+- 契约核对以 openapi.json 为准：当前 39 条路径、55 个操作、63 个组件模型。
 
 ## 5. 数据模型
 
-### 5.1 Scenario
+### 5.1 场景
 
-沿用现有格式：
+草案场景在创建与更新时归一化。证据 fm27lab/domain/scenario.py:25-102。
 
-- schema 3 为权威输入；schema 4 为双阶段视图，字段为 teams[].phase_plans[2]。
-- 顶层字段：schema、rules、fixture、teams[2]，可选 native_generation、experimental_execution、away_tactic_pool。
-- away_tactic_pool 启用后按 mode 分配客队战术：random 按权重逐场抽取，rotation 按条目顺序轮换且种子数必须等于条目数乘 rounds；A/B 对照共享同一分配，提交时展开为每个条目的完整场景并写入 provenance。
-- away_tactic_pool 支持 uniform 与 real 两种客队名单来源：uniform 统一能力属性与位置熟练度；real 使用条目 roster 中的存档球员名单与属性，要求全部条目来自存档战术页。带 roster 的条目合计不能超过约 1.5 MB；轮战每方案最多 10000 场；池最多 128 套、每套 roster 最多 26 名球员。
-- 球队字段：name、tactic_name、mentality、instructions、lineup、captains、takers、setpieces、opposition、players、phases 或 phase_plans、roster_size、native_extra_team_bits。
-- Agent 只操作 schema 4；提交时由服务端归一化为 schema 3。
+- 顶层必须是对象，teams 必须是长度为 2 的列表，否则报「场景必须是对象」或「场景必须包含两支球队」。
+- 每队 players 必须是非空对象列表，每项必须有唯一 source_uid，否则报「球队球员缺少 source_uid」「球队球员 source_uid 重复」「球队球员列表为空」「球队球员 source_uid 无效」。
+- 每队必须有门将；门将判定取自球员属性的位置熟练度。证据 fm27lab/domain/roster.py:141-159。
+- 输出队伍含 players、roster_size=23、lineup、captains、takers、setpieces.role_priorities、roster_trim；首发 11 人、替补 12 人。证据 fm27lab/domain/roster.py:8-10、fm27lab/domain/scenario.py:25-93。
+- 球员属性为 69 维：前 15 维位置熟练度取值 0 到 20，其后取值 1 到 100。证据 fm27lab/domain/attributes.py:12-13、fm27lab/domain/attributes.py:96-102。
 
-### 5.2 Draft
+### 5.2 草案
 
-草案文件路径：<dataDir>/agent/drafts/<draft_id>.json
-draft_id 格式：dr_ 加 12 位十六进制。
+- 存储为 SQLite 表 drafts，字段 id、name、scenario_json、source_json、created_at、updated_at；列表按 updated_at 倒序、同时间按 rowid 倒序。证据 fm27lab/adapters/storage_sqlite/repositories.py:241-266。
+- ID 由 8 字节随机数生成，16 位小写十六进制。证据 fm27lab/adapters/storage_sqlite/repositories.py:340-342。
+- 创建与更新均归一化场景；更新只接受 name、scenario、source，未提供字段或未知字段报「草案更新字段无效」，source 必须是对象，否则报「草案来源必须是对象」。证据 fm27lab/application/drafts.py:59-70。
+- 删除为物理删除，返回 204。证据 fm27lab/adapters/storage_sqlite/repositories.py:323、fm27lab/interfaces/http/routes/drafts.py。
+- 不存在磁盘草案目录；历史设计中的 agent/drafts/<id>.json 与 dr_ 前缀不存在。
 
-```json
-{
-  "schema": 1,
-  "id": "dr_ab12cd34ef56",
-  "name": "高位逼抢对照",
-  "created_at": "2026-11-08T18:40:00+08:00",
-  "updated_at": "2026-11-08T18:42:10+08:00",
-  "source": {"kind": "default", "ref": null},
-  "meta": {"api": "fm27lab/v1", "scenario_view_schema": 4, "server_version": "1112"},
-  "scenario": {"schema": 4, "rules": "game", "fixture": "bundled_match_pkm", "teams": []}
-}
-```
+### 5.3 池条目与 away_tactic_pool
 
-约束：
+池条目库
 
-- scenario 保持 schema 4。
-- 单文件不超过 5 MB。
-- 原子写入：临时文件加 os.replace。
-- 草案归 Agent 层所有；App 不读取、不感知草案。
-- 提交时由服务端重新校验并快照，草案之后可继续修改而不影响已提交实验。
+- 字段 id、name、weight、tactic、roster、created_at。name 长度 1 到 80，weight 取值 1 到 1000 默认 1，tactic 必填对象，roster 可选对象，id 可选且需匹配 ^[A-Za-z0-9_-]{1,64}$。证据 fm27lab/interfaces/http/routes/pools.py:44-46。
+- 创建返回 201；ID 冲突返回 409 conflict，消息 pool entry already exists。证据 fm27lab/adapters/storage_sqlite/repositories.py:77-120。
+- 池条目库与实验没有代码关联：实验只读取草案场景内的 away_tactic_pool 配置。证据 fm27lab/application/experiment_material.py:89-113。
 
-### 5.3 Job 与 Run
+草案内 away_tactic_pool
 
-沿用现有字段，Agent 视图补充：
+- 顶层结构仅 profile，profile 必须为 away-tactic-pool-v1，包含 enabled、entries、uniform、rotation、real。证据 fm27lab/domain/pool.py:36、fm27lab/domain/pool.py:187-520。
+- 条目上限 128，单套 weight 上限 1000，轮战 rounds 上限 1000，名称上限 80 字符，名单人数上限 26，单套名单序列化上限 1500000 字节。证据 fm27lab/domain/pool.py:26-31。
+- 每套 tactic 必填 tactic_name、mentality、instructions、native_extra_team_bits、phases；phases 为两阶段乘十一位位置的矩阵。证据 fm27lab/domain/pool.py:461-520。
+- roster 可选；real.enabled 时每套必须带存档名单，人数 11 到 26。证据 fm27lab/domain/pool.py:379-380。
+- random 模式按权重逐场抽签，抽签随机源为 salt 与 seed 拼接字符串，实验物化时 salt 取任务 ID；rotation 模式按顺序轮换，要求种子数等于条目数乘 rounds 且总场数不超过 10000。证据 fm27lab/domain/pool.py:90-112、fm27lab/application/experiment_material.py:89-113。
+- uniform.enabled 时客队可见属性统一取值 attribute_value，默认 15，门将属性置 1，战术位置熟练度置 20；real 名单优先于 uniform。证据 fm27lab/domain/pool.py:600-640。
+- 提交实验时按 seed 展开为每场场景并移除 away_tactic_pool 键。证据 fm27lab/domain/pool.py:520 附近 expand_away_scenarios。
 
-- job.runs_total、job.runs_truncated。
-- Agent 视图的 runs 按 sequence 升序。
-- run 精简字段：variant、seed、sequence、score、statistics、verified、attempts、elapsed_seconds、native_elapsed_seconds、log、events 可选。
-- 失败继续放在 job.failures，字段同现有实现。
-- 状态机沿用 queued、running、complete、error、cancelled、interrupted。
-- 排队中取消立即落 cancelled 且不再执行；运行中取消由 runner 在安全点落地；续跑与提交共用同一串行闸门。
+### 5.4 任务与运行
 
-### 5.4 结果视图
+任务状态集合与流转
 
-- metrics 沿用现有结构，含 n、wins、draws、losses、win_rate、win_interval、goals_for、goals_against、points。
-- 客队战术池 job 追加 tactic_pool：salt、mode（random 或 rotation）、rounds、players（uniform 或 real）、uniform、entries（weight、probability、roster）与 draws（total 与每套出场次数）；probability 仅在 random 模式有值，rotation 下为 null；draws 按 seed 计数，同一 seed 的 A/B 只算一次。
-- results_compare 对任一方带战术池的任务先核对模式、条目与分配：模式或条目不同、同种子战术不同、仅一方启用池时返回 comparable=false 与原因，paired 置空。
-- results_csv 输出列见 CLI 章节。
+| 起始状态 | 允许流转到 |
+| --- | --- |
+| queued | running、cancelled、error |
+| running | completed、error、cancelled、interrupted |
+| interrupted | queued、running、cancelled |
+| completed、error、cancelled | 无 |
 
-## 6. Draft 工作区
+证据 fm27lab/application/jobs.py:13-21。
 
-### 6.1 创建来源
+- 创建字段：kind 长度 1 到 64 必填，name 长度 1 到 100 可选，config 对象默认空，workers 取值 1 到 256 默认 1，total 不小于 0 默认 0。证据 fm27lab/interfaces/http/routes/jobs.py:12-18。
+- 更新只接受 status、completed、summary、name；completed 不得小于 0；非法状态报「任务状态无效」，状态机不允许报 409 invalid_transition。证据 fm27lab/interfaces/http/routes/jobs.py:21-27、fm27lab/application/jobs.py。
+- 取消走 POST /api/jobs/{job_id}/cancel；批量操作为 POST /api/jobs/actions，action 取值 cancel 或 delete，ids 最多 256 个且不可重复；批量删除为 DELETE /api/jobs 携带 body ids。
+- 运行字段：job_id、sequence、variant、seed、score、verified、stats、events、log_path、created_at；score 解析顺序为 result.score、run.score、home_goals 与 away_goals，要求长度为 2 的非负整数，否则为空。证据 fm27lab/domain/results.py:12-24。
+- 任务字段：id、kind、status、name、config、summary、workers、total、completed、created_at、started_at、finished_at。
 
-| source | 必填 | 行为 |
-| --- | --- | --- |
-| default | 无 | 读取 /api/agent/v1/defaults 的默认场景，转 schema 4 |
-| fmf | file_base64 或 file_path、side、base_scenario 或 base_draft_id | 调用 fmf/import，结果转 schema 4 |
-| job | job_id、variant | 调用 jobs/{id}/export，取指定 variant 的场景 |
-| inline | scenario 或 scenario_path | 直接校验并保存；来源为 draft、job、fmf、inline 时 away_tactic_pool 均原样保留 |
+### 5.5 结果视图
 
-### 6.2 语义编辑
+汇总
 
-每次调用只改一个目标，成功返回 changed 与摘要，失败不保存。
+- GET /api/jobs/{job_id}/summary?side=0|1 返回 job、metrics、paired。side 取 0 表示主队视角，1 表示客队视角；非 0 或 1 返回 400。证据 fm27lab/interfaces/http/routes/results.py。
+- metrics 字段为 n、wins、draws、losses、win_rate、win_interval、goals_for、goals_against、points、xg、xga、possession、shots、pass_completion；xg、xga、possession、shots、pass_completion 可为 null。证据 fm27lab/domain/results.py:53-113。
+- win_rate 为胜场比，win_interval 为 Wilson 95% 区间；进球与积分按场均计算。
+- paired 字段为 n 与 goal_difference_delta，可为 null。
 
-| op | 参数 | 语义 |
-| --- | --- | --- |
-| team_instruction | side、phase、group、option | 设置 phase_plans[phase].team_instructions[group] |
-| mentality | side、value 1 到 7 | 设置球队心态 |
-| role | side、phase、slot 0 到 10、role、duty 可选 | 设置位置角色与职责 |
-| player_instruction | side、phase、slot、group、option | 设置个人指令 |
-| lineup | side、starters 11 人、bench 0 到 12 人 | 设置首发与替补 |
-| formation | side、phase、positions 11 个不重复的位置 | 设置阶段阵型位置；0 号为 GK 且全场仅 1 名 GK |
-| tactic_name | side、value | 设置战术名称 |
+逐场与导出
 
-约束：
+- GET /api/jobs/{job_id}/runs 分页返回运行记录。
+- GET /api/jobs/{job_id}/export.csv 返回 text/csv，列顺序为 job_id、sequence、variant、seed、score_home、score_away、verified、created_at、stats_json、events_json。证据 fm27lab/application/results.py:19-30、fm27lab/application/results.py:342-352。
+- GET /api/jobs/{job_id}/pool-summary 返回 enabled、entry_count，以及可选的 mode、rounds、players、uniform、entries、draws；draws 为种子到条目下标的映射。
 
-- group 与 option 的合法值来自 catalog；非法值返回 validation_failed。
-- role 必须属于该 phase；duty 只允许现有职责位。
-- 首期不提供定位球、针对性指令和球员属性的语义编辑；这些字段通过 FMF 导入或完整场景替换维护。
-- 编辑后立即调用服务端 validate 与 phase-plan，通过后才落盘。
+比较
 
-### 6.3 校验与规范化
+- POST /api/results/compare 输入 baseline_job_id、candidate_job_ids、variant 默认 B、side 默认 0、reps 默认 2000 且取值 1 到 20000；候选最多 32 个。证据 fm27lab/interfaces/http/routes/results.py。
+- 输出 baseline、variant、side、candidates；每个候选含 job_id、name、metrics、tactic_pool、comparable、reason、pairing、paired；pairing 含 common_seeds、draw_mismatches、mismatched_seeds、missing_seeds；paired 含 seeds、win_rate_delta、points_delta、goal_difference_delta、xgd_delta 及各自置信区间。
+- 池任务先核对模式、条目与抽签分配；不一致时 comparable 为 false 并给出 reason。证据 fm27lab/domain/compare.py。
 
-- 编辑流程：应用修改，调用 /api/agent/v1/validate，失败则回滚内存修改。
-- 校验通过后调用 /api/agent/v1/phase-plan 获得归一化 schema 4，落盘。
-- validate 只返回第一条错误；Agent 应逐次编辑并校验，便于定位。
-- 草案加载时记录当时的 scenario_view_schema 与 server_version，版本不匹配时提示重新校验。
+### 5.6 存档、产物、设置与并发检查
 
-### 6.4 生命周期
+存档
 
-- draft_list 按 updated_at 倒序。
-- draft_delete 为物理删除；已被实验引用的场景已由 App 快照，不受影响。
-- 草案与导出文件不自动清理；由用户或 Agent 显式删除。
+- 字段 id、source_path、source_sha256、status、stage、metadata、created_at、updated_at。
+- 状态流转：pending 到 reading、error、cancelled；reading 到 ready、error、cancelled；ready、error、cancelled 为终态。证据 fm27lab/application/saves.py:12-18。
+- 导入分两个接口：POST /api/saves/import 从源文件登记并读取存档，返回 save_id、status、managed_clubs、clubs；POST /api/saves/{save_id}/import 上传 leagues 与 clubs 结构。证据 fm27lab/interfaces/http/routes/saves.py。
+- GET /api/saves/{save_id}/squad?club_uid= 返回球队名单与当前选择；club_uid 取值 1 到 2147483647。
+
+产物
+
+- 字段 id、job_id、kind、path、sha256、bytes、created_at。
+- 内容上限 16 MiB，超限返回 413 payload_too_large；文件写入数据目录 agent/artifacts。证据 fm27lab/interfaces/http/routes/artifacts.py:14、fm27lab/interfaces/http/routes/artifacts.py:141-150。
+
+设置
+
+- 字段 key、value、note、updated_at；PUT 接受任意 JSON 值与可选 note；删除返回 204；不存在返回 404。证据 fm27lab/interfaces/http/routes/settings.py。
+
+并发检查
+
+- GET /api/concurrency/check 查询参数 workers、cpu_count、available_memory_bytes、free_disk_bytes、allow_oversubscription 全部以字符串传入并逐个解析，解析失败返回 400 validation_failed。证据 fm27lab/interfaces/http/routes/settings.py:148-187。
+- 输出 allowed、code、recommended_workers、warnings、memory_required_bytes、disk_required_bytes；每个并行 worker 预算内存 1 GiB、磁盘 1 GiB，另保留内存 2 GiB，推荐值上限 256。证据 fm27lab/domain/concurrency.py。
+
+## 6. 实验提交与执行
+
+提交
+
+- POST /api/experiments 输入 name、seeds、draft_id、baseline_draft_id、workers、cpu_count、available_memory_bytes、free_disk_bytes、allow_oversubscription。
+- seeds 为 1 到 10000 个不重复整数，取值 0 到 4294967295；越界或重复由请求模型拒绝，HTTP 与 CLI 均返回 400 validation_failed、消息「request body or query is invalid」。服务层另有「种子必须为非空且不重复的 0–4294967295 整数列表」，仅内部调用可达。证据 fm27lab/interfaces/http/routes/experiments.py:13-14、:34-39、fm27lab/interfaces/http/app.py:199-204、fm27lab/application/experiments.py:24。
+- 有 baseline_draft_id 时变体为 A 与 B，否则只跑 B；总场数为种子数乘变体数，超过 10000 报「实验总场数不能超过 10000」。证据 fm27lab/application/experiments.py:160-164、fm27lab/application/experiments.py:20。
+- 资源预检不通过返回 409，错误码为 insufficient_memory 或 insufficient_disk。证据 fm27lab/domain/concurrency.py。
+- 草案不存在返回 404 not_found。
+- 引擎工作区缺失时报「引擎目录未配置，无法生成比赛配置」；catalog 缺失时报「未找到引擎目录文件，无法生成比赛配置」，均为 400 validation_failed。证据 fm27lab/application/experiment_material.py:30-31。
+- 物化目录为数据目录 agent/experiments/<job_id>/，含 provenance.json 与每场配置；配置编码为 FM27CFG1，场景模式为 fm27lab-scenario/1。证据 fm27lab/application/experiment_material.py:63-160。
+
+执行
+
+- 没有后台调度线程。POST /api/experiments/start 取 created_at 最早的 queued 任务，在请求线程内同步执行整批；成功返回 200 与 job，无待运行任务返回 204。证据 fm27lab/application/experiments.py:252-299、fm27lab/interfaces/http/routes/experiments.py:120。
+- 已有 running 任务返回 409 invalid_transition，消息「已有任务在运行」；工具异常返回 503 engine_unavailable，错误摘要写入任务 summary.error。证据 fm27lab/application/experiments.py:252-299。
+- 取消：queued 直接置 cancelled；running 设置取消事件并调用引擎取消；其他状态报「任务状态不允许取消」。恢复：仅 interrupted 可回到 queued。证据 fm27lab/application/experiments.py:301-333。
+- CLI 与常见 HTTP 客户端的单次请求超时约 30 秒，而 start 会一直执行到批次结束；长批次应改用直接 HTTP 调用或轮询，CLI start 超时后服务端仍在继续执行。证据 fm27lab/client.py:16。
+
+当前实现边界
+
+- 生产 sidecar 未注入原生引擎宿主，create_app 在未注入引擎时使用 MissingEngine，run_batch 抛出「原生引擎未配置」。因此当前开发构建可以保存草案、池与任务，但 POST /api/experiments/start 返回 503 engine_unavailable。证据 fm27lab/sidecar.py:69-95、fm27lab/interfaces/http/app.py:49-86、fm27lab/interfaces/http/app.py:117-140。
+- 引擎宿主真实要求：可执行文件默认位于引擎工作区 fm27_native/FM27Simulator.exe，单批超时 190 秒，重试 1 次。证据 fm27lab/adapters/engine_native/host.py:231-330。
 
 ## 7. CLI
 
-入口：fm27lab 或 python -m fm27_agent。
+入口
 
-### 7.1 全局选项
+- 安装后命令为 fm27lab，也可以用 python -m fm27lab；控制台入口定义于 pyproject.toml 的 project.scripts。证据 pyproject.toml、fm27lab/__main__.py。
+- 全局只有 --data-dir 一个选项，且必须写在子命令之前；数据目录缺省时读 FM27LAB_DATA 或平台默认路径。证据 fm27lab/cli.py:47-57。
+- 版本命令输出版本号与接口版本，形如 2.0.0.dev0 fm27lab/v2。证据 fm27lab/cli.py:60-63。
 
-| 选项 | 默认 | 说明 |
-| --- | --- | --- |
-| --data-dir PATH | 环境变量 FM27LAB_DATA 或默认数据目录 | 读取 endpoint.json |
-| --endpoint URL | endpoint.json | 覆盖服务地址，用于测试 |
-| --token TOKEN | endpoint.json | 覆盖 token |
-| --json | 关 | 输出单份 JSON |
-| --timeout SECONDS | 120 | 单次 HTTP 超时 |
-| --quiet | 关 | 仅输出结果 |
-| --no-color | 关 | 关闭颜色 |
+命令组
 
-### 7.2 命令表
-
-| 命令 | 关键参数 | 说明 |
-| --- | --- | --- |
-| fm27lab status | 无 | 清单、引擎、活动任务 |
-| fm27lab mcp | 无 | 以 stdio 启动 MCP sidecar |
-| fm27lab engine select | --game PATH | 设置游戏根并预检 |
-| fm27lab draft create | --from default、save、fmf、job、inline、draft；--name；--save-id；--club；--tactic；--job；--variant；--file；--side；--base-draft；--inline FILE | 创建草案；inline 读入场景文件，draft 从 --base-draft 克隆 |
-| fm27lab draft list | 无 | 列出草案 |
-| fm27lab draft show | ID、--full | 摘要或完整场景 |
-| fm27lab draft edit | ID、--op、--team A 或 B、--phase、--group、--option、--value、--slot、--role、--duty、--starters、--bench、--positions | 语义编辑 |
-| fm27lab draft validate | ID | 校验与规范化 |
-| fm27lab draft delete | ID | 删除草案 |
-| fm27lab run | --draft、--baseline、--seeds 1-10、--workers、--quick、--name、--wait | 自由模式运行 |
-| fm27lab job list | --status、--limit、--offset | 任务分页 |
-| fm27lab job get | ID | 任务详情 |
-| fm27lab job wait | ID、--timeout | 等待终态或超时 |
-| fm27lab job action | ID、--cancel、--resume、--delete、--rename NAME、--workers | 任务操作 |
-| fm27lab job logs | ID、--run LOG、--out FILE | 下载单场原始日志 |
-| fm27lab job export | ID、--out DIR | 导出汇总、方案与 provenance |
-| fm27lab results summary | ID | 汇总指标 |
-| fm27lab results matches | ID、--variant、--limit、--offset、--events | 逐场分页 |
-| fm27lab results match | ID、--variant、--seed | 单场详情 |
-| fm27lab results csv | ID、--out FILE | 导出 CSV |
-| fm27lab fmf import | --draft、--side、--file | 导入战术到草案 |
-| fm27lab fmf export | --draft、--side、--out | 导出战术文件 |
-| fm27lab setpiece export | --draft、--side、--type、--variant、--out | 导出定位球文件 |
-
-### 7.3 输出与退出码
-
-- 默认输出人类可读表格；--json 输出单份 JSON 到 stdout。
-- 进度写 stderr；结果写 stdout。
-- 退出码：
-
-| 码 | 含义 |
+| 命令组 | 子命令 |
 | --- | --- |
-| 0 | 成功 |
-| 2 | 用法错误 |
-| 3 | 应用未运行或 endpoint.json 不存在 |
-| 4 | 鉴权失败 |
-| 5 | 引擎不可用或不兼容 |
-| 6 | 校验失败 |
-| 7 | 引擎忙 |
-| 8 | 资源不存在 |
-| 9 | 任务失败、取消或中断 |
-| 10 | 内部错误 |
+| version | 无子命令 |
+| serve | 启动 sidecar |
+| mcp | 以 stdio 启动 MCP 服务 |
+| pools | list、get、create、delete |
+| drafts | list、get、create、update、delete、attributes、export-fmf、import-fmf、apply-roster、undo-roster |
+| jobs | list、get、create、update、cancel、delete、runs、summary、batch-action、batch-delete、export、pool-summary |
+| saves | list、get、create、update、delete、import、import-file、squad |
+| artifacts | list、get、content、create、delete |
+| settings | list、get、put、delete |
+| concurrency | check |
+| experiments | submit、start、cancel、resume |
+| catalog | show |
+| results | compare |
+| system | resources |
 
-### 7.4 CSV 列
+证据 fm27lab/cli.py:34-44、fm27lab/cli.py:236-931。
 
-自由模式：mode、variant、seed、tactic_pool_entry_index、tactic_pool_entry_name、home_goals、away_goals、shots、shots_on_target、xg、possession、passes、completed_passes、elapsed_seconds、attempts、log。战术池列为抽中的客队战术序号与名称；未启用池时留空。MCP results_csv 另含对手统计、xGA、比分变化与进球时间线列。
-事件明细导出时追加：goals、cards 的紧凑 JSON 字符串。
+关键选项
+
+- pools list 与 drafts list 的 limit 默认 128、上限 128；jobs、saves、artifacts 的 list 默认 50、上限 256；jobs runs 默认 50、上限 200。证据 fm27lab/cli.py:221-232。
+- drafts attributes 需要 --side、--scope、--operation、--params，可选 --player-index；参数细节见 9.1。
+- drafts apply-roster 需要 --save-id、--club-uid、--side、--scope。
+- experiments submit 缺省资源参数时会先 GET /api/system/resources 探测宿主资源。证据 fm27lab/cli.py:806-836。
+- results compare 是唯一使用两空格缩进输出的命令，其余命令输出紧凑 JSON。
+
+输出与退出码
+
+- 普通输出为单行紧凑 JSON；删除类命令输出 {"deleted":true}；下载类命令写文件后输出 path 与 bytes。证据 fm27lab/cli.py:151-152、fm27lab/cli.py:178-196、fm27lab/cli.py:206-218。
+- 退出码 0 表示成功；1 表示接口或发现文件错误并输出 code: message 到标准错误；2 表示命令行用法错误。证据 fm27lab/cli.py:143-148。
+
+示例
+
+```bash
+python -m fm27lab --data-dir /absolute/path/data version
+python -m fm27lab --data-dir /absolute/path/data drafts list
+python -m fm27lab --data-dir /absolute/path/data jobs runs <job_id> --limit 50
+```
 
 ## 8. MCP
 
 ### 8.1 传输与生命周期
 
-- 传输：stdio，JSON-RPC 2.0，按行分隔；stdout 只写协议消息，日志写 stderr。
-- 协议版本：支持 2025-06-18 与 2024-11-05，按客户端请求协商。
-- 能力：tools、resources、prompts、logging。
-- 启动时读取 endpoint.json；缺失且启用自动拉起时调用 Launcher --headless，等待最长 120 秒。
-- 连接失败时重新读取 endpoint.json 一次，端口或 token 变化后自动重连。
-- 初始化时读取 manifest，校验 api 主版本；不兼容直接返回错误并退出。
-- 工具调用为同步 HTTP；长任务返回 job_id，由 job_wait 或进度通知推进。
-- 客户端断开时退出 sidecar；不主动停止 App，除非本次由 sidecar 拉起。
+- 传输为 stdio，命令为 python -m fm27lab mcp；服务名固定为 fm27lab。证据 fm27lab/cli.py:90-140、fm27lab/cli.py:111-118。
+- 启动时读取数据目录、加载发现文件并探测 GET /api/health；失败时向标准错误输出「无法启动 MCP 服务：code: message」并以 1 退出。不自动拉起 sidecar。证据 fm27lab/cli.py:121-140。
+- 协议版本固定为 2024-11-05，无版本协商分支。证据 fm27lab/interfaces/mcp/protocol.py:8。
+- 支持方法：initialize、tools/list、tools/call、resources/list、resources/read、prompts/list、prompts/get。initialize 返回 capabilities，其中 tools、resources、prompts 各为 {"listChanged": false}，serverInfo 含 name 与 version。证据 fm27lab/interfaces/mcp/protocol.py:198-225。
 
-### 8.2 工具清单
+### 8.2 工具
 
-| 工具 | 作用 |
-| --- | --- |
-| lab_status | 清单、引擎兼容、活动任务、存档活动状态 |
-| engine_select | 设置游戏根并预检 |
-| draft_create | 从默认、战术文件、任务导出、内联场景或已有草案创建草案 |
-| draft_get | 读取草案摘要、完整场景或场景文件 |
-| draft_edit | 单步或批量语义编辑 |
-| draft_validate | 校验并规范化 |
-| draft_list | 列出草案 |
-| draft_options | 查询合法角色、职责与球队指令选项 |
-| draft_delete | 删除一个或多个草案 |
-| experiment_run | 自由模式批次，支持多候选与对照草案 |
-| job_get | 任务进度或详情，可只取进度 |
-| job_wait | 等待任务终态或超时 |
-| job_list | 任务分页 |
-| job_action | 取消、续跑、删除、重命名 |
-| results_summary | 汇总指标、分布、配对差值与随机池抽中次数 |
-| results_compare | 多任务同种子配对比较与置信区间；战术池模式、条目或分配不一致时拒绝配对 |
-| results_matches | 逐场分页，可选事件 |
-| results_csv | 导出 CSV 并返回路径 |
-| fmf_import | 战术文件导入草案 |
-| fmf_export | 战术文件导出 |
-| setpiece_export | 定位球文件导出 |
+- 工具总数为 49，名称与参数由 fm27lab/interfaces/mcp/tools.py 定义，运行时与 4.6 表一致。
+- 命名差异：saves_import_payload 的 MCP 名为 saves_import，saves_import 的 MCP 名为 saves_import_file。
+- jobs_summary 与 system_resources 没有 MCP 工具；需要汇总时调用 jobs_runs 自行统计，系统资源通过 HTTP 或 CLI 获取。
+- 工具入参接受 JSON 对象；返回封套为 content 数组内单个 text 项、structuredContent 为原始结果、isError 为 false。执行失败时 isError 为 true，structuredContent 为 error 对象，code 为 tool_error。证据 fm27lab/interfaces/mcp/protocol.py:333-370。
 
-### 8.3 工具参数细则
+### 8.3 资源
 
-通用输出：成功返回 content 紧凑 JSON 文本与 structuredContent 数据；文本用于模型读取，structuredContent 供程序消费。失败 isError 为 true，structuredContent 为错误封套。
-
-lab_status：无参数。返回 manifest、engine 兼容状态、active_job、save_active、paths。paths 含 data_dir、runs_dir、drafts_dir、exports_dir 及常见 WSL 映射提示。
-
-engine_select：game_root 字符串必填。返回兼容状态，等价于 /api/agent/v1/engine/select。
-
-draft_create：source 必填，取值 default、fmf、job、inline、draft；name 可选；fmf 来源需要 side、file_base64 或 file_path，以及 base_scenario 或 base_draft_id；job 来源需要 job_id、variant；inline 来源需要 scenario 或 scenario_path，后者支持 Windows 与 \\wsl.localhost UNC 路径；draft 来源需要 base_draft_id，从已有草案克隆。返回 draft_id 与摘要。
-
-draft_get：draft_id 必填；include_scenario 布尔，默认 false；save_scenario 布尔，默认 false，为真时把完整场景写入 dataDir/agent/exports/scenarios 并返回 scenario_path、scenario_sha256、scenario_bytes。返回摘要，按需附带场景。
-
-draft_edit：draft_id 必填；单步用 op 加 op 字段，批量用 ops 数组。批量按顺序应用后统一校验，全部成功才落盘；失败时草案保持原样。返回 draft_id、changed、ops、摘要与校验结果。
-
-draft_validate：draft_id 必填。返回 valid、errors、records、摘要。
-
-draft_list：无参数。返回草案摘要列表。
-
-draft_options：draft_id 必填；side 默认 0；phase 可选，省略时返回两个阶段；slot 可选；include_team_instructions 默认 false。返回该阶段各位置的合法角色、职责与可选球队指令。
-
-draft_delete：draft_id 或 draft_ids 二选一。返回删除结果与逐项错误。
-
-
-
-
-
-
-
-experiment_run：draft_id 或 candidates 二选一；candidates 为 1 到 20 个草案，每项含 draft_id 与可选 name；baseline_draft_id 可选；seeds 为起始与数量，或长度 1 到 10000 的唯一整数数组；workers 可选；event_details 默认 true；name 可选。场景带启用的 away_tactic_pool 时，服务端按 seed 把每场分配到条目（random 按权重、rotation 按顺序），A/B 共享同一分配；轮战要求种子数等于条目数乘轮数。多草案按创建顺序进入同一 FIFO 队列串行执行；返回 jobs 列表与合计 total；单草案返回 job_id、total、workers、mode、seed_count、queued、queue_position、variant_names、seeds。
-
-
-job_get：job_id 必填；runs_offset、runs_limit、variant 可选；include_runs 布尔，默认 true，为 false 时只返回进度。返回任务进度、排队位置与按需的 runs 分页。
-
-job_wait：job_id 必填；timeout_seconds 默认 45，最大 300；poll_ms 默认 1000。返回任务进度；超时返回当前状态、timed_out 与 next_poll_seconds。受客户端调用超时约束，建议 timeout_seconds 不超过 45。
-
-job_list：status、limit、offset 可选。返回分页摘要与排队位置。
-
-job_action：job_id 与 action 必填，action 取 cancel、resume、delete、rename；resume 可带 workers；rename 必须带 name。返回对应结果。
-
-results_summary：job_id 必填。返回 mode、metrics（A/B 分列）、distributions、paired、tactic_pool、failures 摘要、timings。tactic_pool 含 salt、mode、rounds、players、entries 与 draws：draws.total 为参与分配的 seed 数，每个 entry 的 draws 为该套出场次数（同 seed 的 A/B 只计一次）。
-
-results_compare：baseline_job_id 与 candidate_job_ids 必填；candidate_job_ids 为 1 到 20 个任务；variant 默认 B；reps 默认 2000。按同种子配对返回每个候选的 Δ胜率、Δ积分、Δ净胜球、ΔxGD 与 bootstrap 95% 置信区间。任务带客队战术池时先读取 provenance 的模式、条目与分配：仅一方启用池、模式或条目不同、同种子分配不同时返回 comparable=false、reason 与 pairing，paired 置空，禁止错误配对。
-
-results_matches：job_id 必填；variant、seed、limit、offset、include_events 可选。返回 runs 分页与 runs_total；带 seed 时返回单场。文本只返回紧凑比分与关键统计。
-
-results_csv：job_id 必填；out 可选。MCP 工具只接受 dataDir/agent/exports 下的相对文件名，默认按 job_id 命名；CLI 的 --out 可写用户指定路径。CSV 含双方统计、xGA、比分变化、进球时间线与客队战术条目列（tactic_pool_entry_index、tactic_pool_entry_name；无池时留空）；返回 path、path_wsl_hint、sha256、rows、columns。
-
-fmf_import：draft_id、side、file_base64 或 file_path 必填。返回更新后的草案摘要与 report。
-
-fmf_export：draft_id、side 必填；name 可选。返回 filename、path、sha256、report。
-
-setpiece_export：draft_id、side、type、variant 必填。返回 filename、path、sha256、report。
-
-### 8.4 资源
+4 个静态资源，无资源模板
 
 | URI | 内容 |
 | --- | --- |
-| fm27://manifest | 清单与能力 |
-| fm27://catalog | 领域枚举与默认值 |
-| fm27://status | 引擎、活动任务、存档状态 |
-| fm27://paths | 数据、草案、运行与导出目录，含常见 WSL 映射 |
-| fm27://workflow/free-mode | 自由模式战术对比的推荐调用顺序与判读口径 |
-| fm27://drafts/{draft_id} | 草案 JSON |
-| fm27://jobs/{job_id} | 任务摘要 |
-| fm27://jobs/{job_id}/export | 汇总、方案与 provenance |
-| fm27://jobs/{job_id}/logs/{name} | 单场原始 JSONL |
+| fm27lab://drafts | 草案列表，等价 drafts list，limit 128 |
+| fm27lab://pools | 池条目列表，等价 pools list，limit 128 |
+| fm27lab://jobs | 任务列表，等价 jobs list，limit 256 |
+| fm27lab://saves | 存档列表，等价 saves list，limit 256 |
 
-大结果只走资源，工具回摘要与游标。
+证据 fm27lab/interfaces/mcp/resources.py。
 
-### 8.5 prompts
+### 8.4 Prompts
 
-| 名称 | 参数 | 用途 |
-| --- | --- | --- |
-| test_tactic_change | draft_id、instruction、seeds | 引导执行单变量对照实验 |
-| compare_baseline_vs_current | baseline_draft_id、draft_id、seeds | 引导读取配对差值并解释 |
+| 名称 | 参数 |
+| --- | --- |
+| experiment-design | draft_id 必填、instruction 必填、baseline_draft_id 可选、seeds 可选 |
+| pool-review | job_id 必填、focus 可选 |
 
-### 8.6 进度、取消与日志
+证据 fm27lab/interfaces/mcp/prompts.py。
 
-- 请求带 progressToken 时，job_wait 按 poll_ms 轮询并发送 notifications/progress，字段为 progress、total，可选 message。
-- 收到 notifications/cancelled 时停止等待，保留 job，不自动取消。
-- 阶段变化通过 notifications/message 发送，级别 info。
-- 工具文本为紧凑 JSON，上限 16 KB；超限时返回截断标记与替代读取提示，不再截断 JSON 中段。
-- 需要完整逐场数据时用 results_csv 或运行目录 summary.json。
+### 8.5 进度与取消
 
-### 8.7 客户端配置
+- 当前 MCP 服务不发送 notifications/progress、notifications/cancelled 或 logging 消息，也没有 notifications/message。长任务需轮询 jobs_get、jobs_runs 或 HTTP SSE。
+- 取消通过 jobs_cancel 或 experiments_cancel 工具发起，不在协议层取消。
+
+### 8.6 客户端配置示例
+
+客户端直接以 Python 进程方式启动 MCP，环境变量提供数据目录
 
 ```json
 {
   "mcpServers": {
     "fm27lab": {
-      "command": "%LOCALAPPDATA%\\FM27TacticsDesktop\\agent\\fm27lab.cmd",
-      "args": ["mcp"]
+      "command": "python",
+      "args": ["-m", "fm27lab", "mcp"],
+      "env": {
+        "FM27LAB_DATA": "/absolute/path/data"
+      }
     }
   }
 }
 ```
 
-部分客户端对单次工具调用有独立超时，默认常见为 60 秒。若需要更长的 job_wait，应把该客户端的工具超时配置到 300 秒以上；否则保持 timeout_seconds 不超过 45，按返回的 next_poll_seconds 轮询。
-
-### 8.8 工具 schema 细则
-
-工具 inputSchema 由 src/fm27_agent/schemas.py 单点定义，MCP 与 CLI 共用同一份参数定义。字段类型、必填与约束与 8.3 一致；枚举值来自 manifest 与 catalog。错误统一映射为 4.3 错误码。
+- mcp 子命令本身没有 --data-dir 选项，但全局选项可以放在子命令之前：客户端不支持 env 时，把 args 写成 ["-m", "fm27lab", "--data-dir", "/absolute/path/data", "mcp"] 即可指定数据目录。证据 fm27lab/cli.py:47-57、fm27lab/cli.py:90-93。
+- 桌面壳运行期间会自动写入发现文件；若 MCP 与桌面壳共享同一数据目录，可直接读取。
 
 ## 9. 工作流
 
-### 9.1 自由模式对比
+### 9.1 草案与属性编辑
 
-```text
-lab_status
-draft_create source=default name=baseline
-draft_get baseline save_scenario=true
-draft_create source=inline scenario_path=<受控场景文件> name=controlled-baseline
-draft_validate controlled-baseline
-draft_create source=draft base_draft_id=controlled-baseline name=candidate
-draft_edit candidate ops=[...]
-draft_validate candidate
-experiment_run draft_id=candidate baseline_draft_id=controlled-baseline seeds={start:5001,count:200} workers=4 event_details=false
-job_wait job_id timeout_seconds=45
-results_summary job_id
-```
+- 创建草案：POST /api/drafts 或 drafts create，body 为 name 与 scenario；scenario 归一化失败返回 400 validation_failed。
+- 属性编辑：POST /api/drafts/{draft_id}/attributes，输入 side、scope、operation、params、player_index。side 取 home 或 away；scope 取 all、starters、player、squad。证据 fm27lab/application/draft_attributes.py:18-20。
+- operation 取 bulk、position、copy、pair_feet、undo，参数约束：bulk 需 value，可选 groups 与 include_personality；position 需 position 与 value；copy 接受 source_uid 或 source_index 及可选 groups、copy_personality；pair_feet 需 left_index、right_index、preferred、preferred_value、weaker_value；undo 不接受参数。证据 fm27lab/application/draft_attributes.py:23 起。
+- 显示值按 1 到 20 输入，内部按 5 倍换算；位置熟练度单独使用 position 操作，取值 0 到 20。证据 fm27lab/domain/attributes.py:165-183、fm27lab/domain/attributes.py:245-267。
+- 输出 draft、snapshot、changed_players；快照存于草案 source 的 attribute_snapshot 键，可用 undo 回退。
 
-受控夹具要求：
+### 9.2 实验与结果对比
 
-- 双方首发 11 人属性完全一致，lineup 相同，非战术配置同源，针对性指令中性化。
-- 每个首发的 attributes[0..14] 中，当前战术两阶段使用到的位置熟练度设为满值 20。
-- 受控场景用 draft_create source=inline scenario_path 创建，避免把大 JSON 塞进工具参数。
-- 基线可复现后再开始候选。
+1. 创建草案并确认场景合法。
+2. 提交实验：experiments submit 或 POST /api/experiments，必填 seeds 与 draft_id；需要 A/B 时提供 baseline_draft_id。
+3. 启动：experiments start 或 POST /api/experiments/start；该调用同步执行到批次结束。
+4. 轮询：jobs get 查看 status 与 completed，jobs runs 分页读取逐场结果。
+5. 汇总：jobs summary 取 metrics 与 paired。
+6. 对比：results compare 传 baseline 与候选任务，读取 paired 差值；池任务先看 comparable。
+7. 导出：jobs export 得到 CSV，列定义见 5.5。
 
-读取口径：
+### 9.3 阵容同步
 
-- metrics.B.win_rate 与 win_interval 判断变化是否稳定。
-- paired.goal_difference_delta 判断同种子配对差值。
-- 200 场只做筛选；确认至少两个独立种子块各 200 场，合并后用 results_compare 计算配对差与置信区间。
-- 2 到 6 场只用于校准流程，不进入比较表。
+1. saves import-file 登记存档文件并读取，得到 save_id。
+2. saves squad 读取指定俱乐部的名单。
+3. drafts apply-roster 将存档名单写入草案，scope 取 starters、bench、both，side 取 home 或 away。证据 fm27lab/application/save_import.py:23、fm27lab/application/save_import.py:124-178。
+4. drafts undo-roster 从 roster_snapshot 回退；无快照时报「没有可撤销的阵容同步」。证据 fm27lab/application/save_import.py:184-201。
 
-### 9.2 多候选批次
+### 9.4 客队战术池
 
-```text
-experiment_run candidates=[{draft_id:A,name:候选A},{draft_id:B,name:候选B}] baseline_draft_id=baseline seeds={start:5001,count:200} workers=4 event_details=false
-job_get job_id=<批次中每个 job> include_runs=false
-job_wait job_id=<当前队首 job> timeout_seconds=45
-results_compare baseline_job_id=<基准 job> candidate_job_ids=[<候选 job>,...] reps=2000
-```
+- 池配置写在草案场景的 away_tactic_pool 内；提交实验时按种子逐场抽签并写入每场场景。
+- 运行后 jobs pool-summary 查看条目、权重、概率与抽签分布。
+- 多任务对比时，抽签不一致会导致 comparable 为 false，应先确认种子与模式一致。
 
-多草案提交后进入服务端唯一队列，按创建顺序串行执行；job_get 与 job_list 的 queue_position 表示当前排队位置。排队中的任务可直接取消，状态立即变为 cancelled 且不再执行。避免并发提交大量批次，单批候选建议不超过 10 个。
+### 9.5 战术文件往返
 
-跨任务比较前检查 results_compare 的 comparable：若两任务都带客队战术池，salt 不同意味着同 seed 可能抽到不同战术，此时必须返回不可配对；需要跨任务比较时改用同一任务内的 A/B 对照。
-
-### 9.3 战术文件往返
-
-```text
-draft_create source=job job_id variant=B
-fmf_import draft_id side=1 file_base64=...
-draft_validate draft_id
-fmf_export draft_id side=1
-```
-
-导出后 App 会立即回读并比对，report 中不一致会报错。
-
-### 9.4 客队战术池模式
-
-```text
-draft_create source=inline scenario_path=<含 away_tactic_pool 的场景文件>
-draft_validate
-draft_create source=draft base_draft_id=<池草案> name=候选
-experiment_run draft_id=候选 baseline_draft_id=<池草案> seeds={start:5001,count:200} event_details=false
-job_wait job_id
-results_summary job_id
-```
-
-- 池草案可来自 inline、draft、job 或 fmf；创建后 draft_get include_scenario 与 save_scenario 均保留 away_tactic_pool。
-- 同一任务的 A/B 共享 salt 与 seed 分配：同 seed 的客队战术完全相同，配对差值只反映战术变化。
-- random 模式按权重抽取，轮次由种子数决定；rotation 模式要求 seeds 数量等于条目数乘 rounds，第 i 个种子固定对应第 i 对条目数取模的战术。
-- real 名单模式要求每套条目带 roster；roster 来自存档战术页导入时的当前一线队快照，FMF 导入条目没有 roster，不能与 real 同时启用。
-- results_summary 的 tactic_pool.draws 给出每套客队战术的出场次数；results_matches 逐场返回 tactic_pool_entry。
-- 两个独立种子块应在同一实验配置下重复提交，再用 results_compare 比较；不同任务的 salt 不同，若同 seed 分配不一致会被拒绝配对（comparable=false），此时不得手工合并配对结果。
+- 导出：drafts export-fmf，下载文件名为草案名加 .fmf 后缀。
+- 导入：drafts import-fmf，name 长度 1 到 80，内容为 base64，解码后不超过 4 MiB。证据 fm27lab/interfaces/http/routes/fmf.py:19-20。
 
 ## 10. 安全与隐私
 
-- 仅 loopback；Host 白名单；token 或 cookie；Origin 检查保留。
-- token 存于用户目录，建议 icacls 收紧到当前用户；每次启动轮换。
-- Agent 命名空间不提供任意文件读写：存档导入只读用户指定 .fm，导出只写 dataDir 下 agent/exports；MCP 工具不接受绝对路径输出。
-- 不暴露原生宿主命令行，不提供绕过兼容检查、DLL/SHA 门禁或完赛校验的入口。
-- 破坏性操作需要显式参数：删除草案与实验、切换游戏根、覆盖导出文件。
-- 不提取、不打包、不上传游戏 DLL 与资源；存档与结果仅保留本机。
-- 日志只记录命令、耗时、退出码与错误码，不记录完整场景与存档内容。
-- 自由模式提交由 App 唯一 FIFO 队列串行执行；UI 路径在忙碌时直接返回 409，Agent 路径返回 queued 与 queue_position。排队中取消立即落 cancelled，Agent 层不重试提交；引擎、存档与控制面操作仍要求任务空闲。
+- 监听地址限定回环，token 为任意非空 ASCII 字符串（缺省时生成 64 位十六进制），发现文件权限 0600，Windows 上收紧 ACL。
+- 鉴权只接受 Bearer；不写 Cookie，不使用浏览器会话。
+- CORS 仅允许桌面壳来源与开发端口；不携带凭据。
+- 产物文件名做清理，禁止 . 与 .. 路径段；产物内容上限 16 MiB，战术文件上限 4 MiB。
+- 存档读取为只读复制，不修改源文件。
+- 日志只记录 sidecar 标准错误，不输出 token；桌面壳写入的日志文件位于数据目录 logs。
+- 边界：缺少 Host 校验与多用户隔离，同一台机器的其他进程若取得 token 即可调用全部接口；token 不应写入共享脚本或版本库。
 
 ## 11. 性能与预算
 
-- 单场耗时没有公开基准；按 190 秒无进度超时作为最坏边界理解。
-- 新宿主在同一批次 lane 内持续复用，逐场清理执行力上下文；旧宿主回退到每会话 64 场或执行力隔离模式。
-- workers 手动上限当前为 256；CPU 与内存只决定推荐值。高于推荐值的输入显示警告。
-- 准备阶段要求约 20 GiB 可用磁盘；每场按 3 MiB 预留。
-- 建议预算：
+| 项目 | 数值 | 证据 |
+| --- | --- | --- |
+| 并行 worker 上限 | 256 | fm27lab/domain/concurrency.py |
+| 单次提交种子上限 | 10000 | fm27lab/interfaces/http/routes/experiments.py:14（MAX_SEEDS） |
+| 单批总场数上限 | 10000 | fm27lab/application/experiments.py:20 |
+| 每 worker 内存预算 | 1 GiB | fm27lab/domain/concurrency.py |
+| 内存保留 | 2 GiB | fm27lab/domain/concurrency.py |
+| 每 worker 磁盘预算 | 1 GiB | fm27lab/domain/concurrency.py |
+| 引擎单批超时 | 190 秒 | fm27lab/adapters/engine_native/host.py:231-330 |
+| 引擎重试次数 | 1 | fm27lab/adapters/engine_native/host.py:231-330 |
+| SSE 历史保留 | 256 条 | fm27lab/application/events.py |
+| SSE 心跳间隔 | 15 秒 | fm27lab/application/events.py |
+| CLI 与 HTTP 客户端超时 | 30 秒 | fm27lab/client.py:16 |
+| 启动超时 | 30 秒 | src-tauri/src/lib.rs:24-27 |
+| 关闭等待 | 10 秒 | src-tauri/src/lib.rs:24-27 |
 
-| 场景 | 建议 |
-| --- | --- |
-| 首次探测 | 每方案 2 到 6 场，事件明细关闭 |
-| 战术对比 | 每方案 10 到 20 场，同种子 |
-| 对手扫描 | 每对手 4 到 6 场，偶数 |
-| 单次提交上限 | 10000 场，超出需用户确认 |
-| job_wait 单次 | 45 秒，最大 300 秒；受客户端工具超时约束 |
-
-- 提交回包带 total、workers、mode、queued、queue_position；运行中 job 带 eta_seconds 与 matches_per_minute。
-- 首次实际运行后记录单场耗时，用于后续预算。
+推荐并行数取中央处理器核数与内存可支撑并行数中的较小值，上限 256；低于需求时报 insufficient_memory 或 insufficient_disk，除非显式允许超配。
 
 ## 12. 兼容与版本
 
-- api 为 fm27lab/v1；主版本不同即不兼容。
-- manifest 暴露 server、adapter、engine_build、scenario_schema、batch_schema 与能力位。
-- 草案记录 scenario_view_schema 与 server_version；加载时校验，不匹配提示重新校验。
-- 引擎状态原样透出 compatible、trial_allowed、original_build_verified、resource_fingerprint。
-- 适配器版本绑定参考构建 27.0.1+2494687；升级时需要同步 adapter 与规格。
-- App 升级后旧草案仍可加载，但提交前必须重新校验；旧实验按 provenance 规则不可混跑。
-- server_version 与 fm27_agent_contract.APP_VERSION 同步为 1112；status 返回 engine_compatibility，其中 profile 可能是字符串 id（原生兼容事件透传），manifest 的 engine_build 仅在 profile 为对象时取值，MCP 文本同时兼容字符串与对象两种形状。
-- 幂等键与活动任务在重启后清空；状态以磁盘 summary 与 provenance 为准。
-
-## 13. 验收标准
-
-| 编号 | 验收项 | 通过标准 |
+| 项目 | 当前值 | 证据 |
 | --- | --- | --- |
-| A1 | 发现与鉴权 | 无 token 访问 Agent 端点返回 401；错误 Host 返回 403；UI 页面正常 |
-| A2 | 清单与 schema | manifest 字段齐全；schema 包可解析；主版本不匹配时 CLI 与 MCP 明确报错 |
-| A3 | 草案 | 五种来源均可创建；单步与批量编辑、校验、删除、列表、选项查询均通过；非法编辑不落盘 |
-| A4 | 自由模式 | 通过 CLI 与 MCP 各完成一次 A/B 对比；多候选提交进入队列并按序执行；结果含 metrics 与 paired |
-| A6 | 任务 | 列表分页、详情分页、取消、续跑、删除、重命名、导出均通过 |
-| A7 | 结果 | 汇总、逐场分页、单场事件、跨任务配对、CSV 双方列与进球时间线正确 |
-| A8 | 战术文件 | FMF 导入导出往返一致；定位球导出回读通过 |
-| A9 | 错误 | 每个错误码至少一条用例；错误可重试标记正确 |
-| A10 | 幂等 | 同键同载荷不重复建任务；同键异载荷返回 409 |
-| A11 | 生命周期 | headless 启动、shutdown 优雅退出、活动任务取消后退出 |
-| A12 | 兼容 | 现有 UI 全流程不受影响；旧 /api 响应形状不变 |
-| A13 | 安全边界 | 路径越界被拒；不暴露原生宿主 |
-| A14 | 恢复 | App 重启后任务标记 interrupted，可续跑；草案保留 |
-| A15 | 性能基线 | 记录单场耗时与批次吞吐，写入验收记录 |
-| A16 | MCP 文本 | 工具文本为可解析 JSON；超限返回截断标记；results_summary、job_get、draft_list 含关键数据 |
-| A17 | 客队战术池 | 池场景经 inline/draft/job/fmf 往返不丢；random 与 rotation 分配可复现且 A/B 同 seed 战术一致；real 名单与 uniform 属性互斥生效；results_summary 给出每套出场次数；results_compare 对模式、条目或分配不同返回 comparable=false |
-| A18 | 状态与重连 | lab_status 兼容 engine_compatibility 与字符串 profile；token 轮换或端口变化时 MCP 重读 endpoint.json 并重试一次 |
+| 包版本 | 2.0.0.dev0 | fm27lab/__init__.py:3 |
+| 接口版本 | fm27lab/v2 | fm27lab/__init__.py:4 |
+| 发现文件 schema | 1 | fm27lab/sidecar.py:19-30 |
+| Python | 3.12 | pyproject.toml |
+| 存档读取库 | fmsave 0.9.0 | pyproject.toml |
+| MCP 协议 | 2024-11-05 | fm27lab/interfaces/mcp/protocol.py:8 |
+| 桌面壳 | Tauri 2 | src-tauri/tauri.conf.json |
 
-## 14. 实施分期
+- GET /api/version 返回 api、version、capabilities 与 limits；capabilities 当前为空数组，limits 为 max_workers 256 与 max_seeds 10000。证据 fm27lab/interfaces/http/routes/system.py:55-62。
+- 兼容策略：破坏性变更提升 API_VERSION 与发现文件 api 字段；客户端应先比较 api 字段再调用。
 
-| 阶段 | 内容 | 完成标准 |
-| --- | --- | --- |
-| P0 服务端契约 | endpoint.json、Host 与 token、Agent 命名空间、manifest 与 schema、错误封套、分页、幂等、health、shutdown、save cancel、headless | A1、A2、A6 的分页部分、A9、A10、A11、A12 通过 |
-| P1 CLI 与草案 | src/fm27_agent 客户端、草案存储、CLI 命令、mock server 契约测试 | A3、A4 的 CLI 链路、A7、A8 的 CLI 链路通过 |
-| P2 MCP | stdio sidecar、tools、resources、prompts、进度与取消、配置生成 | A4 的 MCP 链路、A14 通过 |
-| P3 收尾 | 打包与入口脚本、文档、Windows 端到端验收 | A13、A15 与全量回归通过 |
+## 13. 验收要点
 
-改动清单：
+1. GET /api/health 返回 200 且 database 为 ready；带错误 Origin 返回 403 forbidden_origin。
+2. 未带 token 访问业务端点返回 401 unauthorized；错误 token 返回 invalid bearer token。
+3. GET /api/agent/v1/manifest 返回 404 not_found，证明旧命名空间已不存在。
+4. 发现文件包含 schema、api、url、port、token、pid、data_dir、engine_root、created_at 九个业务字段，无 game_root、versions、capabilities、limits。
+5. CLI 版本命令输出 2.0.0.dev0 fm27lab/v2；不带 --data-dir 时读取 FM27LAB_DATA 或平台默认目录。
+6. MCP 初始化返回协议 2024-11-05 与 49 个工具；资源为 4 个静态 URI。
+7. 任务生命周期覆盖 queued、running、completed 与 cancelled；非法流转返回 409 invalid_transition。
+8. CSV 列顺序与 5.5 一致。
+9. POST /api/shutdown 返回 202，进程退出后发现文件被删除。
 
-- src/fm27_tactics_server.py：鉴权与 Host 校验、Agent 路由、manifest 与 schema、分页、幂等、endpoint.json、shutdown、save cancel 接口。
-- src/desktop_save_mode.py：读取进程句柄、取消与 cancelled 状态。
-- Launcher.cs：headless、token 感知的自检与关闭、入口脚本生成。
-- scripts/run.py 与 scripts/build_exe.py：现有 src 递归收集已覆盖 fm27_agent，无需新增文件清单。
-- src/fm27_agent：status 形状兼容、战术池摘要与结果视图、CSV 客队战术列、results_compare 配对保护、token 轮换重试。
-- tests：Agent 契约、CLI、MCP、安全用例；mock 覆盖随机与轮战战术池、A/B 同分配和真实名单摘要；离线服务端队列串行、排队取消与池展开测试。
+## 14. 当前实现边界
 
-## 15. 风险与待评审问题
+- 原生引擎尚未接入生产 sidecar，experiments start 返回 503 engine_unavailable；桌面界面与 CLI 的端到端实验依赖后续注入引擎宿主。
+- 数据目录 exports 子目录只在初始化时创建，当前没有写入使用方。
+- 池条目库与实验解耦，实验只读草案内嵌 away_tactic_pool。
+- CLI 无超时选项；批次超过 30 秒时 CLI start 会本地超时，服务端继续执行。
+- MCP 无进度与取消通知，只能轮询。
+- 历史设计中的 Agent 命名空间、Cookie 会话、Host 白名单、manifest、schemas、defaults、logs、phase-plan、selection、repair 等端点均不存在，不应再按旧文档实现。
 
-风险：
+## 15. 风险与待评审
 
-- 取消存档读取需要终止 fmsave 子进程，可能留下部分缓存；需要定义 cancelled 状态与残留清理。
-- token 与 cookie 鉴权会触及所有请求处理；必须回归 UI 全流程。
-- headless 与 Launcher Mutex、托盘生命周期需要明确交互。
-- 部分 MCP 客户端不支持 resources 与 prompts；工具必须可独立完成全流程。
-- 草案与实验绑定本机 data 目录的 HMAC 来源签名，不适合跨机器迁移。
-- 单任务与存档单槽限制多 Agent 并行；首期接受忙时返回错误。
-- 单场耗时未知，预算默认值需要目标机实测后校准。
-- 幂等键仅内存保存，重启后失效。
+| 风险 | 说明 |
+| --- | --- |
+| 引擎注入缺失 | 生产 sidecar 与桌面壳均未装配原生引擎，实验流程当前不可完成 |
+| 单请求同步执行 | start 在请求线程内跑完整批，长批次受客户端超时影响，且无进度推送 |
+| 幂等记录清理 | 幂等记录持久化在 SQLite 的 idempotency 表，主键唯一并对 request_hash 校验载荷，跨重启有效且同一数据库的多进程共享；进程内 asyncio.Lock 只串行单进程内同键请求。当前没有定时调用 prune，记录会随不同键累积。证据 fm27lab/interfaces/http/app.py:148、fm27lab/adapters/storage_sqlite/idempotency.py:35-81。 |
+| 发现文件竞争 | 手工启动与桌面壳共用数据目录时相互覆盖发现文件，需保证同一时刻只有一个 sidecar |
+| 无 Host 校验 | 依赖回环与 token，token 泄露风险需由宿主权限控制兜底 |
+| 池条目库未参与实验 | 条目库仅做 CRUD，实验使用草案内嵌配置，两者易被误认为同一数据源 |
 
-待评审问题：
-
-- MCP 协议版本支持列表是否需要覆盖更多客户端。
-- token 文件是否需要 DPAPI 加密或仅依赖用户目录 ACL。
-- 导出文件默认目录是否固定为 dataDir/agent/exports。
-- 是否在首期提供 job_export 工具，或仅作为资源。
-- CSV 中事件列是否默认关闭，避免大文件。

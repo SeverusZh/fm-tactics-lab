@@ -193,7 +193,10 @@ def remove_endpoint(data_dir):
 
 
 def write_agent_scripts(data_dir, source_dir, python_exe):
-    """Write stable launcher shims so MCP clients do not depend on release hashes."""
+    """Write v1 launcher shims that predate the Tauri shell.
+
+    The v2 desktop shell starts the sidecar directly and never calls this helper.
+    """
     agent_dir = Path(data_dir) / "agent"
     agent_dir.mkdir(parents=True, exist_ok=True)
     command = agent_dir / "fm27lab.cmd"

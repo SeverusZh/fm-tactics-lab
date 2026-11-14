@@ -1175,7 +1175,7 @@ window.FM27English = {
  "请选择有效位置": "Choose a valid position",
  "请选择比赛战术": "Choose a match tactic",
  "请选择球员": "Choose a player",
- "请通过本地启动脚本打开": "Open using the local launcher",
+ "请通过本地启动脚本打开": "Open the FM Tactics Lab desktop app",
  "诺丁汉森林": "Nottingham Forest",
  "调整角色人数时先移除旧任务": "Remove old duties before changing role counts",
  "负": "Loss",

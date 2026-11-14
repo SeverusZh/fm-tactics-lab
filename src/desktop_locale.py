@@ -11,7 +11,7 @@ def normalize_language(language):
 
 
 def system_language():
-    # The launcher supplies CurrentUICulture, independent of browser preferences.
+    # Resolution order: FM27_UI_LANGUAGE, then the Windows display language, then the POSIX locale.
     language = os.environ.get('FM27_UI_LANGUAGE', '')
     if not language and sys.platform == 'win32':
         try:

@@ -116,6 +116,26 @@
 | 2026-11-14 | 结果对比后端修复轮 | 同上 | PASS | strict+extra=forbid 与 additionalProperties=false 断言、ID 统一 1–64 且 MCP baseline 对齐、alpha 区间性质、entries weight/roster 判别、HTTP 不可比 paired=null 与非默认参数透传；1746 项全量、5 变异全部被杀。 |
 | 2026-11-14 | 结果对比前端 | ResultsPage.tsx、api.ts、extra.css、tests | FAIL | 参数变化清空与陈旧响应防护缺少判别性测试，删除请求守卫或 clearCompare 后 35 项仍全过；另有禁用态、区间格式与长文本 MINOR。 |
 | 2026-11-14 | 结果对比前端修复轮 | 同上 | PASS | 补迟到旧响应不覆盖新一轮状态、切变体清空且切回不复活两个用例，守卫与 clearCompare 变异均被杀；禁用候选视觉、区间括号格式与换行修复；169 项 Vitest、typecheck 与 build 通过。 |
+| 2026-11-14 | 原生场景编码器与定位球领域 | domain/setpieces.py、engine_native/scenario_assets.py、scenario_codec.py、tests | FAIL | relative 编码只断言等于基线，缺少任何差量；对方战术 (20)/(21) 两模式未测发射，差量作用域变异存活。 |
+| 2026-11-14 | 编码器测试修复 | tests/test_scenario_codec.py | PASS | 补 12 项 relative 精确差量与对方战术双模式测试，18 项旧测试逐字保留；12 个等效变异全部被杀，实现未改。 |
+| 2026-11-14 | 客队池 schema 与整批展开 | domain/pool.py、tests | FAIL | 只支持单 seed 展开，轮战恒抛错；24–26 人名单在校验层接受但应用层拒绝，与 ADR-0005 归一化冲突。 |
+| 2026-11-14 | 客队池修复轮 | domain/pool.py、tests | PASS | 整批 expand_away_scenarios 一次抽签逐场展开并委托单 seed；24–26 走 normalize_roster 裁剪附 roster_trim、generated 占位保留、缺门将中文提示；6 变异全杀。 |
+| 2026-11-14 | 结果页批量管理与池折叠 | ResultsPage.tsx、ResultsPage.test.tsx、extra.css | FAIL | 删除后切换与重置缺少判别性测试，测试从未先选中任务；aria-busy 与池折叠损坏容错有缺口。 |
+| 2026-11-14 | 结果页修复轮 | 同上 | PASS | 补显式查看任务后删除并断言切换首个、分页归零、对比候选与对比表清空；aria-busy、sessionStorage 损坏容错；185 项 Vitest，7 变异 6 杀且 clearCompare 判等价。 |
+| 2026-11-14 | 实验链路接线 | application/experiment_material.py、application/experiments.py、application/jobs.py、routes/experiments.py、app.py、cli.py、mcp/tools.py、tests | FAIL | submit 物化窗口内并发 start/cancel/delete 会让任务在无 materialized config 时以默认场景静默运行并产出错误结果；set_config 不在清理路径内导致 job 与物化目录残留；配置 materializer 时缺配置仍回退空场景；任务删除不清理物化目录；MCP seeds 缺 maxItems/uniqueItems。 |
+| 2026-11-14 | 实验接线修复轮 | application/experiments.py、jobs.py、experiment_material.py、app.py、mcp/tools.py、tests | PASS | submit 持锁覆盖 create→物化→set_config→summary；异常路径删 job 与物化目录后原样重抛；缺 materialized 配置显式报错不回退空场景；JobService cleanup 回调只对成功删除生效；root containment 与 MCP seeds 约束到位；6 变异全杀、1977 项全量；2 Important 与 3 Minor 为测试判别力缺口。 |
+| 2026-11-14 | 实验接线测试缺口修复 | tests/test_experiment_material.py、test_experiments_service.py | PASS | 补同前缀兄弟目录、discard 符号链接逃逸、BaseException 清理、清理异常不掩盖原异常、summary 返回 None 共 8 用例；5 条存活变异全部被杀，实现未改；1990 项全量。 |
+| 2026-11-14 | 实验接线测试缺口复核 | 同上 | PASS | 5 条存活变异全部被新用例杀死（前缀兄弟目录、discard 符号链接、BaseException 清理、清理异常不掩盖、summary 返回 None），逐字节恢复；旧用例未被削弱，实现零改动；1990 项全量。 |
+| 2026-11-14 | 宿主资源探测 | adapters/host_resources.py、routes/system.py、registry.py、cli.py、tests | PASS | CPU/内存/磁盘三策略与中文错误、503 封套 resource_probe_failed、51 能力注册与 CLI system resources、CLI 自动预填三资源；7 核心变异被杀、1977 项全量；4 项 Minor 为测试判别力缺口。 |
+| 2026-11-14 | 宿主资源测试缺口修复 | tests/test_host_resources.py、test_cli_commands.py | PASS | 补 meminfo 负值不回退、负值转 sysconf、非对象探测响应、cpu_count=0、缺字段共 5 用例；M8–M11 四条存活变异全部被杀、实现未改；1982 项全量。 |
+| 2026-11-14 | 实验提交页面 | ExperimentsPage.tsx、ExperimentsPage.test.tsx、App.tsx、Rail.tsx、api.ts、extra.css | FAIL | 启动结果展示的是最早排队任务却挂在刚提交任务卡片内且不显示任务身份，会误导；手改并行数不被回填、预检随 workers/资源变化触发均无判别性测试；另有名称上限、aria 关联、复选框样式与 warnings 展示等 MINOR。 |
+| 2026-11-14 | 实验提交页面修复轮 | ExperimentsPage.tsx、ExperimentsPage.test.tsx、extra.css | PASS | 启动结果改为独立同级区域并展示任务名、ID、总场数与更早任务提示；名称上限纳入提交禁用、草案选择框 aria 关联、复选框移出 field、预检 warnings 常显；12 变异全杀、36 项用例、221 项 Vitest。 |
+| 2026-11-14 | 实验提交页面结构断言补强 | ExperimentsPage.test.tsx | PASS | 新增启动结果与实验任务区同级不嵌套的结构断言、仅磁盘变化重新预检、提示全文锁定、重提交清空启动结果、草案 select 空错误路径共 5 用例；5 变异全杀、实现零改动、226 项 Vitest。 |
+| 2026-11-14 | 实验提交页面补强复核 | 同上 | PASS | 独立重做 5 条必杀变异与 4 条自设结构变异全部被杀，旧 36 条套件对同类缺陷仍全绿；反向删除还原原始 sha256、纯增量；226 项 Vitest、typecheck 与 build 通过；3 项 MINOR 为同类单字段缺口与断言过严。 |
+| 2026-11-14 | Launcher 退役 | Launcher.cs、scripts/build_exe.py、export_source.py、test_workspace_scripts.cjs、docs/DEVELOPMENT.md、docs/AGENT_INTEGRATION.md、docs/AGENT_VERIFICATION.md、THIRD_PARTY_NOTICES.md | PASS | 删除 C# Launcher 与 csc 构建入口，导出白名单、构建文档、代理集成与第三方声明同步为 Tauri 壳与 sidecar；unittest 281 项与两个 node 测试通过、导出 368 文件不含被删入口、变异证明残留断言仍具判别力；越界 v1 残留列入后续文档切片。 |
+| 2026-11-14 | 实验提交页面预检单字段补测 | ExperimentsPage.test.tsx | PASS | 补 CPU 与可用内存各一条单字段用例，三条 queryKey 字段变异分别被对应用例杀死、基线 41 条在同变异下全绿；反向删除还原原始 sha256、纯增量；228 项 Vitest、typecheck 与 build 通过；MINOR 为子串断言可被超串满足与连接字段既有盲区。 |
+| 2026-11-14 | 文档对齐 v2 事实 | docs/AGENT_QUICKSTART.md、docs/AGENT_INTEGRATION.md、docs/AGENT_VERIFICATION.md、src/desktop_locale.py、src/fm27_agent_contract.py、src/tactics_ui/i18n-en.js | FAIL | 三份接入文档整体重写并与代码逐条核对，25 条抽样断言与 12 条 v1 退场结论成立；唯一 IMPORTANT 为幂等风险表把 SQLite 持久化记录误写为进程内、重启失效，另有 7 项 MINOR 为引擎目录错误混同、MCP 启动文案标点、工具分组计数、token 格式、系统接口归类与证据行号。 |
+| 2026-11-14 | 文档对齐修复轮 | 同上 | PASS | I-1 改为持久化幂等（主键唯一、payload 指纹校验、跨重启有效、同库多进程共享、单进程 asyncio.Lock），并补真实剩余风险“无定时 prune”；7 项 MINOR 全部逐条修正并经复审实测确认；标题无括号、无未发生审核声称、node 测试与 281 项 unittest 通过；遗留 MINOR 为种子错误文案与证据区间。 |
 
 ## 审核规则
 
@@ -124,6 +144,6 @@
 - 先列 findings，再列已验证项，最后给结论。
 - Critical 或 Important 未闭环时不得标记 PASS。
 - 审核通过不等于整体发布就绪；发布仍需最终验收与 Windows 真机验证。
-- 旧 `tests/` 当前 281 项通过，覆盖 legacy UI/HTTP/CLI/MCP、存档战术库、池与名单；新 `fm27lab/tests` 当前 1746 项通过，覆盖包版本、CLI 环境继承、配置/路径边界、SQLite 迁移/事务与池/草案/任务/存档/产物/幂等仓储、HTTP 健康/池/草案/任务 CRUD、鉴权、错误封套、Origin、ACL 失败清理、sidecar serve、23 人名单、真实名单应用、scenario 归一化、catalog/双阶段战术、客队战术池选择、结果指标、任务状态机、存档状态机与应用服务；Vitest 当前 169 项。
+- 旧 `tests/` 当前 281 项通过，覆盖 legacy UI/HTTP/CLI/MCP、存档战术库、池与名单；新 `fm27lab/tests` 当前 1990 项通过，覆盖包版本、CLI 环境继承、配置/路径边界、SQLite 迁移/事务与池/草案/任务/存档/产物/幂等仓储、HTTP 健康/池/草案/任务 CRUD、鉴权、错误封套、Origin、ACL 失败清理、sidecar serve、23 人名单、真实名单应用、scenario 归一化、原生场景编码与定位球记录、场景物化与实验接线、宿主资源探测、catalog/双阶段战术、客队战术池选择与整批展开、结果指标与跨任务对比、任务状态机、存档状态机与应用服务；Vitest 当前 228 项。
 - Tauri sidecar supervisor 的静态实现已存在，但 Linux 无 WebKitGTK，Windows CI 的 `cargo build`/`cargo test`/安装包构建是唯一编译证据。PyInstaller onedir sidecar 已在 Linux 构建并通过 ready/health/shutdown 冒烟测试。
-- Rust 核心 crate 当前 4 项 cargo test 通过；React 壳当前 9 项 Vitest 通过、类型检查与生产构建通过。Windows CI 已通过 cargo build/test、NSIS 安装包与 sidecar 资源断言；Linux 本机仍无 WebKitGTK。合并、设计、sidecar、壳层、名单五个审核门均已 PASS。
+- Rust 核心 crate 当前 4 项 cargo test 通过；前端当前 228 项 Vitest（9 个文件）通过、类型检查与生产构建通过。Windows CI 已通过 cargo build/test、NSIS 安装包与 sidecar 资源断言；Linux 本机仍无 WebKitGTK。合并、设计、sidecar、壳层、名单五个审核门均已 PASS。

@@ -20,7 +20,7 @@ python -m pytest
 python -m unittest discover -s tests
 ```
 
-The sidecar writes `data/agent/endpoint.json` on startup and removes it on shutdown. Do not commit that file or any `.db` database.
+The sidecar writes `data/agent/endpoint.json` on startup and removes it on shutdown. `fm27lab serve` runs without a UI and `fm27lab mcp` exposes the same service over stdio for MCP clients. Do not commit that file or any `.db` database.
 
 ### Frontend
 
@@ -36,13 +36,19 @@ The Vite dev server runs on `http://localhost:1420`. In a browser without Tauri,
 
 ### Tauri shell
 
+The Windows CI job runs these steps for the installer:
+
 ```bash
-cargo install tauri-cli --version "^2"
-cargo tauri dev
-cargo tauri build
+pnpm --dir web install --frozen-lockfile
+pnpm --dir web run build
+python scripts/build_sidecar.py
+cargo build --manifest-path src-tauri/Cargo.toml
+cargo test --manifest-path src-tauri/Cargo.toml
+npm install --global @tauri-apps/cli@^2
+tauri build --bundles nsis
 ```
 
-Tauri runs `pnpm --dir ../web dev` in development and packages `web/dist` in release. The Python sidecar and native host must be packaged before a release build; the current branch has not yet produced a Tauri installer.
+`tauri dev` starts the Vite server and the desktop window; the shell launches the sidecar from `FM27LAB_SIDECAR` or from `python -m fm27lab serve` in a development checkout. The release build packages `web/dist` and the PyInstaller sidecar from `sidecar-dist`, and writes the NSIS installer to `src-tauri/target/release/bundle/nsis/`. The CI job asserts that the sidecar executable and the installer exist.
 
 ### Rust core
 
@@ -61,11 +67,11 @@ python scripts/export_source.py --output dist/fm-tactics-lab-v2.0.0-source.zip
 
 The exporter uses an explicit allowlist and rejects workstation paths and credentials. `SOURCE_MANIFEST.json` must be regenerated after adding public files.
 
-## Legacy v1111 build
+## Source edition
 
-The following instructions describe the previous C# launcher and Python HTTP service. They are retained only while the legacy app is being retired.
+The source edition runs the Python HTTP service from `src` in a browser. It is separate from the Tauri desktop build and requires the private engine assets below.
 
-## Requirements
+### Requirements
 
 - Windows x64, full CPython 3.12 x64, and MSVC C++17 with the Windows SDK.
 - A local FM27 installation; the adapter reference build is `27.0.0+2493426`.
@@ -73,7 +79,7 @@ The following instructions describe the previous C# launcher and Python HTTP ser
 
 Install the save reader and its compression dependency from requirements.txt in the build environment.
 
-## Prepare local inputs
+### Prepare local inputs
 
 Run these commands from the repository root:
 
@@ -85,7 +91,7 @@ py -3.12 -m venv .venv
 
 The script checks the original EXE and embedded payload SHA256, then reads only the named input assets into ignored `private/` directories. It does not execute the EXE. An existing matching asset directory can alternatively be supplied with `--assets-root` and `--catalog`.
 
-## Build the native adapter
+### Build the native adapter
 
 In an **x64 Native Tools Command Prompt for Visual Studio**:
 
@@ -95,7 +101,7 @@ In an **x64 Native Tools Command Prompt for Visual Studio**:
 
 The public repository contains range metadata and digests. The script reconstructs comparison bytes from the exact reference DLL on your machine, verifies every range, then compiles the checked-in C++ host. Generated function bytes remain in ignored local outputs.
 
-## Run from source
+### Run from source
 
 ```powershell
 .venv\Scripts\python.exe scripts/run.py --game-root "D:\Games\Football Manager 27"
@@ -103,17 +109,7 @@ The public repository contains range metadata and digests. The script reconstruc
 
 Open the printed loopback URL after startup. Press `Ctrl+C` to stop the source edition.
 
-## Build a local desktop EXE
-
-```powershell
-.venv\Scripts\python.exe scripts/build_exe.py --python-home "D:\Python312"
-```
-
-Supply a full CPython 3.12 x64 distribution containing `Lib`, `DLLs`, `python312.dll`, the runtime libraries and `LICENSE.txt`. The script uses the .NET Framework C# compiler; `--csc` can override its location. Output: `dist/FM27-Tactics-Lab-v1108.5.exe`.
-
-The build script packages the save reader from the active Python environment. The release EXE and a local build can have different hashes.
-
-## Validate and export source
+### Validate and export source
 
 ```powershell
 .venv\Scripts\python.exe -m unittest discover -s tests -v
@@ -122,4 +118,4 @@ The build script packages the save reader from the active Python environment. Th
 
 The exporter uses an explicit source allowlist, checks for workstation paths and common credential formats, and writes file digests inside the archive. It excludes game DLLs, runtime data, input snapshots and generated comparison bytes.
 
-The EXE release is a separate asset authorized for distribution by the maintainer. Its embedded initial inputs and comparison data are outside the MIT grant for tool code. See [third-party notices](../THIRD_PARTY_NOTICES.md).
+The v1103.2, v1106 and v1108.5 EXE releases are separate assets authorized for distribution by the maintainer. Their embedded initial inputs and comparison data are outside the MIT grant for tool code. See [third-party notices](../THIRD_PARTY_NOTICES.md).
