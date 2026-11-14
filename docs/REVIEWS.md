@@ -140,6 +140,9 @@
 | 2026-11-14 | 前端类型测试补强 | web/src/lib/api-types.test.ts | PASS | 新增剥 `//` 注释后断言别名、`from "./api-schema"` 子句与 import 组各恰 1 且 specifier 集合严格相等；注释伪造别名与额外导入两条变异由存活转为被杀；残留 MINOR 为块注释伪造仍可存活。 |
 | 2026-11-14 | 原生引擎生产接线与按任务并行数配置 | fm27lab/adapters/engine_native/lazy.py、host.py、fm27lab/application/experiments.py、fm27lab/interfaces/http/app.py、fm27lab/tests/test_lazy_engine.py、test_engine_host.py、test_experiments_service.py、test_http_experiments.py | PASS | 引擎解析顺序为注入 engine > engine_root 惰性宿主 > 未配置占位；LazyNativeEngine 双检锁构造且 factory 失败不缓存；运行时计划兼容零参可调用并在创建任务前解析；start_next 置 running 后、run_batch 前调用 configure_workers；HTTP 端到端以 fake_simulator 完成草案提交到 4 场结果且 config 为绝对路径 FM27CFG1 文件；16 变异 14 杀，2 条判定等价；2037 项 pytest。 |
 | 2026-11-14 | 接线测试补强 | fm27lab/tests/test_experiments_service.py、test_lazy_engine.py | PASS | 新增 configure_workers 回调内读取任务状态断言 running 且序列早于 run_batch、factory 前两次失败不留半初始化缓存且第三次成功两条判别用例；对应两处变异被杀；2039 项 pytest、ruff 与类型生成检查通过。 |
+| 2026-11-14 | 双阶段战术校验接线 | adapters/catalog_native/catalog.py、application/tactics_validation.py、application/drafts.py、interfaces/http/app.py、tests | FAIL | load_document 保留原始节与候选顺序、目录缺失或不可解析时跳过、双队与 create/update 覆盖均正确，真实 create_app 47 项探针通过且 OpenAPI 与 /api/catalog 逐字节不变；3 项 Important 全为测试判别力缺口：校验修改入参、PATCH 被拒后草案未变、POST 被拒未落库三个变异存活，22 变异 19 杀。 |
+| 2026-11-14 | 双阶段战术校验测试修复轮 | tests/test_tactics_validation.py、test_http_drafts.py | PASS | 客队计划改为可区分并断言顺序不变、PATCH 被拒后场景深相等、POST 被拒后 total 为 0、坏目录跳过校验参数化用例；四变异全杀，实现零改动，2074 项 pytest。 |
+| 2026-11-14 | 战术板编辑与键盘操作 | web/src/pages/TacticsPage.tsx、TacticsPage.test.tsx、styles/extra.css | PASS | 编辑模式与本地深拷贝、拖拽与键盘交换首发、roving tabindex 与坐标导航、按阶段角色编辑、保存/放弃/脏态保护与 aria-live 播报；22 变异 19 个有效变异全杀，252 项 Vitest 连跑两次、typecheck 与 build 通过；Minor 为触屏拖拽、真实浏览器布局与 catalog 角色 phase 类型滞后。 |
 
 ## 审核规则
 
@@ -148,6 +151,6 @@
 - 先列 findings，再列已验证项，最后给结论。
 - Critical 或 Important 未闭环时不得标记 PASS。
 - 审核通过不等于整体发布就绪；发布仍需最终验收与 Windows 真机验证。
-- 旧 `tests/` 当前 281 项通过，覆盖 legacy UI/HTTP/CLI/MCP、存档战术库、池与名单；新 `fm27lab/tests` 当前 2039 项通过，覆盖包版本、CLI 环境继承、配置/路径边界、SQLite 迁移/事务与池/草案/任务/存档/产物/幂等仓储、HTTP 健康/池/草案/任务 CRUD、鉴权、错误封套、Origin、ACL 失败清理、sidecar serve、23 人名单、真实名单应用、scenario 归一化、原生场景编码与定位球记录、场景物化与实验接线、原生宿主按需构造与按任务并行配置、宿主资源探测、catalog/双阶段战术、客队战术池选择与整批展开、结果指标与跨任务对比、任务状态机与输出状态枚举、存档状态机与应用服务；Vitest 当前 234 项。
+- 旧 `tests/` 当前 281 项通过，覆盖 legacy UI/HTTP/CLI/MCP、存档战术库、池与名单；新 `fm27lab/tests` 当前 2074 项通过，覆盖包版本、CLI 环境继承、配置/路径边界、SQLite 迁移/事务与池/草案/任务/存档/产物/幂等仓储、HTTP 健康/池/草案/任务 CRUD、鉴权、错误封套、Origin、ACL 失败清理、sidecar serve、23 人名单、真实名单应用、scenario 归一化、原生场景编码与定位球记录、场景物化与实验接线、原生宿主按需构造与按任务并行配置、宿主资源探测、catalog/双阶段战术与草案写入校验、客队战术池选择与整批展开、结果指标与跨任务对比、任务状态机与输出状态枚举、存档状态机与应用服务；Vitest 当前 252 项。
 - Tauri sidecar supervisor 的静态实现已存在，但 Linux 无 WebKitGTK，Windows CI 的 `cargo build`/`cargo test`/安装包构建是唯一编译证据。PyInstaller onedir sidecar 已在 Linux 构建并通过 ready/health/shutdown 冒烟测试。
-- Rust 核心 crate 当前 4 项 cargo test 通过；前端当前 234 项 Vitest（10 个文件）通过、类型检查与生产构建通过。Windows CI 已通过 cargo build/test、NSIS 安装包与 sidecar 资源断言；Linux 本机仍无 WebKitGTK。合并、设计、sidecar、壳层、名单五个审核门均已 PASS。
+- Rust 核心 crate 当前 4 项 cargo test 通过；前端当前 252 项 Vitest（10 个文件）通过、类型检查与生产构建通过。Windows CI 已通过 cargo build/test、NSIS 安装包与 sidecar 资源断言；Linux 本机仍无 WebKitGTK。合并、设计、sidecar、壳层、名单五个审核门均已 PASS。
