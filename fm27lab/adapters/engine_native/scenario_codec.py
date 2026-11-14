@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import copy
 import struct
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
 from fm27lab.domain import setpieces
@@ -228,11 +228,42 @@ def _oi_row(row: Mapping[str, Any]) -> dict[str, Any]:
     return result
 
 
+def _player_order(players: Any, base_players: Sequence[Mapping[str, Any]]) -> list[int]:
+    """Map each source player index onto the matching match-sample player index.
+
+    A source roster may hold the leading match squad of the sample, so it may be
+    shorter than the sample list; the mapped indices must stay a prefix of it.
+    """
+    if not isinstance(players, list) or len(players) > len(base_players):
+        raise ValueError("名单长度不匹配")
+    positions = {player["native_id"]: index for index, player in enumerate(base_players)}
+    order: list[int] = []
+    for player in players:
+        native = player.get("native_id") if isinstance(player, Mapping) else None
+        if native is None or native not in positions:
+            raise ValueError("球员顺序或标识不匹配")
+        order.append(positions[native])
+    if sorted(order) != list(range(len(order))):
+        raise ValueError("球员顺序或标识不匹配")
+    return order
+
+
+def _remap_indices(values: Any, order: Sequence[int]) -> Any:
+    if not isinstance(values, list):
+        return values
+    return [
+        order[value] if type(value) is int and 0 <= value < len(order) else value
+        for value in values
+    ]
+
+
 def _validate_team(
     side: int,
     source: Mapping[str, Any],
     base: Mapping[str, Any],
     assets: ScenarioAssets,
+    *,
+    order: Sequence[int],
 ) -> dict[str, Any]:
     normalized = copy.deepcopy(base)
     normalized["name"] = str(source.get("name", base["name"]))[:40]
@@ -245,10 +276,8 @@ def _validate_team(
         raise ValueError("附加原生选项越界或与已命名指令重复")
     normalized["native_extra_team_bits"] = str(extra)
     normalized["mentality"] = integer(source.get("mentality", base["mentality"]), 1, 7, "比赛心态")
-    if "roster_size" in source:
-        normalized["roster_size"] = integer(
-            source["roster_size"], 11, len(base["players"]), "比赛名单人数"
-        )
+    roster_key = "roster_size" in source
+    requested_roster = source.get("roster_size")
     instructions: dict[str, int] = {}
     for group in assets.groups.values():
         value = source.get("instructions", {}).get(
@@ -260,12 +289,21 @@ def _validate_team(
         instructions[str(group["id"])] = value
     normalized["instructions"] = instructions
     players = source.get("players")
-    if not isinstance(players, list) or len(players) != len(base["players"]):
+    if not isinstance(players, list):
         raise ValueError("名单长度不匹配")
+    if not roster_key and len(order) != len(base["players"]):
+        raise ValueError("名单长度不匹配")
+    if roster_key:
+        roster_size = integer(requested_roster, 11, len(players), "比赛名单人数")
+        normalized["roster_size"] = roster_size
+    else:
+        roster_size = len(base["players"])
+    sources = [0] * len(order)
+    for source_index, base_index in enumerate(order):
+        sources[base_index] = source_index
     normalized_players: list[dict[str, Any]] = []
-    for index, player in enumerate(players):
-        if player.get("native_id") != base["players"][index]["native_id"]:
-            raise ValueError("球员顺序或标识不匹配")
+    for index, source_index in enumerate(sources):
+        player = players[source_index]
         attributes = player.get("attributes")
         if not isinstance(attributes, list) or len(attributes) != 69:
             raise ValueError("每名球员必须包含69项原生输入")
@@ -289,12 +327,14 @@ def _validate_team(
     if not isinstance(lineup, list) or len(lineup) != 11 or len(set(lineup)) != 11:
         raise ValueError("首发必须是11名不同球员")
     normalized["lineup"] = [
-        integer(slot, 0, len(base["players"]) - 1, "首发球员") for slot in lineup
+        order[integer(slot, 0, len(order) - 1, "首发球员")] for slot in lineup
     ]
-    roster_size = source.get("roster_size", len(base["players"]))
     if any(slot >= roster_size for slot in normalized["lineup"]):
         raise ValueError("首发包含未进入比赛名单的球员")
-    captains = source.get("captains", base["captains"])
+    source_captains = source.get("captains")
+    captains = (
+        base["captains"] if source_captains is None else _remap_indices(source_captains, order)
+    )
     if (
         not isinstance(captains, list)
         or len(captains) > len(base["players"])
@@ -304,19 +344,32 @@ def _validate_team(
     normalized["captains"] = [
         integer(slot, 0, len(base["players"]) - 1, "队长") for slot in captains
     ]
+    setpieces_source = source.get("setpieces")
+    if setpieces_source is None:
+        setpieces_source = base["setpieces"]
+    elif isinstance(setpieces_source, Mapping):
+        setpieces_source = copy.deepcopy(dict(setpieces_source))
+        priorities = setpieces_source.get("role_priorities")
+        if isinstance(priorities, Mapping):
+            setpieces_source["role_priorities"] = {
+                key: _remap_indices(rows, order) for key, rows in priorities.items()
+            }
     normalized["setpieces"] = setpieces.normalize(
-        source.get("setpieces", base["setpieces"]),
+        setpieces_source,
         side,
         len(base["players"]),
         enums=assets.setpiece_enums,
         default_value=base["setpieces"],
     )
-    takers = source.get("takers", base["takers"])
+    source_takers = source.get("takers")
+    takers = base["takers"] if source_takers is None else source_takers
     if not isinstance(takers, Mapping) or set(takers) != set(assets.taker_keys):
         raise ValueError("定位球主罚名单分类不符")
     normalized_takers: dict[str, list[int]] = {}
     for key in assets.taker_keys:
         values = takers[key]
+        if source_takers is not None:
+            values = _remap_indices(values, order)
         if (
             not isinstance(values, list)
             or len(values) > len(base["players"])
@@ -422,7 +475,13 @@ def validate_scenario(assets: ScenarioAssets, data: Any) -> dict[str, Any]:
         if not isinstance(team, Mapping):
             raise ValueError("必须包含两支球队")
         try:
-            normalized_team = _validate_team(side, team, assets.default_teams[side], assets)
+            order = _player_order(team.get("players"), assets.default_teams[side]["players"])
+        except (KeyError, IndexError, TypeError):
+            raise ValueError("方案格式或比赛样本不匹配") from None
+        try:
+            normalized_team = _validate_team(
+                side, team, assets.default_teams[side], assets, order=order
+            )
         except (KeyError, IndexError, TypeError):
             raise ValueError("方案格式或比赛样本不匹配") from None
         normalized["teams"].append(normalized_team)

@@ -470,6 +470,56 @@ def test_encoding_is_deterministic(assets):
     )
 
 
+def shift_players(team: dict, order: list[int]) -> list[int]:
+    """Reorder the player list and remap every player index reference."""
+    players = team["players"]
+    team["players"] = [players[index] for index in order]
+    position = [0] * len(order)
+    for new_index, old_index in enumerate(order):
+        position[old_index] = new_index
+    team["lineup"] = [position[index] for index in team["lineup"]]
+    team["captains"] = [position[index] for index in team["captains"]]
+    team["takers"] = {
+        key: [position[index] for index in values] for key, values in team["takers"].items()
+    }
+    for priorities in team["setpieces"]["role_priorities"].values():
+        priorities[:] = [position[index] for index in priorities]
+    return position
+
+
+def test_player_permutation_encodes_as_the_canonical_scenario(assets):
+    canonical = make_scenario(assets)
+    shuffled = make_scenario(assets)
+    canonical["teams"][0]["setpieces"]["role_priorities"]["0"] = [0, 5, 3]
+    shuffled["teams"][0]["setpieces"]["role_priorities"]["0"] = [0, 5, 3]
+    order = list(range(23))
+    order = order[7:] + order[:7]
+    shift_players(shuffled["teams"][0], order)
+    shift_players(shuffled["teams"][1], order[::-1])
+    assert absolute_records(assets, shuffled) == absolute_records(assets, canonical)
+    assert relative_records(assets, shuffled) == relative_records(assets, canonical)
+
+
+def test_player_permutation_keeps_edits_on_the_same_player(assets):
+    canonical = make_scenario(assets)
+    canonical["teams"][0]["players"][3]["attributes"][20] = 7
+    canonical["teams"][0]["players"][4]["native_profile"]["condition"] = 9000
+    shuffled = make_scenario(assets)
+    order = list(range(23))
+    order = order[5:] + order[:5]
+    position = shift_players(shuffled["teams"][0], order)
+    shuffled["teams"][0]["players"][position[3]]["attributes"][20] = 7
+    shuffled["teams"][0]["players"][position[4]]["native_profile"]["condition"] = 9000
+    assert absolute_records(assets, shuffled) == absolute_records(assets, canonical)
+
+
+def test_duplicate_native_ids_are_rejected(assets):
+    scenario = make_scenario(assets)
+    players = scenario["teams"][0]["players"]
+    players[1]["native_id"] = players[0]["native_id"]
+    with pytest.raises(ValueError, match="球员顺序或标识不匹配"):
+        encode_scenario(assets, scenario)
+
 def test_profiles_fields_and_normalization():
     assert FIELDS["age"] == (1, 14, 60)
     assert FIELDS["condition"] == (15, 0, 10000)
@@ -654,3 +704,43 @@ def test_invalid_scenarios_raise_chinese_errors(assets):
             scenario = mutate(mutate_function)
         with pytest.raises(ValueError, match=message):
             encode_scenario(assets, scenario)
+
+
+def extend_away_squad(assets) -> None:
+    assets.default_teams[1]["players"].append(
+        {
+            "name": "客队球员 24",
+            "native_id": 999,
+            "attributes": [10] * 15 + [50] * 54,
+            "native_profile": dict(CONTROLLED_START),
+        }
+    )
+
+
+def test_roster_may_cover_only_the_leading_match_squad(assets):
+    extend_away_squad(assets)
+    scenario = make_scenario(assets)
+    players = scenario["teams"][1]["players"]
+    scenario["teams"][1]["players"] = players[:23]
+    scenario["teams"][1]["roster_size"] = 23
+    records = absolute_records(assets, scenario)
+    assert (17, 1, 0, 0, 23) in records
+    assert not [record for record in records if record[0] in (1, 15) and record[1] == 1 and record[2] == 23]
+
+
+def test_shorter_roster_without_roster_size_is_rejected(assets):
+    extend_away_squad(assets)
+    scenario = make_scenario(assets)
+    scenario["teams"][1]["players"] = scenario["teams"][1]["players"][:23]
+    with pytest.raises(ValueError, match="名单长度不匹配"):
+        encode_scenario(assets, scenario)
+
+
+def test_roster_must_map_onto_the_leading_match_squad(assets):
+    extend_away_squad(assets)
+    scenario = make_scenario(assets)
+    players = scenario["teams"][1]["players"]
+    scenario["teams"][1]["players"] = [player for index, player in enumerate(players) if index != 22]
+    scenario["teams"][1]["roster_size"] = 23
+    with pytest.raises(ValueError, match="球员顺序或标识不匹配"):
+        encode_scenario(assets, scenario)
