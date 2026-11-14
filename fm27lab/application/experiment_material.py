@@ -140,7 +140,7 @@ class ExperimentMaterializer:
                         )
                         + "\n"
                     )
-                    (staging / scenario_name).write_text(scenario_text, encoding="utf-8")
+                    (staging / scenario_name).write_bytes(scenario_text.encode("utf-8"))
                     configs.append(
                         {
                             "variant": label,
@@ -168,11 +168,11 @@ class ExperimentMaterializer:
                 "pool": pool_summary,
                 "configs": configs,
             }
-            (staging / PROVENANCE_FILE).write_text(
+            provenance_text = (
                 json.dumps(provenance, sort_keys=True, ensure_ascii=False, allow_nan=False, indent=2)
-                + "\n",
-                encoding="utf-8",
+                + "\n"
             )
+            (staging / PROVENANCE_FILE).write_bytes(provenance_text.encode("utf-8"))
             if target.exists():
                 shutil.rmtree(target)
             os.replace(staging, target)

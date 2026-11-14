@@ -100,8 +100,9 @@ def test_negative_memavailable_falls_through_to_sysconf(
     )
     monkeypatch.setattr(host_resources, "MEMINFO_PATH", path)
     monkeypatch.setattr(host_resources, "_current_platform", lambda: "Linux")
+    monkeypatch.setattr(host_resources.os, "name", "posix")
     sizes = {"SC_PHYS_PAGES": 1024, "SC_PAGE_SIZE": 4096}
-    monkeypatch.setattr(host_resources.os, "sysconf", lambda name: sizes[name])
+    monkeypatch.setattr(host_resources, "_sysconf", lambda name: sizes[name])
     assert host_resources._read_memory_available() == 1024 * 4096
 
 
@@ -115,15 +116,17 @@ def test_linux_falls_back_to_sysconf_when_meminfo_is_unavailable(
 ):
     monkeypatch.setattr(host_resources, "MEMINFO_PATH", tmp_path / "absent")
     monkeypatch.setattr(host_resources, "_current_platform", lambda: "Linux")
+    monkeypatch.setattr(host_resources.os, "name", "posix")
     sizes = {"SC_PHYS_PAGES": 1024, "SC_PAGE_SIZE": 4096}
-    monkeypatch.setattr(host_resources.os, "sysconf", lambda name: sizes[name])
+    monkeypatch.setattr(host_resources, "_sysconf", lambda name: sizes[name])
     assert host_resources._read_memory_available() == 1024 * 4096
 
 
 def test_sysconf_memory_multiplies_pages_by_page_size(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(host_resources, "_current_platform", lambda: "Darwin")
+    monkeypatch.setattr(host_resources.os, "name", "posix")
     sizes = {"SC_PHYS_PAGES": 2048, "SC_PAGE_SIZE": 8192}
-    monkeypatch.setattr(host_resources.os, "sysconf", lambda name: sizes[name])
+    monkeypatch.setattr(host_resources, "_sysconf", lambda name: sizes[name])
     assert host_resources._read_memory_available() == 2048 * 8192
 
 
@@ -166,7 +169,7 @@ def test_windows_probe_failure_falls_back_to_sysconf(monkeypatch: pytest.MonkeyP
     monkeypatch.setattr(host_resources, "_current_platform", lambda: "Windows")
     monkeypatch.setattr(host_resources.os, "name", "nt")
     sizes = {"SC_PHYS_PAGES": 512, "SC_PAGE_SIZE": 4096}
-    monkeypatch.setattr(host_resources.os, "sysconf", lambda name: sizes[name])
+    monkeypatch.setattr(host_resources, "_sysconf", lambda name: sizes[name])
     assert host_resources._read_memory_available() == 512 * 4096
 
 
@@ -175,18 +178,24 @@ def test_memory_probe_failure_uses_chinese_error(
 ):
     monkeypatch.setattr(host_resources, "MEMINFO_PATH", tmp_path / "absent")
     monkeypatch.setattr(host_resources, "_current_platform", lambda: "Linux")
+    monkeypatch.setattr(host_resources.os, "name", "posix")
 
     def unavailable(name):
         raise OSError("sysconf unavailable")
 
-    monkeypatch.setattr(host_resources.os, "sysconf", unavailable)
+    monkeypatch.setattr(host_resources, "_sysconf", unavailable)
     with pytest.raises(RuntimeError, match="无法探测可用内存"):
         host_resources._read_memory_available()
 
 
 def test_missing_sysconf_strategy_uses_chinese_error(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(host_resources, "_current_platform", lambda: "Darwin")
-    monkeypatch.delattr(host_resources.os, "sysconf", raising=False)
+    monkeypatch.setattr(host_resources.os, "name", "posix")
+
+    def missing(name):
+        raise AttributeError("sysconf unavailable")
+
+    monkeypatch.setattr(host_resources, "_sysconf", missing)
     with pytest.raises(RuntimeError, match="无法探测可用内存"):
         host_resources._read_memory_available()
 

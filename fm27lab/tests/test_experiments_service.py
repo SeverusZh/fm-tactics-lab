@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import tempfile
 import threading
 from collections.abc import Callable
 from pathlib import Path
@@ -614,6 +615,10 @@ def test_publisher_failure_keeps_experiment_flow_working(tmp_path: Path):
     ]
 
 
+def fake_experiment_dir(job_id: str) -> Path:
+    return Path(tempfile.gettempdir()) / "experiments" / job_id
+
+
 class FakeMaterializer:
     def __init__(self, *, error: Exception | None = None, pool: dict[str, Any] | None = None):
         self.calls: list[dict[str, Any]] = []
@@ -633,21 +638,22 @@ class FakeMaterializer:
         if self.error is not None:
             raise self.error
         variants = ("A", "B") if baseline_draft_id is not None else ("B",)
+        directory = fake_experiment_dir(job_id)
         configs = [
             {
                 "variant": variant,
                 "seed": seed,
                 "entry": None,
-                "config_file": f"/tmp/experiments/{job_id}/{variant}-{seed}.bin",
+                "config_file": str(directory / f"{variant}-{seed}.bin"),
                 "config_sha256": "0" * 64,
-                "scenario_file": f"/tmp/experiments/{job_id}/{variant}-{seed}.json",
+                "scenario_file": str(directory / f"{variant}-{seed}.json"),
                 "scenario_sha256": "1" * 64,
             }
             for seed in seeds
             for variant in variants
         ]
         return {
-            "dir": f"/tmp/experiments/{job_id}",
+            "dir": str(directory),
             "codec": "FM27CFG1",
             "configs": configs,
             "pool": self.pool,
@@ -687,7 +693,7 @@ def test_submit_materializes_and_updates_job_config(tmp_path: Path):
     assert config["draft_id"] == "draft-1"
     assert config["baseline_draft_id"] == "draft-0"
     materialized = config["materialized"]
-    assert materialized["dir"] == f"/tmp/experiments/{job['id']}"
+    assert materialized["dir"] == str(fake_experiment_dir(job["id"]))
     assert materialized["codec"] == "FM27CFG1"
     assert [(item["variant"], item["seed"]) for item in materialized["configs"]] == [
         ("A", 3),
@@ -795,12 +801,12 @@ def test_start_next_dispatches_materialized_config_paths(tmp_path: Path):
     assert final is not None
     assert final["status"] == "completed"
     assert final["completed"] == 4
-    prefix = f"/tmp/experiments/{job['id']}"
+    prefix = fake_experiment_dir(job["id"])
     assert fake.tasks == [
-        {"variant": "A", "seed": 3, "config": f"{prefix}/A-3.bin"},
-        {"variant": "B", "seed": 3, "config": f"{prefix}/B-3.bin"},
-        {"variant": "A", "seed": 1, "config": f"{prefix}/A-1.bin"},
-        {"variant": "B", "seed": 1, "config": f"{prefix}/B-1.bin"},
+        {"variant": "A", "seed": 3, "config": str(prefix / "A-3.bin")},
+        {"variant": "B", "seed": 3, "config": str(prefix / "B-3.bin")},
+        {"variant": "A", "seed": 1, "config": str(prefix / "A-1.bin")},
+        {"variant": "B", "seed": 1, "config": str(prefix / "B-1.bin")},
     ]
     assert all(Path(task["config"]).is_absolute() for task in fake.tasks)
 
@@ -818,10 +824,10 @@ def test_start_next_after_resume_dispatches_only_missing_materialized_tasks(tmp_
     assert final is not None
     assert final["status"] == "completed"
     assert final["completed"] == 4
-    prefix = f"/tmp/experiments/{job['id']}"
+    prefix = fake_experiment_dir(job["id"])
     assert fake.tasks == [
-        {"variant": "A", "seed": 1, "config": f"{prefix}/A-1.bin"},
-        {"variant": "B", "seed": 1, "config": f"{prefix}/B-1.bin"},
+        {"variant": "A", "seed": 1, "config": str(prefix / "A-1.bin")},
+        {"variant": "B", "seed": 1, "config": str(prefix / "B-1.bin")},
     ]
     assert len(materializer.calls) == 1
     assert materializer.discarded == []

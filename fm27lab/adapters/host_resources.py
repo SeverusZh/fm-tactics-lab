@@ -84,10 +84,14 @@ def _read_windows_memory() -> int | None:
     return available if available >= 0 else None
 
 
+def _sysconf(name: str) -> int:
+    return os.sysconf(name)
+
+
 def _read_sysconf_memory() -> int | None:
     try:
-        pages = os.sysconf("SC_PHYS_PAGES")
-        page_size = os.sysconf("SC_PAGE_SIZE")
+        pages = _sysconf("SC_PHYS_PAGES")
+        page_size = _sysconf("SC_PAGE_SIZE")
     except (AttributeError, OSError, ValueError):
         return None
     if not isinstance(pages, int) or not isinstance(page_size, int):

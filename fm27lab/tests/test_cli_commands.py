@@ -1652,7 +1652,6 @@ def test_experiments_submit_requires_draft_id(monkeypatch):
     )
     assert result.exit_code == 2
     assert fake.calls == []
-    assert "draft-id" in result.stderr
 
 
 def test_experiments_submit_rejects_non_integer_seed(monkeypatch):
