@@ -1,6 +1,6 @@
 # AI Agent 接入规格
 
-状态：v2 实现事实。本文按本仓库 2.0.0.dev0 代码与实测行为核对，核对日期 2026-11-14。历史上以启动器 EXE 与 fm27lab/v1 命名空间为前提的设计章节已删除，替代事实见各节代码位置。
+状态：v2 实现事实。本文按本仓库 2.0.0.dev0 代码与实测行为核对，核对日期 2026-11-15。历史上以启动器 EXE 与 fm27lab/v1 命名空间为前提的设计章节已删除，替代事实见各节代码位置。
 
 ## 1. 目标与非目标
 
@@ -8,7 +8,7 @@
 
 - 同一台机器上的 Agent 客户端通过回环 HTTP 调用 sidecar，完成战术池、草案、实验、结果、存档与产物的读写。
 - 提供两种稳定封装：fm27lab CLI 与 fm27lab MCP 服务，二者都只依赖发现文件，不自行拉起进程。
-- 契约以代码为唯一事实来源：参数字段见 fm27lab/interfaces/http/routes，能力映射见 fm27lab/registry.py，OpenAPI 见 GET /api/openapi.json。
+- 契约以代码为唯一事实来源：参数字段见 fm27lab/interfaces/http/routes，能力映射见 fm27lab/registry/（model.py 定义能力与系统路径约定，parts/ 按域分片，__init__.py 聚合），OpenAPI 见 GET /api/openapi.json。
 
 非目标
 
@@ -28,7 +28,7 @@
 | 草案 | 存于 SQLite drafts 表的场景记录 |
 | 池条目 | 存于 SQLite 的战术池条目库；实验用的 away_tactic_pool 是草案场景内嵌配置 |
 | 任务与运行 | Job 一次实验批次，Run 为其中一场比赛 |
-| 能力 | fm27lab/registry.py 的 Capability，统一映射 HTTP、CLI、MCP 三个入口 |
+| 能力 | fm27lab/registry/model.py 的 Capability，统一映射 HTTP、CLI、MCP 三个入口 |
 
 ## 3. 部署与生命周期
 
@@ -164,7 +164,7 @@ ready 行
 
 ### 4.1 命名空间与兼容
 
-- 全部接口位于 /api 下；registry 定义的系统与文档路径为 /api/health、/api/version、/api/events、/api/shutdown、/api/docs、/api/openapi.json。证据 fm27lab/registry.py:10-19。
+- 全部接口位于 /api 下；registry 定义的系统与文档路径共 16 条，包括 /api/health、/api/version、/api/events、/api/shutdown、/api/docs、/api/openapi.json。证据 fm27lab/registry/model.py:9-28。
 - 不存在 /api/agent/v1 命名空间；实测 GET /api/agent/v1/manifest 返回 404 not_found。
 - 文档端点 /api/docs 与 /api/openapi.json 由 FastAPI 直接提供，redoc 关闭。证据 fm27lab/interfaces/http/app.py:107-113。
 
@@ -252,8 +252,10 @@ retriable 默认在状态码不小于 500 或等于 409 时为 true。证据 fm2
 | GET /api/tactics/template | 是 | 基于运行时目录返回合法默认战术场景 |
 | GET /api/saves/{save_id}/tactics | 是 | 列出存档中的存储战术 |
 | POST /api/saves/{save_id}/tactics/{tactic_index}/import | 是 | 由存档战术创建草案 |
+| GET /api/saves/{save_id}/tactics/{tactic_index}/export.fmf | 是 | 导出存档战术为 FMF 文件，响应为 application/octet-stream |
+| POST /api/saves/{save_id}/tactics/{tactic_index}/pool | 是 | 201，把存档战术加入池条目库 |
 
-证据 fm27lab/interfaces/http/routes/system.py、fm27lab/registry.py:10-19 与各路由模块。以上引擎配置、引擎导入、战术模板与存档战术路由登记在 fm27lab/registry.py 的 SYSTEM_PATHS，均需要 Bearer，不属于能力表，能力数仍为 52。GET /api/system/resources 与 GET /api/catalog 属于普通能力（system_resources、catalog_snapshot），需要 Bearer，已列入下方能力表；/api/docs 与 /api/openapi.json 见 4.7。
+证据 fm27lab/interfaces/http/routes/system.py、fm27lab/registry/model.py:9-28 与各路由模块。以上引擎配置、引擎导入、战术模板与存档战术路由登记在 fm27lab/registry/model.py 的 SYSTEM_PATHS，均需要 Bearer，不属于能力表，能力数仍为 61。GET /api/system/resources 与 GET /api/catalog 属于普通能力（system_resources、catalog_snapshot），需要 Bearer，已列入下方能力表；/api/docs 与 /api/openapi.json 见 4.7。
 
 能力端点与三入口映射
 
@@ -262,7 +264,9 @@ retriable 默认在状态码不小于 500 或等于 409 时为 true。证据 fm2
 | pools_list | GET /api/pools | pools list | pools_list |
 | pools_get | GET /api/pools/{entry_id} | pools get | pools_get |
 | pools_create | POST /api/pools | pools create | pools_create |
+| pools_update | PATCH /api/pools/{entry_id} | pools update | pools_update |
 | pools_delete | DELETE /api/pools/{entry_id} | pools delete | pools_delete |
+| pools_import_fmf | POST /api/pools/import-fmf | pools import-fmf | pools_import_fmf |
 | drafts_list | GET /api/drafts | drafts list | drafts_list |
 | drafts_get | GET /api/drafts/{draft_id} | drafts get | drafts_get |
 | drafts_create | POST /api/drafts | drafts create | drafts_create |
@@ -274,6 +278,7 @@ retriable 默认在状态码不小于 500 或等于 409 时为 true。证据 fm2
 | drafts_import_fmf_file | POST /api/drafts/import-fmf-file | drafts import-fmf-file | 无 |
 | drafts_apply_roster | POST /api/drafts/{draft_id}/apply-roster | drafts apply-roster | drafts_apply_roster |
 | drafts_undo_roster | POST /api/drafts/{draft_id}/undo-roster | drafts undo-roster | drafts_undo_roster |
+| drafts_formation | POST /api/drafts/{draft_id}/formation | drafts formation | drafts_formation |
 | jobs_list | GET /api/jobs | jobs list | jobs_list |
 | jobs_get | GET /api/jobs/{job_id} | jobs get | jobs_get |
 | jobs_create | POST /api/jobs | jobs create | jobs_create |
@@ -294,6 +299,11 @@ retriable 默认在状态码不小于 500 或等于 409 时为 true。证据 fm2
 | saves_import | POST /api/saves/import | saves import-file | saves_import_file |
 | saves_squad | GET /api/saves/{save_id}/squad | saves squad | saves_squad |
 | saves_import_payload | POST /api/saves/{save_id}/import | saves import | saves_import |
+| setpieces_list | GET /api/setpieces | setpieces list | setpieces_list |
+| setpieces_get | GET /api/setpieces/{setpiece_id} | setpieces get | setpieces_get |
+| setpieces_update | PATCH /api/setpieces/{setpiece_id} | setpieces update | setpieces_update |
+| setpieces_import_file | POST /api/setpieces/{setpiece_id}/import-file | setpieces import-file | setpieces_import_file |
+| setpieces_export_file | GET /api/setpieces/{setpiece_id}/export-file | setpieces export-file | setpieces_export_file |
 | artifacts_list | GET /api/artifacts | artifacts list | artifacts_list |
 | artifacts_get | GET /api/artifacts/{artifact_id} | artifacts get | artifacts_get |
 | artifacts_content | GET /api/artifacts/{artifact_id}/content | artifacts content | artifacts_content |
@@ -308,16 +318,19 @@ retriable 默认在状态码不小于 500 或等于 409 时为 true。证据 fm2
 | experiments_start | POST /api/experiments/start | experiments start | experiments_start |
 | experiments_cancel | POST /api/experiments/{job_id}/cancel | experiments cancel | experiments_cancel |
 | experiments_resume | POST /api/experiments/{job_id}/resume | experiments resume | experiments_resume |
+| formations_list | GET /api/formations | formations list | formations_list |
 | catalog_snapshot | GET /api/catalog | catalog show | catalog_snapshot |
 | results_compare | POST /api/results/compare | results compare | results_compare |
 | system_resources | GET /api/system/resources | system resources | 无 |
 
-证据 fm27lab/registry.py:96-101、fm27lab/registry.py:105-427。共 52 项能力，其中 jobs_summary、system_resources 与 drafts_import_fmf_file 没有 MCP 工具。
+证据 fm27lab/registry/__init__.py:33-47、fm27lab/registry/parts/*.py。共 61 项能力，其中 drafts_import_fmf_file、jobs_summary 与 system_resources 没有 MCP 工具。
+
+drafts_formation 只做预览：按阵型模板与名单位置熟悉度返回排阵后的场景与提示，不写库；需要保存时再调用 PATCH /api/drafts/{draft_id} 提交 scenario。overwrite 为真时重置职责、个人指令与盯防字段，否则按位置保留旧值。
 
 ### 4.7 文档端点
 
 - GET /api/docs 返回 Swagger UI，GET /api/openapi.json 返回 OpenAPI 文档；二者无 token 依赖，仅供本机调试。证据 fm27lab/interfaces/http/app.py:107-113。
-- 契约核对以 openapi.json 为准：当前 48 条路径、64 个操作、76 个组件模型。
+- 契约核对以 openapi.json 为准：当前 57 条路径、75 个操作、84 个组件模型。
 
 ## 5. 数据模型
 
@@ -459,19 +472,21 @@ retriable 默认在状态码不小于 500 或等于 409 时为 true。证据 fm2
 | version | 无子命令 |
 | serve | 启动 sidecar |
 | mcp | 以 stdio 启动 MCP 服务 |
-| pools | list、get、create、delete |
-| drafts | list、get、create、update、delete、attributes、export-fmf、import-fmf、import-fmf-file、apply-roster、undo-roster |
+| pools | list、get、create、update、delete、import-fmf |
+| drafts | list、get、create、update、delete、attributes、export-fmf、import-fmf、import-fmf-file、apply-roster、undo-roster、formation |
 | jobs | list、get、create、update、cancel、delete、runs、summary、batch-action、batch-delete、export、pool-summary |
 | saves | list、get、create、update、delete、import、import-file、squad |
+| setpieces | list、get、update、import-file、export-file |
 | artifacts | list、get、content、create、delete |
 | settings | list、get、put、delete |
 | concurrency | check |
 | experiments | submit、start、cancel、resume |
+| formations | list |
 | catalog | show |
 | results | compare |
 | system | resources |
 
-证据 fm27lab/cli.py:34-44、fm27lab/cli.py:236-931。
+证据 fm27lab/cli.py:21-48、fm27lab/cli.py:245-1066。叶子命令共 64 个，为 61 个能力命令加 version、serve、mcp。
 
 关键选项
 
@@ -505,9 +520,9 @@ python -m fm27lab --data-dir /absolute/path/data jobs runs <job_id> --limit 50
 
 ### 8.2 工具
 
-- 工具总数为 49，名称与参数由 fm27lab/interfaces/mcp/tools.py 定义，运行时与 4.6 表一致。
+- 工具总数为 58，名称与参数由 fm27lab/interfaces/mcp/tools.py 定义，运行时与 4.6 表一致。
 - 命名差异：saves_import_payload 的 MCP 名为 saves_import，saves_import 的 MCP 名为 saves_import_file。
-- jobs_summary 与 system_resources 没有 MCP 工具；需要汇总时调用 jobs_runs 自行统计，系统资源通过 HTTP 或 CLI 获取。
+- drafts_import_fmf_file、jobs_summary 与 system_resources 没有 MCP 工具；需要汇总时调用 jobs_runs 自行统计，系统资源通过 HTTP 或 CLI 获取，按文件导入草案也走 HTTP 或 CLI。
 - 工具入参接受 JSON 对象；返回封套为 content 数组内单个 text 项、structuredContent 为原始结果、isError 为 false。执行失败时 isError 为 true，structuredContent 为 error 对象，code 为 tool_error。证据 fm27lab/interfaces/mcp/protocol.py:333-370。
 
 ### 8.3 资源
@@ -649,7 +664,7 @@ python -m fm27lab --data-dir /absolute/path/data jobs runs <job_id> --limit 50
 3. GET /api/agent/v1/manifest 返回 404 not_found，证明旧命名空间已不存在。
 4. 发现文件包含 schema、api、url、port、token、pid、data_dir、engine_root、created_at 九个业务字段，无 game_root、versions、capabilities、limits。
 5. CLI 版本命令输出 2.0.0.dev0 fm27lab/v2；不带 --data-dir 时读取 FM27LAB_DATA 或平台默认目录。
-6. MCP 初始化返回协议 2024-11-05 与 49 个工具；资源为 4 个静态 URI。
+6. MCP 初始化返回协议 2024-11-05 与 58 个工具；资源为 4 个静态 URI。
 7. 任务生命周期覆盖 queued、running、completed 与 cancelled；非法流转返回 409 invalid_transition。
 8. CSV 列顺序与 5.5 一致。
 9. POST /api/shutdown 返回 202，进程退出后发现文件被删除。

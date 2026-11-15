@@ -11,8 +11,8 @@
 | 运行形态 | Tauri 2 壳加 Python sidecar | src-tauri/tauri.conf.json、fm27lab/sidecar.py |
 | 进程入口 | fm27lab serve、fm27lab-sidecar | fm27lab/cli.py:66、pyproject.toml |
 | 发现文件 | data_dir/agent/endpoint.json | fm27lab/config.py:92-93 |
-| 能力总数 | 51 个 Capability | fm27lab/registry.py:104 |
-| MCP 工具 | 49 个 | fm27lab/interfaces/mcp/tools.py:613-620 |
+| 能力总数 | 61 个 Capability | fm27lab/registry/__init__.py:33-47 |
+| MCP 工具 | 58 个 | fm27lab/interfaces/mcp/tools.py:698-702 |
 
 当前开发构建的边界必须了解：
 
@@ -122,14 +122,16 @@ sidecar 绑定端口后写入 data_dir/agent/endpoint.json（fm27lab/config.py:9
 
 | 命令组 | 子命令与主要选项 |
 | --- | --- |
-| pools | list --limit --offset；get ENTRY_ID；create --name --tactic --weight --roster --id；delete ENTRY_ID |
-| drafts | list --limit --offset；get；create --name --scenario --source；update --name/--scenario/--source；delete；attributes --side --scope --operation --params --player-index；export-fmf --output；import-fmf --name --file --source；import-fmf-file FILE --name；apply-roster --save-id --club-uid --side --scope；undo-roster |
+| pools | list --limit --offset；get ENTRY_ID；create --name --tactic --weight --roster --id；update ENTRY_ID --name/--weight；delete ENTRY_ID；import-fmf --file --name |
+| drafts | list --limit --offset；get；create --name --scenario --source；update --name/--scenario/--source；delete；attributes --side --scope --operation --params --player-index；export-fmf --output；import-fmf --name --file --source；import-fmf-file FILE --name；apply-roster --save-id --club-uid --side --scope；undo-roster；formation DRAFT_ID --formation-id --overwrite（只预览返回场景，不写库） |
 | jobs | list --status --limit --offset；get；create --kind --name --config --workers --total；update --status/--completed/--summary/--name；cancel；delete；runs --limit --offset；summary --side；batch-action --action --ids；batch-delete --ids；export --output；pool-summary |
 | saves | list --status --limit --offset；get；create --source-path --source-sha256 --status --stage --metadata；update；delete；import SAVE_ID --leagues --clubs --stage；import-file --source-path --replace；squad SAVE_ID --club-uid |
+| setpieces | list；get SETPIECE_ID；update SETPIECE_ID --value；import-file SETPIECE_ID --file；export-file SETPIECE_ID --output |
 | artifacts | list --kind --job-id --limit --offset；get；content --output；create --kind --filename --file --job-id；delete |
 | settings | list；get KEY；put KEY --value --note；delete KEY |
 | concurrency | check --workers --cpu-count --available-memory-bytes --free-disk-bytes --allow-oversubscription |
 | experiments | submit --draft-id --seed --workers --cpu-count --available-memory-bytes --free-disk-bytes --baseline-draft-id --name --allow-oversubscription；start；cancel JOB_ID；resume JOB_ID |
+| formations | list |
 | catalog | show |
 | results | compare --baseline --candidate --variant --side --reps |
 | system | resources |
@@ -187,28 +189,30 @@ MCP 以 stdio 子进程方式运行 fm27lab mcp，不监听网络端口。启动
 
 ### 5.3 工具
 
-共 49 个工具，按能力组列出（fm27lab/registry.py:27-39 定义 11 个能力组，其中 system 组没有 MCP 工具，故下列为 10 组；工具清单见 fm27lab/interfaces/mcp/tools.py:613-620）：
+共 58 个工具，按能力组列出（fm27lab/registry/model.py:36-50 定义 13 个能力组，其中 system 组没有 MCP 工具，故下列为 12 组；工具清单见 fm27lab/interfaces/mcp/tools.py:89-698）：
 
-- pools_list、pools_get、pools_create、pools_delete
-- drafts_list、drafts_get、drafts_create、drafts_update、drafts_delete、drafts_attributes、drafts_export_fmf、drafts_import_fmf、drafts_apply_roster、drafts_undo_roster
+- pools_list、pools_get、pools_create、pools_update、pools_delete、pools_import_fmf
+- drafts_list、drafts_get、drafts_create、drafts_update、drafts_delete、drafts_attributes、drafts_export_fmf、drafts_import_fmf、drafts_apply_roster、drafts_undo_roster、drafts_formation
 - jobs_list、jobs_get、jobs_create、jobs_update、jobs_cancel、jobs_delete、jobs_runs、jobs_batch_actions、jobs_batch_delete、jobs_export、jobs_pool_summary
-- saves_list、saves_get、saves_create、saves_update、saves_delete、saves_import、saves_import_file、saves_squad
+- saves_list、saves_get、saves_create、saves_update、saves_delete、saves_import_file、saves_squad、saves_import
+- setpieces_list、setpieces_get、setpieces_update、setpieces_import_file、setpieces_export_file
 - artifacts_list、artifacts_get、artifacts_content、artifacts_create、artifacts_delete
 - settings_list、settings_get、settings_put、settings_delete
 - concurrency_check
 - experiments_submit、experiments_start、experiments_cancel、experiments_resume
+- formations_list
 - catalog_snapshot
 - results_compare
 
-jobs_summary 与 system_resources 只有 HTTP 与 CLI 入口，没有对应的 MCP 工具（fm27lab/registry.py:242-248、415-421）。
+drafts_import_fmf_file、jobs_summary 与 system_resources 只有 HTTP 与 CLI 入口，没有对应的 MCP 工具（fm27lab/registry/parts/drafts.py:65、fm27lab/registry/parts/jobs.py:54、fm27lab/registry/parts/system.py:9）。
 
 工具成功结果的 content[0].text 是紧凑 JSON，structuredContent 为同一份数据，isError 为 false；失败时 isError 为 true，structuredContent.error.code 固定为 tool_error（fm27lab/interfaces/mcp/protocol.py:333-362）。
 
 ### 5.4 资源与提示词
 
-静态资源 4 个，无资源模板（fm27lab/interfaces/mcp/resources.py）：fm27lab://drafts 与 fm27lab://pools 每页 128 条，fm27lab://jobs 与 fm27lab://saves 每页 256 条，读取结果为 JSON。
+静态资源 4 个，无资源模板（fm27lab/interfaces/mcp/resources.py:32-37）：fm27lab://drafts 与 fm27lab://pools 每页 128 条，fm27lab://jobs 与 fm27lab://saves 每页 256 条，读取结果为 JSON。
 
-提示词 2 个（fm27lab/interfaces/mcp/prompts.py）：experiment-design 必填 draft_id 与 instruction，可选 baseline_draft_id 与 seeds；pool-review 必填 job_id，可选 focus。
+提示词 2 个（fm27lab/interfaces/mcp/prompts.py:16-27、53-63）：experiment-design 必填 draft_id 与 instruction，可选 baseline_draft_id 与 seeds；pool-review 必填 job_id，可选 focus。
 
 ### 5.5 长任务轮询
 
@@ -271,5 +275,5 @@ fm27lab.db 路径由 fm27lab/config.py:88-89 决定；agent、exports 等目录�
 - MCP 无进度通知与取消通知，只能轮询任务状态。
 - 仅支持本机回环访问，没有多用户或远程认证设计。
 - 不提供 v1 的 /api/agent/v1/ 命名空间，v1 客户端与旧接入文档不适用。
-- jobs summary 与 system resources 无 MCP 工具。
+- jobs summary、system resources 与 drafts import-fmf-file 无 MCP 工具。
 - exports/ 目录当前未使用。

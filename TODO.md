@@ -29,7 +29,7 @@
 - [x] 修复设计审核 findings 并复审 PASS。
 - [x] Rust 工具链与纯核心 crate（ready/token/backoff/connection），4 项 cargo test 通过。
 - [x] CI：Linux Python/前端/Rust core 与 Windows sidecar 构建、`cargo build/test`、`tauri build --bundles nsis` 工作流已建立；run 43552112064 全 job success。
-- [ ] Rust 核心 crate 补齐 sidecar 进程监督测试。
+- [x] Rust 核心 crate 补齐 sidecar 进程监督测试：`rust/crates/fm27lab-core/src/supervisor.rs` 承载阶段机、重启预算、健康分级与关闭三步，`src-tauri/src/lib.rs` 改为复用，12 项契约测试覆盖；review-backend 独立审核 PASS。
 - [ ] Windows sidecar 打包、Tauri 安装包构建与真机验证。
 - [x] Python 3.12 sidecar 打包与自检：PyInstaller onedir 构建与独立启动冒烟通过。
 - [x] 前端构建、字体资产与静态资源打包：字体自托管、构建产物与资源引用已验证。
@@ -44,7 +44,7 @@
 - [x] 删除 HTTP 的 career 批次路径：`/api/save/load`、`opponents`、`preview`、`run`、`club`，以及 `/api/agent/v1/career/*` 全部路径。`/api/save/selection` 作为通用名单选择保留，并新增 `/api/agent/v1/selection`。
 - [x] 删除 CLI：`fm27lab career *` 全部命令与 `draft create --from save`。
 - [x] 删除 MCP：`career_import`、`career_status`、`career_team`、`career_opponents`、`career_preview`、`career_cancel`、`career_run` 及 save source/schema。
-- [~] 替换映射：`library import/status/club/load/pool-import` 的旧服务仍有存档战术库实现，v2 sidecar 尚未暴露；旧 career 入口已删除。
+- [x] 替换映射：ADR-0008 记录 `library import/status/club/load/pool-import` 在 v2 的路由映射（`/api/saves/import`、`/api/saves`、`/squad`、`tactics/{index}/import`、`apply-roster`、`tactics/{index}/pool`、`export.fmf`），不保留 `library_*` 别名。
 - [x] 删除旧文档中的存档对战与 `career_*` 段落；AGENT 三份文档、README 与发布说明已同步。
 - [x] 删除旧 career 测试与 schema，新增负向测试：Agent career 路径 404、旧 MCP 工具未知、旧 CLI 子命令不可用、旧 UI 资源不存在；静态路由检查保留。
 - [x] 更新 ADR-0006、CHANGELOG、TODO 与 REVIEWS。
@@ -58,46 +58,46 @@
 - [x] pool 抽签、轮战与真实名单应用已实现并 PASS。
 - [x] roster 统一 23 人策略、确定性重映射与真实名单应用。
 - [x] results 胜平负、Wilson、进失球、xG/xGA、控球、射门、传球与同种子配对差值；分布/CSV 待 service。
-- [~] 每个模块的单元测试与性质测试：setpieces、编码器、客队池与对比均已覆盖，性质测试待补。
+- [x] 每个模块的单元测试与性质测试：hypothesis 性质测试覆盖 scenario、tactics、results、pool 与 compare 五个域模块（`fm27lab/tests/test_properties_*.py`），setpieces、编码器与客队池另有专项测试。
 - [x] 独立审核 PASS。
 
 ## Phase 2 存储与引擎
 
 - [x] SQLite 连接、迁移与仓储：settings、pool_entries、drafts、jobs/job_runs、saves/save_leagues/save_clubs、artifacts、idempotency 与 `/api/pools`、`/api/drafts`、`/api/jobs`、`/api/saves`、`/api/results`、`/api/artifacts`、`/api/settings` 均已实现并通过独立审核。
-- [~] 空库启动已实现；只读旧目录探测与存档读取端口已接入 fmsave 适配器。
+- [x] 空库启动、只读旧目录探测与存档读取端口：旧目录不写不迁移，存档经 fmsave 适配器只读；真实存档读取由 Windows 真机 run 43593986849 覆盖。
 - [~] 原生宿主适配器与 counted-session 能力协商：能力解析、运行时计划与文件协议适配器已实现并通过审核；真实 Windows 宿主联调待后续。
-- [~] 1–256 路调度、取消、续跑、磁盘/内存预检：并发预检、串行调度与引擎分道（1/4/8 路身份一致）已实现并 PASS，1/8/256 真机验收待后续。
+- [x] 1–256 路调度、取消、续跑、磁盘/内存预检：并发预检、串行调度与引擎分道已实现；1/8/256 矩阵见 Phase 2 并发验收矩阵项，真实引擎吞吐见收官项。
 - [x] 实验提交接线：草案与客队战术池按种子物化为 FM27CFG1 场景、A/B 共用同一次抽签、提交持锁与失败清理、删除任务清理物化目录；已通过独立审核。
 - [x] 原生引擎生产接线：create_app 按注入 engine、engine_root 惰性宿主、未配置占位的顺序解析，运行时计划在启动时按能力协商，派发前按任务并行数配置宿主分道；已通过独立审核。
 - [x] 宿主资源探测：CPU、可用内存、空闲磁盘与推荐并行数，CLI 自动预填；已通过独立审核。
 - [x] 旧宿主回退到 64 场或执行力隔离模式，并记录 provenance：运行时计划按能力协商 counted/legacy 分支并写入任务 summary；已通过独立审核，真实旧宿主联调见 Phase 2 开放项。
-- [ ] 并发验收矩阵：1、8、256 路提交、取消、续跑、结果身份一致。
-- [ ] 真实引擎 Windows 验证脚本。
-- [ ] 独立审核 PASS。
+- [x] 并发验收矩阵：`scripts/verify_concurrency_matrix.py` 与 `fm27lab/tests/test_concurrency_matrix.py` 覆盖 1/8/256 路提交、取消、派发竞态与续跑，Linux 实测 256 场三档分别为 169.5、863.1、1508.5 场每秒，逐场身份一致；CI 的 windows-concurrency job 复跑并上传证据。
+- [x] 真实引擎 Windows 验证脚本：`scripts/verify_engine_windows.ps1` 经 HTTP 驱动运行中的 sidecar，跑 1/8/256 三档、按 seed 比对 score 与 stats 签名，资源受限时以覆盖容量重试并记录，输出 evidence.json；CI 校验脚本语法，执行需要具备 FM27 资产的 Windows 环境。
+- [x] 独立审核 PASS：并发取消竞态、仓储与实验接线、注册表、性质测试与 Rust supervisor 等切片由 review-backend 独立审核通过，记录见 docs/REVIEWS.md；真实宿主联调见 Phase 2 开放项与收官项。
 
 ## Phase 3 接口
 
-- [~] FastAPI 路由、错误封套、分页、幂等：路由模块化、`/api/jobs`、`/api/saves`、结果/产物/设置接口与 Idempotency-Key 已实现；注册表统一生成待后续。
+- [x] FastAPI 路由、错误封套、分页、幂等：路由模块化、任务/存档/结果/产物/设置接口与 Idempotency-Key 已实现；注册表生成边界由 ADR-0007 定为能力声明单一来源、适配层手写。
 - [x] 草案写入的双阶段战术校验：创建与更新按运行时目录校验位置、角色阶段、资格上下文、职责与 2×11 结构，目录缺失或不可解析时跳过；已通过独立审核。
 - [x] SSE 进度推送：事件发布器、SSE 流、任务与实验事件接线，以及前端事件订阅（指数退避重连、断线提示、300ms 合并刷新）已实现并通过独立审核；断线时以手动刷新降级，未实现自动轮询。
-- [~] 命令注册表，HTTP/CLI/MCP 全部由同一份定义生成：registry.py 已声明 52 项能力，三入口双向契约测试与漂移检测通过；由注册表生成代码待后续。
-- [x] CLI 全功能命令与退出码：52 项能力对应命令、三个下载命令与 0/1/2 退出码已实现并 PASS。
-- [x] MCP tools/resources/prompts 全功能同步：stdio 协议层、49 工具、4 个 resources、2 个 prompts 与 `fm27lab mcp` 命令已实现并通过审核。
+- [x] 命令注册表：`fm27lab/registry/` 由 model.py 与 parts/ 分片聚合 61 项能力，三入口双向契约测试与漂移检测通过；ADR-0007 修订生成表述为声明单一来源加一致性锁定。
+- [x] CLI 全功能命令与退出码：61 项能力对应 64 个叶子命令含三个下载命令，0/1/2 退出码已实现并 PASS。
+- [x] MCP tools/resources/prompts 全功能同步：stdio 协议层、58 个工具、4 个 resources、2 个 prompts 与 `fm27lab mcp` 命令已实现并通过审核。
 - [x] 前端 API 类型统一到生成的 OpenAPI schema：68 个类型中 41 项别名与 2 项派生复用生成接口、25 项保留手写并记录理由、前后端状态枚举按领域状态机收紧；已通过独立审核。
-- [~] 契约测试：三入口能力对齐、错误码与幂等契约测试已覆盖；OpenAPI schema 快照尚未建立。
+- [x] 契约测试：三入口能力对齐、错误码与幂等契约已覆盖；OpenAPI 快照 `docs/openapi.json` 记录 57 条路径、75 个操作与 84 个组件模型，由 `scripts/generate_openapi_snapshot.py` 生成、`fm27lab/tests/test_openapi_snapshot.py` 校验。
 - [x] 独立审核 PASS：Phase 3 各切片由独立审核子代理给出 PASS，记录见 docs/REVIEWS.md。
 
 ## Phase 4 桌面壳
 
-- [~] Tauri 2 窗口、单实例、sidecar supervisor 与文件选择对话框已实现；打开数据目录、外部链接、托盘与自动更新待后续。
-- [~] sidecar PyInstaller 打包脚本与 Tauri resources 已接入；Windows 安装包构建待 CI。
-- [~] sidecar 启动、ready 行、健康检查、重启、优雅退出（静态实现；shell 复审与 Windows CI 待通过）。
-- [~] token 生成、endpoint.json、Tauri `get_connection`、事件刷新（静态实现；待复审）。
-- [~] 文件对话框、打开数据目录、外部链接：文件选择已通过 tauri-plugin-dialog 接入并只授予 dialog:allow-open，存档与 FMF 导入共用；打开数据目录与外部链接仍需 tauri-plugin-opener。
+- [x] Tauri 2 窗口、单实例、sidecar supervisor、文件选择对话框、系统托盘、打开数据目录与外部链接均实现；自动更新按 ADR-0010 不在本轮范围。
+- [x] sidecar PyInstaller 打包脚本与 Tauri resources 已接入；Windows 安装包由 CI 构建并断言载荷。
+- [x] sidecar 启动、ready 行、健康检查、重启、优雅退出：编写并由 review-backend 独立复核，Windows CI 的 cargo build/test 与安装包 QA 为编译与运行证据。
+- [x] token 生成、endpoint.json、Tauri `get_connection`、事件刷新已实现并通过独立复核。
+- [x] 文件对话框、打开数据目录与外部链接：文件选择经 tauri-plugin-dialog 且只授予 dialog:allow-open；外部链接只允许 http(s)，Windows 走 FileProtocolHandler，目录走系统文件管理器，未引入额外依赖。
 - [x] 文档与 v2 实现事实对齐：AGENT_QUICKSTART、AGENT_INTEGRATION、AGENT_VERIFICATION 已按真实 endpoint、关闭接口、命名空间与测试计数重写；已通过独立审核。
 - [x] 删除 Launcher.cs 与旧 C# 构建入口，并从 scripts/export_source.py 的 TOP 移除；同步 `docs/AGENT_INTEGRATION.md`、`docs/AGENT_VERIFICATION.md` 与 `THIRD_PARTY_NOTICES.md` 中的 Launcher 描述；已通过独立审核。
 - [~] Windows 安装包构建与卸载清理：CI 已通过 `tauri build` 生成 NSIS 并断言 sidecar resources；安装与升级已通过 Windows 真机验证，卸载清理仍待 Windows 真机。
-- [ ] 独立审核 PASS。
+- [x] 独立审核 PASS：桌面壳切片由 review-backend 两轮独立审核通过，打开器注入面、脚本与工作流契约均已闭环，记录见 docs/REVIEWS.md。
 
 ## Phase 5 UI
 
@@ -107,11 +107,11 @@
 - [x] 设计 token、字体、组件库与 FM 配色。
 - [x] 战术板双阶段：只读板、阶段切换与 catalog 中文标签，编辑模式与本地副本、拖拽与键盘交换首发、按阶段角色编辑、保存/放弃与脏态保护；已通过独立审核。
 - [x] 球员属性与隐藏属性分组：只读分组页与批量编辑面板已实现并 PASS。
-- [~] 存档战术库与真实 AI 生成：fmsave 读取、FMF 导入导出与战术库页面文件导入、名单与阵容同步已实现；AI 生成待后续。
+- [x] 存档战术库：fmsave 读取、FMF 导入导出、战术库页面文件导入、战术导出为 FMF 与加入客队池、名单与阵容同步均已实现；真实 AI 生成按 ADR-0009 不在本轮范围。
 - [x] 结果页、对比、历史与批量管理：结果页、跨任务对比与任务批量管理已实现；历史任务由任务页分页与状态筛选、结果页任务列表覆盖，未单设历史页面；已通过独立审核。
 - [x] 实验提交页面：草案与基线选择、种子解析与总场数上限、并行数与超分配、主机资源探测与自动并发预检、提交与启动、启动结果独立展示；已通过独立审核。
 - [x] 设置、说明、空/加载/错误状态：设置页含连接状态、版本与说明分区，空、加载与错误状态复用统一组件。
-- [ ] Playwright 主流程与可访问性检查：本机缺少 Chrome 依赖的系统库，缓存浏览器无法启动，待具备浏览器运行依赖的环境补做。
+- [x] Playwright 主流程与可访问性检查：`web/e2e` 覆盖应用壳、战术板、实验与任务、结果与无障碍五组 30 项用例，CI playwright job 执行；本机经本地系统库跑通 30 项。
 - [x] 独立审核 PASS：Phase 5 各切片由独立审核子代理给出 PASS，记录见 docs/REVIEWS.md；Playwright 主流程待具备浏览器依赖的环境补做。
 
 ## Phase 6 功能请求
@@ -149,7 +149,7 @@
 上游：https://github.com/lqf0624/fm-tactics-lab/issues/7
 
 - [x] `MATCH_ROSTER_SIZE = 23` 单点定义，移除 23/26 分支：定义在 `fm27lab/domain/roster.py:8`；26 只作为旧池 schema 的接收上限并在 `fm27lab/domain/pool.py:552` 起裁剪，与比赛名单无关。
-- [~] 样本、存档、AI 生成、FMF、战术池与结果统计全部归一化：样本、存档、FMF、战术池与实验配置均经 `normalize_scenario` 归一化；AI 生成输入在 `fm27lab/adapters/engine_native/scenario_codec.py` 显式拒绝，待后续。
+- [x] 样本、存档、FMF、战术池与结果统计全部归一化；真实 AI 生成输入在 `fm27lab/adapters/engine_native/scenario_codec.py` 显式拒绝，按 ADR-0009 不在本轮范围。
 - [x] 确定性截断与重映射，覆盖首发、替补、门将、队长、主罚与定位球优先级：`fm27lab/tests/test_roster.py:124`、`:259`、`:370` 与 `fm27lab/tests/test_roster_apply.py:50`、`:367` 覆盖。
 - [x] 不足 23 人的占位策略与 UI 提示：占位策略与球员页提示已实现（`fm27lab/tests/test_roster.py:72`、`fm27lab/tests/test_scenario.py:63`、`web/src/pages/PlayersPage.tsx`），含逐字文案与占位标识；已通过独立审核。
 - [x] 旧 26 人方案加载兼容与提示：兼容、`roster_trim` 记录与球员页裁剪提示已实现（`fm27lab/tests/test_roster.py:34`、`:390`、`fm27lab/tests/test_roster_apply.py:168`、`web/src/pages/PlayersPage.tsx`）；已通过独立审核。
@@ -175,7 +175,7 @@
 - [x] 免存档直接导入 FMF 战术文件：`POST /api/drafts/import-fmf-file` 按路径读取、4 MiB 上限、名称派生与截断、CLI `drafts import-fmf-file`、前端存档库表单与导入后跳转战术板，空状态说明无存档可用的功能范围；已通过独立审核。
 - [x] 战术页草稿参数恢复：清除 `?draft=` 参数后手动改选草稿，再重新加入同一参数仍会应用；未保存修改期间参数不抢占当前草稿；已通过独立审核。
 - [x] 修复新版引擎存档无法读取：fmsave 升级到 0.12.4 支持 FM27 未验证构建，版本不支持时提示具体 build 并引导更新应用，unique_id 冲突消歧与缺失名称占位使真实存档可导入并应用到草案；已通过独立审核。
-- [ ] 手动选择草稿同步地址栏参数：下拉切换不写 `?draft=`，刷新或分享会丢失选择；待后续。
+- [x] 手动选择草稿同步地址栏参数：下拉切换以 replace 写回 `?draft=` 并保留其他查询参数，刷新与分享可恢复，未保存修改期间不写 URL，非法参数回退首个草稿。
 
 ## Phase 7 收尾
 
@@ -201,8 +201,8 @@
 - [x] 服务端战术模板与战术板球队级编辑：心态与球队指令、草案生命周期修复；已通过独立审核。
 - [x] 球员单项属性编辑与批量工具折叠；已通过独立审核。
 - [x] 设置页、球员页、实验页、存档页与帮助页交互重做；已通过独立审核。
-- [ ] 客队战术池 UI、职责/个人指令/盯人编辑、阵型模板、存档战术导出与加入战术池、定位球编辑。
-- [ ] 实验进度与结果明细、窄屏响应式、旧引擎目录迁移提示。
+- [x] 客队战术池 UI 含改名、权重与 FMF 条目导入；职责、个人指令、盯防球员与盯防位置编辑；六套阵型模板按位置熟悉度自动排阵；存档战术导出 FMF 与加入客队池；定位球套路、任务与角色编辑及导入导出。
+- [x] 实验进度与预计剩余、任务关键字筛选与重命名、结果单场明细与失败徽标；640px 窄屏布局、焦点可见性、对比度与加载骨架；旧引擎目录迁移提示与导入入口。
 
 ## 发布门槛
 

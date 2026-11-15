@@ -191,6 +191,14 @@
 | 2026-11-15 | 场景编码名单顺序修复 | fm27lab/adapters/engine_native/scenario_codec.py 与测试 | PASS | 实验提交在真实资源上返回 400「球员顺序或标识不匹配」的根因修复：按 native_id 把场景名单映射到引擎样本前缀，首发、队长、主罚与定位球优先级随索引重排，真实 16 份 FMF 与 31 个 v1 变体字节基线全通；Important 为短名单下队长、主罚、定位球优先级与盯防目标仍以样本人数为界，越界引用可编码，已由第二次提交加固。 |
 | 2026-11-15 | 短名单边界加固复核 | scenario_codec.py 与测试（第二次提交） | PASS | 队长、主罚与定位球优先级改用名单人数，盯防目标与针对性指令按对手名单校验，native_id 要求整数，空名单拒绝；真实资源往返 16/16、边界探针 51/51、v1 字节基线 31/31，10 个变异 8 个杀死（剩余为等价与不可达分支），2559 项 pytest 全绿。 |
 | 2026-11-15 | 安装器升级进程清理 | src-tauri/windows/hooks.nsh、src-tauri/tauri.conf.json、test_packaging_config.py 与收尾文档 | PASS | 配置键与路径符合 NsisConfig 且相对 tauri.conf.json 解析；钩子位于 CheckIfAppIsRunning 与文件复制之前、卸载首个删除之前，静默与图形安装均执行，不误杀安装器自身；6 项 Minor 为杀进程顺序、图形安装静默终止无提示、内容断言偏浅、退出码未检查、无 Windows 真机、文案顺序，已采纳顺序与断言两项；2561 项 pytest 全绿。 |
+| 2026-11-15 | 后端切片独立审查 | 并发取消竞态与矩阵测试、定位球切片、客队池更新与 FMF 导入、存档战术导出与入池、注册表拆分与契约、性质测试与 OpenAPI 快照、Rust supervisor 与桌面壳复用 | FAIL | 无 Critical；Important 为取消意图在 configure_workers 内的残余丢失窗口与 SOURCE_MANIFEST 未同步；Minor 为附件头助手重复、.fmf 后缀叠加与入池检查顺序，已由后端修复切片处理。 |
+| 2026-11-15 | 后端修复复核 | experiments.py 取消双复检与 ADR-0011、common.py 附件助手、setpieces 导出头、save_tactics 入池顺序与新增用例 | PASS | 取消判别用例与 2 处变异均被捕获并还原，定向 158 项通过；遗留 Minor 为入池检查判别性与 .fmf 后缀用例，已补测试。 |
+| 2026-11-15 | 前端切片独立审查 | 定位球页、客队池面板、任务与结果页、骨架与响应式、桌面打开器、存档战术导出与入池、e2e | FAIL | 无 Critical；4 项 Important 为定位球任务配额文案错误、后台刷新覆盖未保存草稿与切换队伍无确认、禁用态无原因、池删除对话框缺焦点管理；已由前端修复切片闭环。 |
+| 2026-11-15 | 前端修复复核 | 同上切片与新增用例 | PASS | 四项 Important 全部闭环，207 项定向测试通过，3 处变异被捕获；Minor 为定位球导出定时器与脏保护用例缺口，已补。 |
+| 2026-11-15 | formations 切片独立审查 | domain/application/routes/app/cli/mcp/registry 接线、TacticsPage 编辑面板与草稿参数、api-formations | FAIL | Critical 为应用阵型清空个人指令组导致导出与开赛必然 400；Important 为盯防球员无编辑入口且保存期不校验交叉约束、测试用模板反推目录形成循环定义；已由修复切片闭环。 |
+| 2026-11-15 | formations 复审 | 同上 | PASS | 指令组归一与 14 组交叉校验、盯防球员选择、按阶段过滤指令组、非法参数回写与阵型选人测试全部成立；7 处变异被捕获，六套阵型在真实资产上 12 次预览均通过领域校验。 |
+| 2026-11-15 | CI 工作流、验收脚本与文档独立审查 | ci.yml、release.yml、verify_installer_windows.ps1、verify_engine_windows.ps1、verify_concurrency_matrix.py、ADR 与文档、桌面打开器 | FAIL | Critical 为并发脚本在 Windows 无内存探测且 256 路资源预检必阻塞；Important 为脚本 $Matches 遮蔽自动变量、cmd 打开器存在注入面与源码清单未同步；已由修复切片闭环。 |
+| 2026-11-15 | CI 工作流与验收脚本复审 | ci.yml、release.yml、两个 PowerShell 脚本、并发矩阵脚本、ADR 与文档、桌面打开器 | PASS | Windows 内存探测与容量覆盖、脚本变量改名、打开器安全与文档计数全部闭环；端到端脚本 81/81 通过，两处变异被捕获；Minor 为静态契约缺口与真机未验证，已补 CI 契约测试并把目录打开改为系统文件管理器。 |
 
 ## 审核规则
 
@@ -199,6 +207,6 @@
 - 先列 findings，再列已验证项，最后给结论。
 - Critical 或 Important 未闭环时不得标记 PASS。
 - 审核通过不等于整体发布就绪；发布仍需最终验收与 Windows 真机验证。
-- 旧 `tests/` 当前 281 项通过，覆盖 legacy UI/HTTP/CLI/MCP、存档战术库、池与名单；新 `fm27lab/tests` 当前 2561 项通过，覆盖包版本、CLI 环境继承、配置/路径边界、SQLite 迁移/事务与池/草案/任务/存档/产物/幂等仓储、HTTP 健康/池/草案/任务 CRUD、鉴权、错误封套、Origin、ACL 失败清理、sidecar serve、23 人名单、真实名单应用、scenario 归一化与旧场景 schema 升级、原生场景编码与定位球记录、场景物化与实验接线、原生宿主按需构造与按任务并行配置、宿主资源探测、catalog/双阶段战术与草案写入校验、客队战术池选择与整批展开、结果指标与跨任务对比、任务状态机与输出状态枚举、存档状态机与应用服务、安全边界与数据目录权限、事件流前端订阅与刷新合并、页面错误边界、性能基准与并发通道基准、跨平台测试、存档导入路径清洗与 FMF 路径导入、桌面文件选择接线、战术页参数恢复、README 中英文一致；Vitest 当前 487 项（15 个文件）。
+- 旧 `tests/` 当前 281 项通过，覆盖 legacy UI/HTTP/CLI/MCP、存档战术库、池与名单；新 `fm27lab/tests` 当前 2852 项通过，覆盖包版本、CLI 环境继承、配置/路径边界、SQLite 迁移/事务与池/草案/任务/存档/产物/幂等仓储、HTTP 健康/池/草案/任务 CRUD、鉴权、错误封套、Origin、ACL 失败清理、sidecar serve、23 人名单、真实名单应用、scenario 归一化与旧场景 schema 升级、原生场景编码与定位球记录、场景物化与实验接线、原生宿主按需构造与按任务并行配置、宿主资源探测、catalog/双阶段战术与草案写入校验、客队战术池选择与整批展开、结果指标与跨任务对比、任务状态机与输出状态枚举、存档状态机与应用服务、安全边界与数据目录权限、事件流前端订阅与刷新合并、页面错误边界、性能基准与并发通道基准、跨平台测试、存档导入路径清洗与 FMF 路径导入、桌面文件选择接线、战术页参数恢复、README 中英文一致、定位球与客队池编辑、存档战术导出与入池、阵型模板与指令归一、性质测试、OpenAPI 快照、并发验收矩阵与 CI 脚本契约；Vitest 当前 593 项（21 个文件）。
 - Tauri sidecar supervisor 的静态实现已存在，但 Linux 无 WebKitGTK，Windows CI 的 `cargo build`/`cargo test`/安装包构建是唯一编译证据。PyInstaller onedir sidecar 已在 Linux 构建并通过 ready/health/shutdown 冒烟测试。
-- Rust 核心 crate 当前 4 项 cargo test 通过；前端当前 487 项 Vitest（15 个文件）通过、类型检查与生产构建通过。Windows CI run 43558281006 全 job success，含 cargo build/test、NSIS 安装包与 sidecar 资源断言；Linux 本机仍无 WebKitGTK。合并、设计、sidecar、壳层、名单五个审核门均已 PASS。
+- Rust 核心 crate 当前 16 项 cargo test 通过，桌面壳另有 10 项；前端当前 593 项 Vitest（21 个文件）通过、类型检查与生产构建通过。Windows CI run 43558281006 全 job success，含 cargo build/test、NSIS 安装包与 sidecar 资源断言；Linux 本机仍无 WebKitGTK。合并、设计、sidecar、壳层、名单五个审核门均已 PASS。

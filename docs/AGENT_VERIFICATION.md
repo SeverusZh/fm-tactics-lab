@@ -1,6 +1,6 @@
 # Agent 集成验证
 
-状态：按 v2 实现核对，核对日期 2026-11-14。当前版本 fm27lab 2.0.0.dev0，接口版本 fm27lab/v2。历史 v1 agent-runtime 的验收记录保留在第 7 节并标注版本与日期，不作为当前契约依据。
+状态：按 v2 实现核对，核对日期 2026-11-15。当前版本 fm27lab 2.0.0.dev0，接口版本 fm27lab/v2。历史 v1 agent-runtime 的验收记录保留在第 7 节并标注版本与日期，不作为当前契约依据。
 
 ## 1. 目的与范围
 
@@ -44,7 +44,7 @@
 .venv/bin/python -m pytest
 ```
 
-配置来自 pyproject.toml，testpaths 为 fm27lab/tests，收集 2561 项，全部通过时退出码为 0。
+配置来自 pyproject.toml，testpaths 为 fm27lab/tests，收集 2852 项，全部通过时退出码为 0。
 
 覆盖范围：fm27lab/tests 下的 pytest 风格用例，包含 HTTP 路由、应用服务、领域规则、SQLite 适配器、MCP 协议与引擎宿主适配。
 
@@ -54,7 +54,7 @@
 cd web && npx vitest run
 ```
 
-期望输出包含 Test Files 15 passed 与 Tests 487 passed；测试文件为 App 与 ErrorBoundary、5 个 lib 测试与 8 个页面测试。
+期望输出包含 Test Files 21 passed 与 Tests 593 passed；测试文件为 App、ErrorBoundary、Skeleton 与 JobProgress、9 个 lib 测试与 9 个页面测试。
 
 ### 3.4 Node 脚本测试
 
@@ -75,8 +75,8 @@ workspace scripts compile and squad selection is declared
 | 测试集 | 命令 | 当前计数 |
 | --- | --- | --- |
 | legacy unittest | .venv/bin/python -m unittest discover -s tests | 281 |
-| v2 pytest | .venv/bin/python -m pytest | 2561 |
-| web Vitest | cd web && npx vitest run | 487，共 15 个文件 |
+| v2 pytest | .venv/bin/python -m pytest | 2852 |
+| web Vitest | cd web && npx vitest run | 593，共 21 个文件 |
 | Node 脚本 | node tests/test_i18n.cjs 与 node tests/test_workspace_scripts.cjs | 2 个脚本 |
 
 口径说明
@@ -139,8 +139,8 @@ TOKEN=$(python -c "import json,sys;print(json.load(open(sys.argv[1]))['token'])"
 | --- | --- | --- |
 | OpenAPI 文档 | curl -s -o /dev/null -w '%{http_code}' "$URL/api/openapi.json" | 200 |
 | Swagger UI | curl -s -o /dev/null -w '%{http_code}' "$URL/api/docs" | 200 |
-| 路径数与操作数 | python -c "import json,urllib.request,sys;d=json.load(urllib.request.urlopen(sys.argv[1]));ops=sum(len([k for k in v if k in ('get','post','put','patch','delete')]) for v in d['paths'].values());print(len(d['paths']),ops)" "$URL/api/openapi.json" | 48 条路径，64 个操作 |
-| 组件模型数 | python -c "import json,urllib.request,sys;d=json.load(urllib.request.urlopen(sys.argv[1]));print(len(d['components']['schemas']))" "$URL/api/openapi.json" | 76 |
+| 路径数与操作数 | python -c "import json,urllib.request,sys;d=json.load(urllib.request.urlopen(sys.argv[1]));ops=sum(len([k for k in v if k in ('get','post','put','patch','delete')]) for v in d['paths'].values());print(len(d['paths']),ops)" "$URL/api/openapi.json" | 57 条路径，75 个操作 |
+| 组件模型数 | python -c "import json,urllib.request,sys;d=json.load(urllib.request.urlopen(sys.argv[1]));print(len(d['components']['schemas']))" "$URL/api/openapi.json" | 84 |
 
 证据 fm27lab/interfaces/http/app.py:107-113。
 
@@ -181,7 +181,7 @@ TOKEN=$(python -c "import json,sys;print(json.load(open(sys.argv[1]))['token'])"
 - capabilities 含 tools、resources、prompts，且各自 listChanged 为 false。
 - serverInfo 的 name 为 fm27lab。
 
-随后发送 tools/list，期望工具数为 49；发送 resources/list，期望 4 个静态资源。证据 fm27lab/interfaces/mcp/protocol.py:198-225、fm27lab/interfaces/mcp/tools.py、fm27lab/interfaces/mcp/resources.py。
+随后发送 tools/list，期望工具数为 58；发送 resources/list，期望 4 个静态资源。证据 fm27lab/interfaces/mcp/protocol.py:198-225、fm27lab/interfaces/mcp/tools.py、fm27lab/interfaces/mcp/resources.py。
 
 ## 6. Windows 桌面端验收
 
@@ -229,7 +229,7 @@ TOKEN=$(python -c "import json,sys;print(json.load(open(sys.argv[1]))['token'])"
 - 200 场批次失败数为 0。
 - WSL 访问 UNC 路径读取 match.pkm 时进程退出码 104。
 
-注意：以上记录中的接口、工具数、协议版本与 Cookie 鉴权均属 v1，当前 v2 的对应事实为 49 个工具、协议 2024-11-05、仅 Bearer 鉴权、无 /api/agent/v1 命名空间。
+注意：以上记录中的接口、工具数、协议版本与 Cookie 鉴权均属 v1，当前 v2 的对应事实为 58 个工具、协议 2024-11-05、仅 Bearer 鉴权、无 /api/agent/v1 命名空间。
 
 ## 8. 已知限制
 

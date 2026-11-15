@@ -2,7 +2,7 @@
 
 ## 状态
 
-设计基线，适用于 `refactor/v2-modular` 分支。技术栈由仓库维护者选定为 Tauri 2 + Rust + TypeScript + Python sidecar。实现按 TDD 推进，每个切片必须通过独立审核后才能结束。
+设计基线，适用于 `main` 分支。技术栈由仓库维护者选定为 Tauri 2 + Rust + TypeScript + Python sidecar。实现按 TDD 推进，每个切片必须通过独立审核后才能结束。
 
 ## 目标
 
@@ -41,7 +41,7 @@
 Windows x64
 ┌──────────────────────────────────────────────────────────────┐
 │ Tauri 2 shell · Rust                                         │
-│ 窗口 / 单实例 / 文件对话框 / sidecar 监督（托盘/更新 Phase 4） │
+│ 窗口 / 单实例 / 文件对话框 / 托盘 / sidecar 监督               │
 │        │ Tauri command get_connection()：只返回 URL 与 token │
 │        ▼                                                     │
 │ React 19 + TypeScript + Vite · WebView2                      │
@@ -59,7 +59,7 @@ Windows x64
 
 Rust 不持有足球领域逻辑，不直接读写 SQLite。Python sidecar 是领域、引擎、存储、CLI 与 MCP 的唯一所有者。前端只通过带 token 的 loopback API 访问 sidecar，不经过 Rust 代理。
 
-Phase 0 的桌面壳覆盖窗口、单实例、sidecar 启动/健康检查/退避重启/退出清理与连接信息注入；文件对话框、打开数据目录、外部链接、托盘与自动更新在 Phase 4 接入，不以当前分支的 `cargo check` 作为完成证据。
+Phase 0 的桌面壳覆盖窗口、单实例、sidecar 启动/健康检查/退避重启/退出清理与连接信息注入；文件对话框、打开数据目录、外部链接与系统托盘已在 Phase 4 接入，托盘菜单提供显示/隐藏主窗口、重启 sidecar 与退出。自动更新不在本轮范围，见 ADR-0010。桌面壳的完成证据是 Windows CI 的 `cargo build`、`cargo test`、安装包构建与安装/卸载 QA 脚本，不以 `cargo check` 代替。
 
 sidecar supervisor 在 ready 行后轮询 `/api/health`，失败或进程退出时按 500/1000/2000ms 退避重启，最多 3 次；重启前清空旧连接并发送 `sidecar-down`/`sidecar-ready`/`sidecar-error`/`sidecar-failed` Tauri events；应用退出时调用 `/api/shutdown`，随后 kill child。
 
@@ -130,7 +130,7 @@ fm27lab/
     http/              FastAPI 路由、鉴权、SSE、错误封套、系统与导入端点
     cli/               Typer 命令
     mcp/               MCP stdio 服务
-  registry.py          命令注册表
+  registry/            命令注册表包：model.py 约定能力与系统路径，parts/ 按域分片，__init__.py 聚合
   bootstrap.py         组合根
 web/                   React 19 + TypeScript + Vite
 rust/                  纯 Rust 契约与 sidecar 监督核心，可独立 cargo test
@@ -145,10 +145,10 @@ native/                C++17 适配器
 - 列表统一支持 `limit`、`offset`，返回 `items`、`total`、`next_offset`。
 - 写操作支持 `Idempotency-Key`；同键同载荷返回首次响应，同键异载荷返回 409。
 - 长任务通过 `GET /api/events` 的 SSE 推送进度；React 使用 fetch 流式读取并携带 `Authorization: Bearer`、`Accept: text/event-stream` 与 `Last-Event-ID`，不使用 EventSource 或 URL token；CORS preflight 允许 `Authorization` 与 `Last-Event-ID`。服务端先发送 ready 事件并支持按 `Last-Event-ID` 重放，客户端仅在重连时携带最后事件 id，断开后按 1s 起、30s 封顶的指数退避重连；事件驱动的查询失效按 300ms 窗口合并，页面保留手动刷新作为降级路径，未实现自动轮询。
-- `registry.py` 声明每个能力的名称、HTTP 方法与路径、CLI 命令路径与 MCP 工具名；三入口适配层当前手写并保持薄，`fm27lab/tests/test_registry_contract.py` 校验 OpenAPI 业务操作、CLI 叶子命令与 MCP 工具名同注册表一致，并检测名称、方法与路径约定漂移。输入/输出模型尚未纳入注册表。
-- 系统与导入路由 `/api/engine`、`/api/engine/select`、`/api/engine/diagnose`、`/api/engine/import`、`/api/system/restart`、`/api/tactics/template`、`/api/saves/{save_id}/tactics` 与 `/api/saves/{save_id}/tactics/{tactic_index}/import` 登记在 `registry.py` 的 `SYSTEM_PATHS`，需要 Bearer，不计入能力表，能力数仍为 52。
-- 业务路由只允许在 `fm27lab/interfaces/http/routes/` 的模块中声明并登记到 `registry.py`；除 `/api/health`、`/api/version`、`/api/openapi.json`、`/api/docs`、静态资源与显式系统路由 `/api/shutdown`、`/api/events` 外，不得在其他位置新增业务路由。
-- 契约测试验证每个能力在 HTTP、CLI、MCP 三个入口都存在，并校验 OpenAPI 操作、CLI 命令与 MCP 工具名一致；输入/输出 schema 快照尚未建立。
+- `fm27lab/registry/` 声明每个能力的名称、HTTP 方法与路径、CLI 命令路径与 MCP 工具名：`model.py` 定义动作、系统路径与能力组约定，`parts/` 按域分片声明能力，`__init__.py` 聚合为 61 项能力；三入口适配层手写并保持薄，`fm27lab/tests/test_registry_contract.py` 校验 OpenAPI 业务操作、CLI 叶子命令与 MCP 工具名同注册表一致，并检测命名、方法与路径约定漂移。输入/输出模型由路由层的 Pydantic 模型定义并纳入 OpenAPI 快照，不纳入注册表，决策见 ADR-0007。
+- 系统与导入路由 `/api/engine`、`/api/engine/select`、`/api/engine/diagnose`、`/api/engine/import`、`/api/system/restart`、`/api/tactics/template`、`/api/saves/{save_id}/tactics`、`/api/saves/{save_id}/tactics/{tactic_index}/import`、`/api/saves/{save_id}/tactics/{tactic_index}/export.fmf` 与 `/api/saves/{save_id}/tactics/{tactic_index}/pool` 登记在 `SYSTEM_PATHS`，需要 Bearer，不计入能力表；能力数为 61。
+- 业务路由只允许在 `fm27lab/interfaces/http/routes/` 的模块中声明并登记到 `fm27lab/registry/`；除 `/api/health`、`/api/version`、`/api/openapi.json`、`/api/docs`、静态资源与显式系统路由 `/api/shutdown`、`/api/events` 外，不得在其他位置新增业务路由。
+- 契约测试验证每个能力在 HTTP、CLI、MCP 三个入口都存在，并校验 OpenAPI 操作、CLI 命令与 MCP 工具名一致；OpenAPI 快照 `docs/openapi.json` 由 `scripts/generate_openapi_snapshot.py` 生成，`fm27lab/tests/test_openapi_snapshot.py` 校验文档与快照一致；性质测试覆盖场景、战术、客队池、对比与结果。
 - MCP 提供 tools、resources、prompts，并保留 stdio 传输。
 
 ## 存储
@@ -168,9 +168,10 @@ native/                C++17 适配器
 - 单一批次队列串行执行，批次内按 worker 分道；排队位置、取消、续跑与失败明细可见。
 - 高于推荐值显示非阻塞资源警告；高于 8 路的收益不做保证。
 - 每场保留原生校验、超时、取消与磁盘空间检查；失败保留现场，不自动重跑。
+- 取消意图随任务事件传递：派发前与工作进程配置后各复检一次，已取消则不派发新批次；最后一次复检到宿主清理标记之间仍存在指令级窗口，见 ADR-0011。
 - 资源预检：按每路 1 GiB 加 2 GiB 保留估算；高于推荐值时显示非阻塞警告。只有可用内存低于 2 GiB、磁盘不足或并行数超过 256 时返回 409；前两者可由 `allow_oversubscription=true` 覆盖。UI 对 256 路要求二次确认，CLI/MCP 暴露同名参数。
 - 旧宿主缺少 counted-session 能力时回退到每会话 64 场；执行力实验回退到隔离模式。回退路径必须记录在任务 provenance 中。
-- 验收矩阵：1、8、256 路各验证提交、取消、续跑与结果身份一致；256 路的真实耗时与内存只在 Windows 真机记录，不作为 Linux 单测断言。
+- 验收矩阵：1、8、256 路各验证提交、取消、续跑与结果身份一致，由 `scripts/verify_concurrency_matrix.py` 在 Linux 与 Windows CI 的假引擎上执行；CI runner 的磁盘小于 256 路所需的 258 GiB，用 `--available-memory-bytes` 与 `--free-disk-bytes` 提供等效容量，实测资源同时写入证据。真实引擎的吞吐与内存只由 `scripts/verify_engine_windows.ps1` 在 Windows 真机记录，不作为 Linux 单测断言。
 - 性能目标：同一输入与种子下结果一致；并发提升不改变比分、统计与执行力回执。
 
 ## 23 人名单规则
@@ -187,8 +188,8 @@ native/                C++17 适配器
 
 - 深炭紫底、FM 紫主操作色、球场绿数据强调、琥珀警告、红色危险。
 - 左侧固定导航，图标加文字；每屏一个主操作；页面可深链。
-- 页面：战术板、球员属性、存档战术库、实验、实验结果、设置与说明。
-- 战术板支持双阶段、拖拽与键盘换位；球员页支持隐藏属性分组；存档页支持唯一存档导入、联赛战术库、真实 AI 生成与我的球队同步；结果页支持多选批量管理、对比与可折叠战术池卡片；实验页以草案为输入，提交时自动探测主机资源并做并发预检，可启动批次并跳转结果。
+- 页面：战术板、球员属性、存档战术库、客队战术池、实验、实验结果、任务、定位球、设置与说明。
+- 战术板支持双阶段、拖拽与键盘换位、阵型模板与按位置自动排阵、职责与个人指令编辑、盯人目标选择；球员页支持隐藏属性分组；存档页支持唯一存档导入、存档战术库、导出 FMF、加入客队战术池与我的球队同步；客队战术池支持条目权重、行内改名与 FMF 条目导入；定位球页支持编辑与导入导出；结果页支持多选批量管理、对比、可折叠战术池卡片与单场明细；任务页支持重命名与关键字筛选；实验页以草案为输入，提交时自动探测主机资源并做并发预检，展示已完成场数与预计剩余时间。
 - 所有数据视图提供空、加载、错误、成功状态；键盘、焦点、对比度与减少动画遵循设计系统。
 - React 只保存临时 UI 状态；业务数据、草稿、设置与历史一律通过 API 写入 SQLite，不使用 localStorage 或 IndexedDB 作为第二持久化 owner。
 - OpenAPI 生成 TypeScript 类型与请求客户端；前端不得手写重复的请求/响应类型。
@@ -198,16 +199,16 @@ native/                C++17 适配器
 
 - Tauri 安装包包含：Rust 壳、WebView2 前端资源与 Python sidecar；原生宿主与私有引擎输入由 `scripts/build_native.py` 与用户自备私有输入单独准备，安装后通过 engine_root 配置。
 - Python sidecar 使用 PyInstaller onedir 构建到 `sidecar-dist/fm27lab-sidecar`，独立可运行；`scripts/build_sidecar.py` 负责构建，`tauri.conf.json` 的 `bundle.resources` 将其复制到 `resource/sidecar/`。资源映射必须使用目录形式：glob 形式会把 onedir 的 `_internal/` 与迁移目录平铺到同一层，安装后 sidecar 无法启动。
-- `beforeBuildCommand` 先构建前端再构建 sidecar；Windows CI 执行 sidecar 打包、Python 测试、`cargo build`、Tauri 安装包构建与 `cargo test`。`src-tauri/Cargo.lock` 必须提交以固定依赖。
+- `beforeBuildCommand` 先构建前端再构建 sidecar；Windows CI 执行 sidecar 打包、Python 测试、`cargo build`、`cargo test`、Tauri 安装包构建、安装包载荷断言与安装/卸载 QA 脚本。`src-tauri/Cargo.lock` 必须提交以固定依赖；`release.yml` 由版本 tag 触发构建安装包并发布。
 - Tauri 只负责启动、健康检查、重启与退出；若 sidecar 构建失败，安装包构建失败，不生成缺少后端的发布包。
 - sidecar 通过环境变量接收数据目录、引擎目录、端口与 token；token 只保存在内存与受保护文件。
 - 保留 `fm27lab serve`、`fm27lab mcp` 与 CLI 独立入口，便于无桌面环境测试与 Agent 接入。
-- Windows 真实引擎验证不在 Linux 开发环境内完成；作为发布门槛记录在 TODO。
+- Windows 真实引擎验证不在 Linux 开发环境内完成；由 `scripts/verify_engine_windows.ps1` 在装有 FM27 27.0.1+2494687 的 Windows 机器上驱动 sidecar API 完成 1/8/256 路验收，作为发布门槛记录在 TODO。
 
 ## 测试与审核
 
 - TDD Route: strict。每个行为先写失败测试，再写最小实现。
-- Python 使用 pytest；前端使用 Vitest 与 React Testing Library；Rust 核心模块使用 cargo test。Playwright 主流程与可访问性检查为待补项。
+- Python 使用 pytest；前端使用 Vitest 与 React Testing Library；Rust 核心模块使用 cargo test；Playwright 覆盖主流程与可访问性，位于 `web/e2e/`，由 CI 的 playwright job 执行。
 - 契约测试覆盖 OpenAPI、CLI 帮助、MCP 工具 schema、三入口能力对齐，以及由 OpenAPI 生成的 TypeScript 类型快照。
 - 集成测试使用 fake engine；真实原生比赛测试需要 Windows + FM27，作为发布前人工/CI 门槛。
 - 每个切片由独立审核子代理只读审查，给出 findings 与明确 PASS/FAIL；未通过不得进入下一阶段。
@@ -233,3 +234,8 @@ native/                C++17 适配器
 - [ADR-0004](docs/adr/0004-native-concurrency.md)：原生 counted-session 与 1–256 并行。
 - [ADR-0005](docs/adr/0005-uniform-23-roster.md)：统一 23 人比赛名单。
 - [ADR-0006](docs/adr/0006-remove-career-match.md)：删除存档对战，收敛存档入口。
+- [ADR-0007](docs/adr/0007-capability-registry-generation.md)：能力注册表的单一事实来源与三入口一致性。
+- [ADR-0008](docs/adr/0008-save-library-entry-mapping.md)：存档库旧入口在 v2 的映射。
+- [ADR-0009](docs/adr/0009-ai-scenario-generation-scope.md)：AI 场景生成不在本轮范围。
+- [ADR-0010](docs/adr/0010-desktop-auto-update-scope.md)：桌面自动更新不在本轮范围。
+- [ADR-0011](docs/adr/0011-cancel-intent-delivery.md)：取消意图的传递与残余指令级窗口。

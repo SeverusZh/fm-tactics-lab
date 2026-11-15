@@ -30,7 +30,10 @@ engine_compat_profile.json
 .ruff_cache/
 /web/.pnpm-store/
 *.tsbuildinfo
+/web/playwright-report/
+/web/test-results/
 /.toolchain/
 /.agents/
+/.team/
 /.dsh/
 /sidecar-dist/
