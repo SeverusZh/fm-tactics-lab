@@ -7,7 +7,6 @@ import hashlib
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
-from urllib.parse import quote
 
 from fastapi import Depends, FastAPI, HTTPException, Response
 from pydantic import BaseModel, ConfigDict, Field
@@ -25,7 +24,7 @@ from fm27lab.application.source_paths import clean_path_text
 from fm27lab.application.tactic_export import EngineUnavailableError, TacticExporter
 from fm27lab.application.tactic_import import build_scenario
 from fm27lab.config import Settings
-from fm27lab.interfaces.http.common import ErrorEnvelope, require_token
+from fm27lab.interfaces.http.common import ErrorEnvelope, attachment_disposition, require_token
 from fm27lab.interfaces.http.routes.drafts import DraftOutput
 from fm27lab.ports.fmf import FMF_MAGIC
 from fm27lab.ports.fmf import FmfCodec as FmfCodecPort
@@ -179,18 +178,6 @@ def _not_found() -> HTTPException:
     )
 
 
-def _filename(name: str) -> str:
-    cleaned = "".join(char for char in name if char.isprintable() and char not in '\\/:*?"<>|').strip(" .")
-    return (cleaned or "draft") + ".fmf"
-
-
-def _content_disposition(name: str) -> str:
-    filename = _filename(name)
-    if filename.isascii() and '"' not in filename and "\\" not in filename:
-        return f'attachment; filename="{filename}"'
-    return "attachment; filename=\"draft.fmf\"; filename*=UTF-8''" + quote(filename, safe="")
-
-
 def register(app: FastAPI) -> None:
     def service() -> FmfService:
         return app.state.fmf_service
@@ -223,7 +210,7 @@ def register(app: FastAPI) -> None:
             content=payload,
             media_type="application/octet-stream",
             headers={
-                "Content-Disposition": _content_disposition(str(draft["name"])),
+                "Content-Disposition": attachment_disposition(str(draft["name"]), "draft"),
                 "ETag": f'"{digest}"',
                 FMF_FORMAT_HEADER: FMF_V8_FORMAT,
             },

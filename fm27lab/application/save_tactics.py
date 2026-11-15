@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from fm27lab.adapters.engine_native.scenario_assets import ScenarioAssets, load_scenario_assets
 from fm27lab.adapters.engine_native.tactic_file import (
@@ -17,8 +17,12 @@ from fm27lab.adapters.save_fmsave.tactics import StoredTactic, read_tactic_strea
 from fm27lab.application.drafts import DraftService
 from fm27lab.application.saves import SavesService
 from fm27lab.application.source_paths import clean_path_text
+from fm27lab.application.tactic_export import TacticExporter, archive_title
 from fm27lab.application.tactic_import import build_scenario
 from fm27lab.config import Settings
+
+if TYPE_CHECKING:
+    from fm27lab.application.pools import PoolService
 
 SAVE_MISSING_ERROR = "存档文件不可用，请重新导入存档"
 SAVE_UNREADABLE_ERROR = "存档无法读取"
@@ -31,6 +35,7 @@ MAX_NAME_CHARS = 80
 FALLBACK_NAME = "导入战术"
 MAX_CACHE_ENTRIES = 8
 SAVE_TACTIC_SOURCE = "save_tactic"
+POOL_UNAVAILABLE_ERROR = "客队战术池不可用"
 
 Reader = Callable[[Path], tuple[StoredTactic, ...]]
 StreamReader = Callable[..., bytes | None]
@@ -53,6 +58,8 @@ class SaveTacticsService:
         parser: Parser = parse_tactic_stream,
         assets_loader: AssetsLoader = load_scenario_assets,
         builder: Builder = build_scenario,
+        pools: PoolService | None = None,
+        exporter: TacticExporter | None = None,
     ) -> None:
         self.saves = saves
         self.drafts = drafts
@@ -62,6 +69,8 @@ class SaveTacticsService:
         self.parser = parser
         self.assets_loader = assets_loader
         self.builder = builder
+        self.pools = pools
+        self.exporter = exporter if exporter is not None else TacticExporter()
         self._cache: dict[str, tuple[tuple[Any, ...], tuple[dict[str, Any], ...]]] = {}
 
     def engine_ready(self) -> bool:
@@ -83,28 +92,63 @@ class SaveTacticsService:
         tactic_index: int,
         name: str | None = None,
     ) -> dict[str, Any] | None:
+        target = self._target(save_id, tactic_index)
+        if target is None:
+            return None
+        item, scenario = target
+        source = {"kind": SAVE_TACTIC_SOURCE, "save_id": save_id, "tactic_index": tactic_index}
+        return self.drafts.create(self._draft_name(name, item["name"]), scenario, source)
+
+    def export_tactic(self, save_id: str, tactic_index: int) -> tuple[str, bytes] | None:
+        target = self._target(save_id, tactic_index)
+        if target is None:
+            return None
+        item, scenario = target
+        engine_root, game_root = self._roots()
+        payload = self.exporter.export(
+            name=item["name"],
+            scenario=scenario,
+            engine_root=engine_root,
+            game_root=game_root,
+        )
+        return archive_title(item["name"]), payload
+
+    def add_to_pool(self, save_id: str, tactic_index: int) -> dict[str, Any] | None:
+        if self.pools is None:
+            raise ValueError(POOL_UNAVAILABLE_ERROR)
+        target = self._target(save_id, tactic_index)
+        if target is None:
+            return None
+        item, scenario = target
+        return self.pools.add_from_scenario(scenario, item["name"])
+
+    def _target(
+        self,
+        save_id: str,
+        tactic_index: int,
+    ) -> tuple[dict[str, Any], dict[str, Any]] | None:
         save = self.saves.get(save_id)
         if save is None:
             return None
         path = self._source_path(save)
-        items = self._items(save_id, path)
-        item = next((entry for entry in items if entry["index"] == tactic_index), None)
+        item = next((entry for entry in self._items(save_id, path) if entry["index"] == tactic_index), None)
         if item is None:
             raise ValueError(TACTIC_MISSING_ERROR)
         if item["team_slot"] != FIRST_TEAM_SLOT:
             raise ValueError(TACTIC_TEAM_ERROR)
+        return item, self._scenario(path, item)
+
+    def _scenario(self, path: Path, item: Mapping[str, Any]) -> dict[str, Any]:
         engine_root, game_root = self._roots()
-        payload = self._stream(path, tactic_index)
+        payload = self._stream(path, item["index"])
         if not payload:
             raise ValueError(TACTIC_STREAM_ERROR)
         plan = self.parser(payload, name=item["name"], engine_root=engine_root, game_root=game_root)
-        scenario = self.builder(
+        return self.builder(
             self.assets_loader(engine_root),
             plan,
             tactic_name=item["name"],
         )
-        source = {"kind": SAVE_TACTIC_SOURCE, "save_id": save_id, "tactic_index": tactic_index}
-        return self.drafts.create(self._draft_name(name, item["name"]), scenario, source)
 
     def _items(self, save_id: str, path: Path) -> list[dict[str, Any]]:
         key = self._signature(path)

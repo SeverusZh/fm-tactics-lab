@@ -177,6 +177,51 @@ class PoolRepository:
                 active.commit()
             return cursor.rowcount > 0
 
+    def update(
+        self,
+        entry_id: str,
+        value: Mapping[str, Any],
+        connection: sqlite3.Connection | None = None,
+    ) -> dict[str, Any] | None:
+        self._validate_id(entry_id)
+        if not isinstance(value, Mapping):
+            raise ValueError("客队战术更新内容必须是对象")
+        name = value.get("name")
+        if name is not None:
+            if (
+                not isinstance(name, str)
+                or not 1 <= len(name.strip()) <= 80
+                or any(ord(c) < 32 or ord(c) == 127 for c in name)
+            ):
+                raise ValueError("客队战术名称无效")
+            try:
+                name.encode("utf-8")
+            except UnicodeEncodeError as error:
+                raise ValueError("客队战术名称无效") from error
+            name = name.strip()
+        weight = value.get("weight")
+        if weight is not None and (type(weight) is not int or not 1 <= weight <= 1000):
+            raise ValueError("客队战术权重无效")
+        if name is None and weight is None:
+            raise ValueError("至少需要提供一项更新字段")
+        with self._connection(connection) as (active, owned):
+            if owned:
+                active.execute("BEGIN IMMEDIATE")
+            row = active.execute(
+                "SELECT name, weight FROM pool_entries WHERE id=?", (entry_id,)
+            ).fetchone()
+            if row is None:
+                if owned:
+                    active.rollback()
+                return None
+            active.execute(
+                "UPDATE pool_entries SET name=?, weight=? WHERE id=?",
+                (row["name"] if name is None else name, row["weight"] if weight is None else weight, entry_id),
+            )
+            if owned:
+                active.commit()
+        return self.get(entry_id, connection=connection)
+
     @staticmethod
     def _validate_id(entry_id: Any) -> None:
         if not isinstance(entry_id, str) or not ID_PATTERN.fullmatch(entry_id):
@@ -433,9 +478,44 @@ class JobRepository:
             ).fetchone()
         return None if row is None else self._row(row)
 
+    @staticmethod
+    def _normalize_query(value: str | None) -> str | None:
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            raise ValueError("任务关键字无效")
+        query = value.strip()
+        if query == "":
+            return None
+        if len(query) > 100:
+            raise ValueError("任务关键字长度必须为 1–100 个字符")
+        return query
+
+    @staticmethod
+    def _like_pattern(value: str) -> str:
+        escaped = value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        return "%" + escaped + "%"
+
+    def _where(self, status: str | None, query: str | None) -> tuple[str, list[Any]]:
+        if status is not None and (not isinstance(status, str) or status not in self.STATUSES):
+            raise ValueError("任务状态无效")
+        clauses: list[str] = []
+        parameters: list[Any] = []
+        if status is not None:
+            clauses.append("status=?")
+            parameters.append(status)
+        if query is not None:
+            pattern = self._like_pattern(query)
+            clauses.append("(name LIKE ? ESCAPE '\\' OR id LIKE ? ESCAPE '\\')")
+            parameters.extend([pattern, pattern])
+        if not clauses:
+            return "", parameters
+        return " WHERE " + " AND ".join(clauses), parameters
+
     def list(
         self,
         status: str | None = None,
+        q: str | None = None,
         limit: int = 50,
         offset: int = 0,
         connection: sqlite3.Connection | None = None,
@@ -444,30 +524,26 @@ class JobRepository:
             raise ValueError("任务分页大小无效")
         if type(offset) is not int or offset < 0:
             raise ValueError("任务分页偏移无效")
-        if status is not None and (not isinstance(status, str) or status not in self.STATUSES):
-            raise ValueError("任务状态无效")
+        where, parameters = self._where(status, self._normalize_query(q))
         statement = (
             "SELECT id, kind, status, name, config_json, summary_json, workers, total, "
             "completed, created_at, started_at, finished_at FROM jobs"
+            + where
+            + " ORDER BY created_at DESC, rowid DESC LIMIT ? OFFSET ?"
         )
-        parameters: list[Any] = []
-        if status is not None:
-            statement += " WHERE status=?"
-            parameters.append(status)
-        statement += " ORDER BY created_at DESC, rowid DESC LIMIT ? OFFSET ?"
         parameters.extend([limit, offset])
         with self._connection(connection) as (active, _):
             rows = active.execute(statement, parameters).fetchall()
         return [self._row(row) for row in rows]
 
-    def count(self, status: str | None = None, connection: sqlite3.Connection | None = None) -> int:
-        if status is not None and (not isinstance(status, str) or status not in self.STATUSES):
-            raise ValueError("任务状态无效")
-        statement = "SELECT COUNT(*) FROM jobs"
-        parameters: list[Any] = []
-        if status is not None:
-            statement += " WHERE status=?"
-            parameters.append(status)
+    def count(
+        self,
+        status: str | None = None,
+        q: str | None = None,
+        connection: sqlite3.Connection | None = None,
+    ) -> int:
+        where, parameters = self._where(status, self._normalize_query(q))
+        statement = "SELECT COUNT(*) FROM jobs" + where
         with self._connection(connection) as (active, _):
             row = active.execute(statement, parameters).fetchone()
         return int(row[0])

@@ -29,7 +29,9 @@ EXPECTED_NAMES = frozenset(
         "pools_list",
         "pools_get",
         "pools_create",
+        "pools_update",
         "pools_delete",
+        "pools_import_fmf",
         "drafts_list",
         "drafts_get",
         "drafts_create",
@@ -78,15 +80,26 @@ EXPECTED_NAMES = frozenset(
         "catalog_snapshot",
         "results_compare",
         "system_resources",
+        "setpieces_list",
+        "setpieces_get",
+        "setpieces_update",
+        "setpieces_import_file",
+        "setpieces_export_file",
+        "formations_list",
+        "drafts_formation",
     }
 )
 
 EXTENDED_SURFACES: dict[str, tuple[tuple[str, ...], str]] = {
+    "pools_update": (("pools", "update"), "pools_update"),
+    "pools_import_fmf": (("pools", "import-fmf"), "pools_import_fmf"),
     "drafts_attributes": (("drafts", "attributes"), "drafts_attributes"),
     "drafts_export_fmf": (("drafts", "export-fmf"), "drafts_export_fmf"),
     "drafts_import_fmf": (("drafts", "import-fmf"), "drafts_import_fmf"),
     "drafts_apply_roster": (("drafts", "apply-roster"), "drafts_apply_roster"),
     "drafts_undo_roster": (("drafts", "undo-roster"), "drafts_undo_roster"),
+    "drafts_formation": (("drafts", "formation"), "drafts_formation"),
+    "formations_list": (("formations", "list"), "formations_list"),
     "jobs_batch_actions": (("jobs", "batch-action"), "jobs_batch_actions"),
     "jobs_batch_delete": (("jobs", "batch-delete"), "jobs_batch_delete"),
     "jobs_export": (("jobs", "export"), "jobs_export"),
@@ -109,6 +122,11 @@ EXTENDED_SURFACES: dict[str, tuple[tuple[str, ...], str]] = {
     "experiments_resume": (("experiments", "resume"), "experiments_resume"),
     "catalog_snapshot": (("catalog", "show"), "catalog_snapshot"),
     "results_compare": (("results", "compare"), "results_compare"),
+    "setpieces_list": (("setpieces", "list"), "setpieces_list"),
+    "setpieces_get": (("setpieces", "get"), "setpieces_get"),
+    "setpieces_update": (("setpieces", "update"), "setpieces_update"),
+    "setpieces_import_file": (("setpieces", "import-file"), "setpieces_import_file"),
+    "setpieces_export_file": (("setpieces", "export-file"), "setpieces_export_file"),
 }
 
 
@@ -163,20 +181,9 @@ def test_openapi_business_operations_match_registry(tmp_path: Path):
     for item in CAPABILITIES:
         assert item.http in operations, item.name
     declared_paths = {path for _method, path in operations}
-    assert declared_paths - {path for _method, path in registered} == {
-        "/api/engine",
-        "/api/engine/diagnose",
-        "/api/engine/import",
-        "/api/engine/select",
-        "/api/events",
-        "/api/health",
-        "/api/shutdown",
-        "/api/saves/{save_id}/tactics",
-        "/api/saves/{save_id}/tactics/{tactic_index}/import",
-        "/api/system/restart",
-        "/api/tactics/template",
-        "/api/version",
-    }
+    documentation_only = {"/api/docs", "/api/openapi.json"}
+    assert set(SYSTEM_PATHS) - declared_paths == documentation_only
+    assert declared_paths == {path for _method, path in registered} | (set(SYSTEM_PATHS) - documentation_only)
     business = {(method, path) for method, path in operations if path not in SYSTEM_PATHS}
     assert business == registered
     assert detect_drift(CAPABILITIES, openapi_operations=operations) == []
@@ -281,7 +288,7 @@ def test_every_capability_declares_cli_surface():
 
 
 def test_system_resources_serves_http_and_cli_without_mcp(tmp_path: Path):
-    assert len(CAPABILITIES) == 52
+    assert len(CAPABILITIES) == 61
     item = capability("system_resources")
     assert item.description.strip()
     assert item.http == ("GET", "/api/system/resources")

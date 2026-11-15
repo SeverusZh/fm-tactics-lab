@@ -197,6 +197,58 @@ def test_job_http_list_status_filter_and_pagination_boundaries(tmp_path: Path):
         assert client.get(f"/api/jobs?{query}", headers=headers).status_code == 400, query
 
 
+def test_job_http_list_query_filter_combines_status_and_pagination(tmp_path: Path):
+    app, settings, _, _ = make_app(tmp_path)
+    client = TestClient(app)
+    headers = auth(settings)
+    first = create_job(client, headers, name="种子扫描 A")
+    second = create_job(client, headers, name="种子扫描 B")
+    other = create_job(client, headers, name="其他实验")
+    percent = create_job(client, headers, name="100% 覆盖")
+    case = create_job(client, headers, name="Case Study")
+    assert (
+        client.patch(f"/api/jobs/{second['id']}", json={"status": "running"}, headers=headers).status_code
+        == 200
+    )
+
+    listing = client.get("/api/jobs", params={"q": "种子"}, headers=headers).json()
+    assert listing["total"] == 2
+    assert [item["id"] for item in listing["items"]] == [second["id"], first["id"]]
+    combined = client.get("/api/jobs", params={"q": "种子", "status": "running"}, headers=headers).json()
+    assert combined["total"] == 1
+    assert [item["id"] for item in combined["items"]] == [second["id"]]
+    page = client.get("/api/jobs", params={"q": "种子", "limit": 1}, headers=headers).json()
+    assert page["total"] == 2
+    assert [item["id"] for item in page["items"]] == [second["id"]]
+    assert page["next_offset"] == 1
+    tail = client.get("/api/jobs", params={"q": "种子", "limit": 1, "offset": 1}, headers=headers).json()
+    assert [item["id"] for item in tail["items"]] == [first["id"]]
+    assert tail["next_offset"] is None
+    by_id = client.get("/api/jobs", params={"q": other["id"]}, headers=headers).json()
+    assert by_id["total"] == 1
+    assert [item["id"] for item in by_id["items"]] == [other["id"]]
+    by_case = client.get("/api/jobs", params={"q": "CASE"}, headers=headers).json()
+    assert [item["id"] for item in by_case["items"]] == [case["id"]]
+    literal = client.get("/api/jobs", params={"q": "100%"}, headers=headers).json()
+    assert [item["id"] for item in literal["items"]] == [percent["id"]]
+    wildcard = client.get("/api/jobs", params={"q": "%"}, headers=headers).json()
+    assert [item["id"] for item in wildcard["items"]] == [percent["id"]]
+    assert client.get("/api/jobs", params={"q": "  种子  "}, headers=headers).json()["total"] == 2
+    assert client.get("/api/jobs", params={"q": "   "}, headers=headers).json()["total"] == 5
+    assert client.get("/api/jobs", params={"q": "missing"}, headers=headers).json() == {
+        "items": [],
+        "total": 0,
+        "next_offset": None,
+    }
+    assert client.get("/api/jobs", params={"q": "x" * 100}, headers=headers).status_code == 200
+    rejected = client.get("/api/jobs", params={"q": "x" * 101}, headers=headers)
+    assert rejected.status_code == 400
+    assert rejected.json()["error"]["code"] == "validation_failed"
+    assert rejected.json()["error"]["retriable"] is False
+    assert "关键字" in rejected.json()["error"]["message"]
+    assert client.get("/api/jobs", params={"q": "种子", "limit": 0}, headers=headers).status_code == 400
+
+
 def test_job_http_create_validation_failures(tmp_path: Path):
     app, settings, _, _ = make_app(tmp_path)
     client = TestClient(app)
@@ -427,6 +479,8 @@ def test_job_http_openapi_contract(tmp_path: Path):
     assert parameters["offset"]["minimum"] == 0
     assert parameters["offset"]["default"] == 0
     assert "status" in parameters
+    assert parameters["q"]["type"] == "string"
+    assert parameters["q"]["maxLength"] == 100
     run_parameters = {item["name"]: item["schema"] for item in runs_operation["parameters"]}
     assert run_parameters["limit"]["minimum"] == 1
     assert run_parameters["limit"]["maximum"] == 200
@@ -472,7 +526,7 @@ def test_job_http_cors_methods_and_existing_routes(tmp_path: Path):
     )
 
     class FakeJobs:
-        def list(self, status=None, limit=50, offset=0):
+        def list(self, status=None, q=None, limit=50, offset=0):
             return {"items": [], "total": 0, "next_offset": None}
 
         def create(self, kind, name=None, config=None, workers=1, total=0):

@@ -157,3 +157,63 @@ def test_same_timestamp_preserves_insertion_order_and_unicode(tmp_path):
     rows = repo.list()
     assert [row["id"] for row in rows] == [first["id"], second["id"]]
     assert [row["name"] for row in rows] == ["甲", "乙"]
+
+
+def test_pool_repository_update_changes_name_and_weight(tmp_path: Path):
+    repo = PoolRepository(database(tmp_path))
+    created = repo.add(entry("旧名", weight=2))
+    updated = repo.update(created["id"], {"name": "新名", "weight": 9})
+    assert updated is not None
+    assert updated["name"] == "新名"
+    assert updated["weight"] == 9
+    assert updated["tactic"] == created["tactic"]
+    assert updated["roster"] == created["roster"]
+    assert updated["created_at"] == created["created_at"]
+    assert repo.get(created["id"]) == updated
+    assert repo.list() == [updated]
+
+
+def test_pool_repository_update_applies_partial_changes(tmp_path: Path):
+    repo = PoolRepository(database(tmp_path))
+    created = repo.add(entry("保留", weight=2))
+    renamed = repo.update(created["id"], {"name": "改名"})
+    assert renamed is not None
+    assert (renamed["name"], renamed["weight"]) == ("改名", 2)
+    reweighted = repo.update(created["id"], {"weight": 4})
+    assert reweighted is not None
+    assert (reweighted["name"], reweighted["weight"]) == ("改名", 4)
+
+
+def test_pool_repository_update_rejects_invalid_values_and_missing_ids(tmp_path: Path):
+    repo = PoolRepository(database(tmp_path))
+    created = repo.add(entry())
+    assert repo.update("missing", {"name": "x"}) is None
+    for value in (
+        {},
+        {"name": None, "weight": None},
+        {"weight": 0},
+        {"weight": 1001},
+        {"weight": True},
+        {"name": ""},
+        {"name": "  "},
+        {"name": "x\n"},
+        {"name": "\ud800"},
+        {"tactic": {}},
+    ):
+        with pytest.raises(ValueError):
+            repo.update(created["id"], value)
+    for unsafe in ("a/b", "..", " "):
+        with pytest.raises(ValueError, match="标识"):
+            repo.update(unsafe, {"name": "x"})
+    assert repo.get(created["id"]) == created
+
+
+def test_pool_repository_update_keeps_transaction_rollback(tmp_path: Path):
+    db = database(tmp_path)
+    repo = PoolRepository(db)
+    created = repo.add(entry("原名"))
+    with pytest.raises(RuntimeError):
+        with db.transaction() as connection:
+            repo.update(created["id"], {"name": "事务改名"}, connection=connection)
+            raise RuntimeError("rollback")
+    assert repo.get(created["id"]) == created

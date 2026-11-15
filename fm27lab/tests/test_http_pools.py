@@ -1,8 +1,19 @@
+import base64
 from pathlib import Path
 
 from fastapi.testclient import TestClient
 
+from fm27lab.adapters.fmf import FmfCodec
+from fm27lab.interfaces.http.routes.pools import FMF_SIZE_ERROR, MAX_FMF_BYTES
+from fm27lab.tests.test_http_drafts import scenario
 from fm27lab.tests.test_http_health import make_app
+from fm27lab.tests.test_pool_schema import tactic
+
+
+def fmf_payload(*, tactic_name: str = "客队战术") -> bytes:
+    document = scenario(23)
+    document["teams"][0].update(tactic(tactic_name=tactic_name))
+    return FmfCodec().encode(document)
 
 
 def auth(settings):
@@ -26,6 +37,14 @@ def test_pool_http_requires_token(tmp_path: Path):
     assert client.get("/api/pools").status_code == 401
     assert client.post("/api/pools", json=payload()).status_code == 401
     assert client.get("/api/pools/none").status_code == 401
+    assert client.patch("/api/pools/none", json={"name": "x"}).status_code == 401
+    assert (
+        client.post(
+            "/api/pools/import-fmf",
+            json={"content_base64": base64.b64encode(fmf_payload()).decode("ascii")},
+        ).status_code
+        == 401
+    )
     assert client.delete("/api/pools/none").status_code == 401
 
 
@@ -118,6 +137,13 @@ def test_pool_http_openapi_exposes_routes(tmp_path: Path):
     assert paths["/api/pools"]["post"]["responses"]["201"]["content"]["application/json"]["schema"][
         "$ref"
     ].endswith("PoolEntryOutput")
+    assert "/api/pools/import-fmf" in paths
+    assert paths["/api/pools/import-fmf"]["post"]["responses"]["201"]["content"]["application/json"][
+        "schema"
+    ]["$ref"].endswith("PoolImportOutput")
+    assert paths["/api/pools/{entry_id}"]["patch"]["responses"]["200"]["content"]["application/json"][
+        "schema"
+    ]["$ref"].endswith("PoolEntryOutput")
 
 
 def test_openapi_removes_422_and_documents_error_envelope(tmp_path: Path):
@@ -140,9 +166,10 @@ def test_405_allow_lists_all_methods_and_bearer_is_case_insensitive(tmp_path: Pa
     wrong = client.put("/api/pools", headers=headers)
     assert wrong.status_code == 405
     assert "GET" in wrong.headers["allow"] and "POST" in wrong.headers["allow"]
-    wrong_member = client.patch("/api/pools/x", headers=headers)
+    wrong_member = client.put("/api/pools/x", headers=headers)
     assert wrong_member.status_code == 405
-    assert "GET" in wrong_member.headers["allow"] and "DELETE" in wrong_member.headers["allow"]
+    allow = wrong_member.headers["allow"]
+    assert "GET" in allow and "PATCH" in allow and "DELETE" in allow
     lower = client.get("/api/pools", headers={"Authorization": f"bearer {settings.token}"})
     assert lower.status_code == 200
 
@@ -194,6 +221,148 @@ def test_duplicate_conflict_keeps_original_and_pool_service_injection(tmp_path: 
 
     second = create_app(settings, database, pool_service=FakeService())
     assert TestClient(second).get("/api/pools", headers=headers).json()["items"] == []
+
+
+def test_pool_http_updates_name_and_weight(tmp_path: Path):
+    app, settings, _, _ = make_app(tmp_path)
+    client = TestClient(app)
+    headers = auth(settings)
+    created = client.post("/api/pools", json=payload(), headers=headers).json()
+    renamed = client.patch(
+        f"/api/pools/{created['id']}",
+        json={"name": "  改名  ", "weight": 9},
+        headers=headers,
+    )
+    assert renamed.status_code == 200, renamed.text
+    updated = renamed.json()
+    assert updated["name"] == "改名"
+    assert updated["weight"] == 9
+    assert updated["tactic"] == created["tactic"]
+    assert updated["roster"] == created["roster"]
+    assert client.get(f"/api/pools/{created['id']}", headers=headers).json() == updated
+    only_weight = client.patch(f"/api/pools/{created['id']}", json={"weight": 3}, headers=headers)
+    assert only_weight.status_code == 200
+    assert only_weight.json()["name"] == "改名"
+    assert only_weight.json()["weight"] == 3
+
+
+def test_pool_http_update_rejects_invalid_payloads(tmp_path: Path):
+    app, settings, _, _ = make_app(tmp_path)
+    client = TestClient(app)
+    headers = auth(settings)
+    created = client.post("/api/pools", json=payload(), headers=headers).json()
+    for body in (
+        {},
+        {"weight": 0},
+        {"weight": 1001},
+        {"weight": True},
+        {"weight": "2"},
+        {"weight": 1.5},
+        {"name": ""},
+        {"name": "   "},
+        {"tactic": {}},
+        {"name": "x", "unknown": 1},
+    ):
+        response = client.patch(f"/api/pools/{created['id']}", json=body, headers=headers)
+        assert response.status_code == 400, body
+        assert response.json()["error"]["code"] == "validation_failed", body
+    missing = client.patch("/api/pools/missing", json={"name": "x"}, headers=headers)
+    assert missing.status_code == 404
+    assert missing.json()["error"]["code"] == "not_found"
+    assert client.patch("/api/pools/a b", json={"name": "x"}, headers=headers).status_code == 400
+
+
+def test_pool_http_import_fmf_creates_entries(tmp_path: Path):
+    app, settings, _, _ = make_app(tmp_path)
+    client = TestClient(app)
+    headers = auth(settings)
+    content = base64.b64encode(fmf_payload()).decode("ascii")
+    response = client.post(
+        "/api/pools/import-fmf",
+        json={"content_base64": content, "name": "导入战术"},
+        headers=headers,
+    )
+    assert response.status_code == 201, response.text
+    imported = response.json()
+    assert imported["total"] == 1
+    item = imported["items"][0]
+    assert item["id"]
+    assert item["name"] == "导入战术"
+    assert item["weight"] == 1
+    assert item["roster"] is None
+    assert item["tactic"]["tactic_name"] == "客队战术"
+    assert item["tactic"]["mentality"] == 3
+    assert item["tactic"]["native_extra_team_bits"] == "0"
+    assert len(item["tactic"]["phases"]) == 2
+    listed = client.get("/api/pools", headers=headers).json()
+    assert listed["items"] == [item]
+    assert listed["total"] == 1
+
+    duplicate = client.post(
+        "/api/pools/import-fmf",
+        json={"content_base64": content, "name": "导入战术"},
+        headers=headers,
+    )
+    assert duplicate.status_code == 201, duplicate.text
+    assert duplicate.json()["items"][0]["name"] == "导入战术 2"
+
+    anonymous = client.post(
+        "/api/pools/import-fmf", json={"content_base64": content}, headers=headers
+    )
+    assert anonymous.status_code == 201, anonymous.text
+    assert anonymous.json()["items"][0]["name"] == "导入战术 3"
+
+
+def test_pool_http_import_fmf_uses_name_as_entry_name(tmp_path: Path):
+    app, settings, _, _ = make_app(tmp_path)
+    client = TestClient(app)
+    headers = auth(settings)
+    content = base64.b64encode(fmf_payload(tactic_name="高压")).decode("ascii")
+    response = client.post(
+        "/api/pools/import-fmf",
+        json={"content_base64": content, "name": "主战术"},
+        headers=headers,
+    )
+    assert response.status_code == 201, response.text
+    assert response.json()["items"][0]["tactic"]["tactic_name"] == "高压"
+    listed = client.get("/api/pools", headers=headers).json()
+    assert [row["name"] for row in listed["items"]] == ["主战术"]
+
+
+def test_pool_http_import_fmf_rejects_bad_files(tmp_path: Path):
+    app, settings, _, _ = make_app(tmp_path)
+    client = TestClient(app)
+    headers = auth(settings)
+    no_tactic = FmfCodec().encode(scenario(23))
+    bad_cases = (
+        {"content_base64": "not base64!"},
+        {"content_base64": base64.b64encode(b"not a fmf file").decode("ascii")},
+        {"content_base64": base64.b64encode(b"FMFV2" + (2).to_bytes(4, "big") + b"{}").decode("ascii")},
+        {"content_base64": base64.b64encode(no_tactic).decode("ascii")},
+        {"content_base64": ""},
+        {"name": "x"},
+        {"content_base64": 123},
+        {"content_base64": "Rk1GVjI=", "unknown": True},
+    )
+    for body in bad_cases:
+        response = client.post("/api/pools/import-fmf", json=body, headers=headers)
+        assert response.status_code == 400, body
+        assert response.json()["error"]["code"] == "validation_failed", body
+    assert client.get("/api/pools", headers=headers).json()["total"] == 0
+
+
+def test_pool_http_import_fmf_rejects_oversized_content(tmp_path: Path):
+    app, settings, _, _ = make_app(tmp_path)
+    client = TestClient(app)
+    headers = auth(settings)
+    oversized = base64.b64encode(b"\0" * (MAX_FMF_BYTES + 1)).decode("ascii")
+    response = client.post(
+        "/api/pools/import-fmf",
+        json={"content_base64": oversized},
+        headers=headers,
+    )
+    assert response.status_code == 400
+    assert response.json()["error"]["message"] == FMF_SIZE_ERROR
 
 
 def test_openapi_pagination_and_all_error_schemas(tmp_path: Path):

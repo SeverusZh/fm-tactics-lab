@@ -133,6 +133,7 @@ def register(app: FastAPI) -> None:
     )
     def list_jobs(
         status: Annotated[str | None, Query()] = None,
+        q: Annotated[str | None, Query(json_schema_extra={"type": "string", "maxLength": 100})] = None,
         limit: Annotated[
             str,
             Query(json_schema_extra={"type": "integer", "minimum": 1, "maximum": 256, "default": 50}),
@@ -146,6 +147,7 @@ def register(app: FastAPI) -> None:
         try:
             return app.state.jobs.list(
                 status=status,
+                q=q,
                 limit=_query_integer(limit, "limit", 1, 256),
                 offset=_query_integer(offset, "offset", 0, 2**31 - 1),
             )

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import sqlite3
 from pathlib import Path
 
@@ -8,6 +9,9 @@ import pytest
 from fm27lab.adapters.storage_sqlite.db import Database
 from fm27lab.adapters.storage_sqlite.repositories import DraftRepository
 from fm27lab.application.drafts import DraftService
+from fm27lab.application.tactics_validation import TacticalValidator
+from fm27lab.tests.test_tactics import catalog_with_instructions
+from fm27lab.tests.test_tactics import phases as tactic_phases
 
 
 def database(tmp_path: Path) -> Database:
@@ -170,3 +174,40 @@ def test_draft_service_pagination_and_update_delete_rollback(tmp_path: Path):
     assert service.get(ids[1]) is not None
     assert service.delete(ids[2]) is True
     assert service.get(ids[2]) is None
+
+
+class StubCatalog:
+    def __init__(self, document: dict | None):
+        self.document = document
+
+    def load_document(self) -> dict | None:
+        return self.document
+
+
+def phased_scenario() -> dict:
+    value = scenario()
+    for team_value in value["teams"]:
+        team_value["phases"] = copy.deepcopy(tactic_phases())
+    return value
+
+
+def test_draft_service_persists_normalized_instruction_groups(tmp_path: Path):
+    validator = TacticalValidator(StubCatalog(catalog_with_instructions()))
+    service = DraftService(DraftRepository(database(tmp_path)), validator=validator)
+    created = service.create("Draft", phased_scenario())
+    cells = created["scenario"]["teams"][0]["phases"][0]
+    assert cells[0]["instructions"] == {"8": 0, "14": 0}
+    assert cells[0]["target_player"] == 255
+    updated = service.update(created["id"], scenario=phased_scenario())
+    assert updated is not None
+    stored = updated["scenario"]["teams"][1]["phases"][1]
+    assert stored[0]["instructions"] == {"8": 0, "14": 0}
+
+
+def test_draft_service_rejects_invalid_instruction_groups(tmp_path: Path):
+    validator = TacticalValidator(StubCatalog(catalog_with_instructions()))
+    service = DraftService(DraftRepository(database(tmp_path)), validator=validator)
+    value = phased_scenario()
+    value["teams"][0]["phases"][0][0]["instructions"] = {"14": 34}
+    with pytest.raises(ValueError, match="对方名单序号"):
+        service.create("Draft", value)

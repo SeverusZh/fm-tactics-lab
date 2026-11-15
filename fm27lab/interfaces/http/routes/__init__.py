@@ -10,12 +10,14 @@ from fm27lab.interfaces.http.routes import (
     engine,
     experiments,
     fmf,
+    formations,
     jobs,
     pools,
     results,
     save_import,
     save_tactics,
     saves,
+    setpieces,
     settings,
     system,
     tactics,
@@ -29,6 +31,7 @@ def register_routes(app: FastAPI) -> None:
     tactics.register(app)
     pools.register(app)
     drafts.register(app)
+    formations.register(app)
     draft_attributes.register(app)
     fmf.register(app)
     jobs.register(app)
@@ -37,5 +40,6 @@ def register_routes(app: FastAPI) -> None:
     save_import.register(app)
     save_tactics.register(app)
     saves.register(app)
+    setpieces.register(app)
     artifacts.register(app)
     settings.register(app)

@@ -9,6 +9,7 @@ import pytest
 from fm27lab.adapters.engine_native.tactic_file import UNCONFIGURED_ERROR, TacticFileError, TacticPlan
 from fm27lab.adapters.save_fmsave.tactics import StoredTactic
 from fm27lab.application.save_tactics import (
+    POOL_UNAVAILABLE_ERROR,
     SAVE_MISSING_ERROR,
     SAVE_UNREADABLE_ERROR,
     TACTIC_MISSING_ERROR,
@@ -16,6 +17,7 @@ from fm27lab.application.save_tactics import (
     TACTIC_TEAM_ERROR,
     SaveTacticsService,
 )
+from fm27lab.application.tactic_export import EngineUnavailableError
 from fm27lab.config import Settings
 
 PLAN = TacticPlan(name="native", mentality=4, team_bits=0, mapping=tuple(range(11)), phases=((), ()))
@@ -113,6 +115,28 @@ class FakeAssets:
         return "assets"
 
 
+class FakeExporter:
+    def __init__(self, payload=b"fmf-bytes", error=None):
+        self.payload = payload
+        self.error = error
+        self.calls = []
+
+    def export(self, **kwargs):
+        self.calls.append(kwargs)
+        if self.error is not None:
+            raise self.error
+        return self.payload
+
+
+class FakePools:
+    def __init__(self):
+        self.calls = []
+
+    def add_from_scenario(self, scenario, name):
+        self.calls.append({"scenario": scenario, "name": name})
+        return {"id": "entry-1", "name": name, "weight": 1, "tactic": {}, "roster": None, "created_at": None}
+
+
 def make_service(
     tmp_path: Path,
     *,
@@ -133,6 +157,8 @@ def make_service(
         "parser": FakeParser(),
         "builder": FakeBuilder(),
         "assets": FakeAssets(),
+        "exporter": FakeExporter(),
+        "pools": FakePools(),
     }
     settings = Settings.create(
         data_dir=tmp_path / "data",
@@ -151,6 +177,8 @@ def make_service(
         parser=deps["parser"],
         assets_loader=deps["assets"],
         builder=deps["builder"],
+        pools=deps["pools"],
+        exporter=deps["exporter"],
     )
     return service, deps
 
@@ -393,3 +421,101 @@ def test_import_tactic_truncates_long_draft_name(tmp_path: Path):
     service.import_tactic("save-1", 0, name="x" * 200)
 
     assert deps["drafts"].calls[0]["name"] == "x" * 80
+
+
+def test_export_tactic_returns_archive_title_and_payload(tmp_path: Path):
+    service, deps = make_service(tmp_path, rows=(stored(0, "Direct"),), payloads={0: b"raw-stream"})
+
+    result = service.export_tactic("save-1", 0)
+
+    title, payload = result
+    assert title == "Direct"
+    assert payload == b"fmf-bytes"
+    call = deps["exporter"].calls[0]
+    assert call["name"] == "Direct"
+    assert call["scenario"] == {"teams": [{"name": "Home"}, {"name": "Away"}]}
+    assert call["engine_root"] == deps["settings"].engine_root
+    assert call["game_root"] == deps["settings"].game_root
+    assert deps["drafts"].calls == []
+
+
+def test_export_tactic_sanitizes_archive_title(tmp_path: Path):
+    service, _ = make_service(tmp_path, rows=(stored(0, "Direct/Plan"),), payloads={0: b"raw"})
+
+    title, _ = service.export_tactic("save-1", 0)
+
+    assert title == "DirectPlan"
+
+
+def test_export_tactic_returns_none_for_unknown_save(tmp_path: Path):
+    service, deps = make_service(tmp_path, rows=(stored(0),), payloads={0: b"raw"})
+
+    assert service.export_tactic("missing", 0) is None
+    assert deps["exporter"].calls == []
+
+
+def test_export_tactic_rejects_missing_tactic(tmp_path: Path):
+    service, _ = make_service(tmp_path, rows=(stored(0),), payloads={0: b"raw"})
+
+    with pytest.raises(ValueError, match=TACTIC_MISSING_ERROR):
+        service.export_tactic("save-1", 3)
+
+
+def test_export_tactic_requires_engine_roots(tmp_path: Path):
+    service, _ = make_service(tmp_path, rows=(stored(0),), payloads={0: b"raw"}, engine=False)
+
+    with pytest.raises(TacticFileError) as info:
+        service.export_tactic("save-1", 0)
+
+    assert str(info.value) == UNCONFIGURED_ERROR
+
+
+def test_export_tactic_propagates_exporter_unavailable(tmp_path: Path):
+    service, deps = make_service(tmp_path, rows=(stored(0),), payloads={0: b"raw"})
+    deps["exporter"].error = EngineUnavailableError("引擎资源缺失，无法导出战术")
+
+    with pytest.raises(EngineUnavailableError):
+        service.export_tactic("save-1", 0)
+
+
+def test_add_to_pool_creates_entry_from_save_tactic(tmp_path: Path):
+    service, deps = make_service(tmp_path, rows=(stored(0, "Direct"),), payloads={0: b"raw-stream"})
+
+    entry = service.add_to_pool("save-1", 0)
+
+    assert entry["id"] == "entry-1"
+    assert entry["name"] == "Direct"
+    call = deps["pools"].calls[0]
+    assert call["name"] == "Direct"
+    assert call["scenario"] == {"teams": [{"name": "Home"}, {"name": "Away"}]}
+    assert deps["drafts"].calls == []
+
+
+def test_add_to_pool_returns_none_for_unknown_save(tmp_path: Path):
+    service, deps = make_service(tmp_path, rows=(stored(0),), payloads={0: b"raw"})
+
+    assert service.add_to_pool("missing", 0) is None
+    assert deps["pools"].calls == []
+
+
+def test_add_to_pool_rejects_missing_tactic(tmp_path: Path):
+    service, _ = make_service(tmp_path, rows=(stored(0),), payloads={0: b"raw"})
+
+    with pytest.raises(ValueError, match=TACTIC_MISSING_ERROR):
+        service.add_to_pool("save-1", 2)
+
+
+def test_add_to_pool_requires_pool_service(tmp_path: Path):
+    service, _ = make_service(tmp_path, rows=(stored(0),), payloads={0: b"raw"})
+    service.pools = None
+
+    with pytest.raises(ValueError, match=POOL_UNAVAILABLE_ERROR):
+        service.add_to_pool("save-1", 0)
+
+
+def test_add_to_pool_checks_pool_before_save_lookup(tmp_path: Path):
+    service, _ = make_service(tmp_path, rows=(stored(0),), payloads={0: b"raw"})
+    service.pools = None
+
+    with pytest.raises(ValueError, match=POOL_UNAVAILABLE_ERROR):
+        service.add_to_pool("missing", 0)

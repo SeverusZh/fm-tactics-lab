@@ -155,6 +155,7 @@ class ServerQueueTests(unittest.TestCase):
         ids = [self.module.start_run(self.request())["id"] for _ in range(3)]
         self.wait_for(lambda: all(
             self.module.JOBS[job_id]["status"] == "complete" for job_id in ids))
+        self.wait_for(lambda: len(self.ends) == len(ids))
         self.assertFalse(self.overlap)
         self.assertEqual(self.starts, ids)
         self.assertEqual(self.ends, ids)

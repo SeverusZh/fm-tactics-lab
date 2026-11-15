@@ -60,13 +60,19 @@ class JobService:
     def get(self, job_id: str) -> dict[str, Any] | None:
         return self.repository.get(job_id)
 
-    def list(self, status: str | None = None, limit: int = 50, offset: int = 0) -> dict[str, Any]:
+    def list(
+        self,
+        status: str | None = None,
+        q: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> dict[str, Any]:
         if type(limit) is not int or not 1 <= limit <= 256:
             raise ValueError("limit 必须为 1–256 的整数")
         if type(offset) is not int or offset < 0:
             raise ValueError("offset 必须为非负整数")
-        items = self.repository.list(status=status, limit=limit, offset=offset)
-        total = self.repository.count(status=status)
+        items = self.repository.list(status=status, q=q, limit=limit, offset=offset)
+        total = self.repository.count(status=status, q=q)
         next_offset = offset + len(items)
         return {
             "items": items,

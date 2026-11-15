@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import hashlib
 from typing import Annotated
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Response
 from fastapi import Path as PathParameter
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -14,8 +15,15 @@ from fm27lab.application.save_tactics import (
     TACTIC_MISSING_ERROR,
     SaveTacticsService,
 )
-from fm27lab.interfaces.http.common import ErrorEnvelope, require_token
+from fm27lab.application.tactic_export import EngineUnavailableError
+from fm27lab.interfaces.http.common import (
+    ErrorEnvelope,
+    attachment_disposition,
+    require_token,
+)
 from fm27lab.interfaces.http.routes.drafts import DraftOutput
+from fm27lab.interfaces.http.routes.fmf import FMF_FORMAT_HEADER, FMF_V8_FORMAT
+from fm27lab.interfaces.http.routes.pools import PoolEntryOutput
 
 ENGINE_UNAVAILABLE_CODE = "engine_unavailable"
 VALIDATION_FAILED_CODE = "validation_failed"
@@ -70,17 +78,34 @@ def _not_found(message: str) -> HTTPException:
     )
 
 
-def _engine_unavailable() -> HTTPException:
+def _engine_unavailable(message: str = ENGINE_UNAVAILABLE_MESSAGE) -> HTTPException:
     return HTTPException(
         status_code=503,
-        detail={"code": ENGINE_UNAVAILABLE_CODE, "message": ENGINE_UNAVAILABLE_MESSAGE, "retriable": True},
+        detail={"code": ENGINE_UNAVAILABLE_CODE, "message": message, "retriable": True},
     )
+
+
+def _translated(error: Exception) -> HTTPException:
+    if isinstance(error, EngineUnavailableError):
+        return _engine_unavailable(str(error))
+    if isinstance(error, TacticFileError):
+        if str(error) == UNCONFIGURED_ERROR:
+            return _engine_unavailable()
+        return _validation_error(error)
+    if str(error) == TACTIC_MISSING_ERROR:
+        return _not_found(TACTIC_MISSING_ERROR)
+    return _validation_error(ValueError(str(error)))
 
 
 def _service(app: FastAPI) -> SaveTacticsService:
     service = getattr(app.state, "save_tactics", None)
     if service is None:
-        service = SaveTacticsService(app.state.saves, app.state.drafts, app.state.settings)
+        service = SaveTacticsService(
+            app.state.saves,
+            app.state.drafts,
+            app.state.settings,
+            pools=getattr(app.state, "pools", None),
+        )
         app.state.save_tactics = service
     return service
 
@@ -126,14 +151,68 @@ def register(app: FastAPI) -> None:
             raise _validation_error(ValueError("战术名称不能为空白"))
         try:
             draft = _service(app).import_tactic(save_id, tactic_index, name)
-        except TacticFileError as error:
-            if str(error) == UNCONFIGURED_ERROR:
-                raise _engine_unavailable() from error
-            raise _validation_error(error) from error
-        except ValueError as error:
-            if str(error) == TACTIC_MISSING_ERROR:
-                raise _not_found(TACTIC_MISSING_ERROR) from error
-            raise _validation_error(error) from error
+        except (TacticFileError, ValueError) as error:
+            raise _translated(error) from error
         if draft is None:
             raise _not_found(SAVE_NOT_FOUND_MESSAGE)
         return {"draft": draft}
+
+    @app.get(
+        "/api/saves/{save_id}/tactics/{tactic_index}/export.fmf",
+        responses={
+            200: {
+                "description": "存档战术 FMF 文件",
+                "content": {"application/octet-stream": {"schema": {"type": "string", "format": "binary"}}},
+            },
+            400: {"model": ErrorEnvelope},
+            401: {"model": ErrorEnvelope},
+            404: {"model": ErrorEnvelope},
+            503: {"model": ErrorEnvelope},
+        },
+    )
+    def export_save_tactic(
+        save_id: str,
+        tactic_index: Annotated[int, PathParameter(ge=0)],
+        _: None = Depends(require_token),
+    ):
+        try:
+            result = _service(app).export_tactic(save_id, tactic_index)
+        except (TacticFileError, ValueError) as error:
+            raise _translated(error) from error
+        if result is None:
+            raise _not_found(SAVE_NOT_FOUND_MESSAGE)
+        title, payload = result
+        digest = hashlib.sha256(payload).hexdigest()
+        return Response(
+            content=payload,
+            media_type="application/octet-stream",
+            headers={
+                "Content-Disposition": attachment_disposition(title, "tactic"),
+                "ETag": f'"{digest}"',
+                FMF_FORMAT_HEADER: FMF_V8_FORMAT,
+            },
+        )
+
+    @app.post(
+        "/api/saves/{save_id}/tactics/{tactic_index}/pool",
+        status_code=201,
+        response_model=PoolEntryOutput,
+        responses={
+            400: {"model": ErrorEnvelope},
+            401: {"model": ErrorEnvelope},
+            404: {"model": ErrorEnvelope},
+            503: {"model": ErrorEnvelope},
+        },
+    )
+    def add_save_tactic_to_pool(
+        save_id: str,
+        tactic_index: Annotated[int, PathParameter(ge=0)],
+        _: None = Depends(require_token),
+    ):
+        try:
+            entry = _service(app).add_to_pool(save_id, tactic_index)
+        except (TacticFileError, ValueError) as error:
+            raise _translated(error) from error
+        if entry is None:
+            raise _not_found(SAVE_NOT_FOUND_MESSAGE)
+        return entry

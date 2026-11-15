@@ -81,4 +81,11 @@ CAPABILITIES: tuple[Capability, ...] = (
         ("drafts", "undo-roster"),
         "drafts_undo_roster",
     ),
+    Capability(
+        "drafts_formation",
+        "按阵型模板重排场景草案阵型",
+        ("POST", "/api/drafts/{draft_id}/formation"),
+        ("drafts", "formation"),
+        "drafts_formation",
+    ),
 )

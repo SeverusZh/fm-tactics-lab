@@ -290,16 +290,24 @@ class ExperimentService:
                 for task in _tasks(running["config"])
                 if (task["variant"], task["seed"]) not in completed_pairs
             ]
-            if remaining:
+            if not remaining:
+                status = "completed"
+                final = self._job_service.update(job_id, {"status": "completed"})
+            elif event.is_set():
+                # 取消在派发前到达时不再启动引擎，避免引擎启动清空取消标记后仍跑完批次。
+                status = "cancelled"
+                final = self._job_service.update(job_id, {"status": "cancelled"})
+            else:
                 configure = getattr(self._engine, "configure_workers", None)
                 if callable(configure):
                     configure(int(running["workers"]))
-                self._engine.run_batch(remaining, on_result, on_progress)
-                status = "cancelled" if event.is_set() else "completed"
-                final = self._job_service.update(job_id, {"status": status})
-            else:
-                status = "completed"
-                final = self._job_service.update(job_id, {"status": "completed"})
+                if event.is_set():
+                    status = "cancelled"
+                    final = self._job_service.update(job_id, {"status": "cancelled"})
+                else:
+                    self._engine.run_batch(remaining, on_result, on_progress)
+                    status = "cancelled" if event.is_set() else "completed"
+                    final = self._job_service.update(job_id, {"status": status})
         except Exception as error:
             status = "error"
             final = self._finish_error(job_id, error)

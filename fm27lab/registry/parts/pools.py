@@ -21,10 +21,24 @@ CAPABILITIES: tuple[Capability, ...] = (
         "pools_create",
     ),
     Capability(
+        "pools_update",
+        "更新战术池条目的名称或权重",
+        ("PATCH", "/api/pools/{entry_id}"),
+        ("pools", "update"),
+        "pools_update",
+    ),
+    Capability(
         "pools_delete",
         "删除战术池条目",
         ("DELETE", "/api/pools/{entry_id}"),
         ("pools", "delete"),
         "pools_delete",
+    ),
+    Capability(
+        "pools_import_fmf",
+        "从 FMF 文件导入战术池条目",
+        ("POST", "/api/pools/import-fmf"),
+        ("pools", "import-fmf"),
+        "pools_import_fmf",
     ),
 )

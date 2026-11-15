@@ -25,7 +25,9 @@ class DraftService:
             raise ValueError("草案来源必须是对象")
         normalized = normalize_scenario(scenario)
         if self.validator is not None:
-            self.validator.validate(normalized)
+            checked = self.validator.validate(normalized)
+            if checked is not None:
+                normalized = checked
         return self.repository.add(
             {
                 "name": name,
@@ -70,7 +72,9 @@ class DraftService:
         if "source" in changes and not isinstance(changes["source"], Mapping):
             raise ValueError("草案来源必须是对象")
         if self.validator is not None and "scenario" in changes:
-            self.validator.validate(changes["scenario"])
+            checked = self.validator.validate(changes["scenario"])
+            if checked is not None:
+                changes["scenario"] = checked
         return self.repository.update(draft_id, changes)
 
     def delete(self, draft_id: str) -> bool:

@@ -23,11 +23,13 @@ pools_app = typer.Typer(add_completion=False, no_args_is_help=True, help="战术
 drafts_app = typer.Typer(add_completion=False, no_args_is_help=True, help="场景草案")
 jobs_app = typer.Typer(add_completion=False, no_args_is_help=True, help="实验任务")
 saves_app = typer.Typer(add_completion=False, no_args_is_help=True, help="存档库")
+setpieces_app = typer.Typer(add_completion=False, no_args_is_help=True, help="定位球配置")
 artifacts_app = typer.Typer(add_completion=False, no_args_is_help=True, help="产物")
 settings_app = typer.Typer(add_completion=False, no_args_is_help=True, help="设置")
 concurrency_app = typer.Typer(add_completion=False, no_args_is_help=True, help="并发资源预检")
 experiments_app = typer.Typer(add_completion=False, no_args_is_help=True, help="实验调度")
 catalog_app = typer.Typer(add_completion=False, no_args_is_help=True, help="运行时目录")
+formations_app = typer.Typer(add_completion=False, no_args_is_help=True, help="阵型模板")
 results_app = typer.Typer(add_completion=False, no_args_is_help=True, help="结果对比")
 system_app = typer.Typer(add_completion=False, no_args_is_help=True, help="宿主资源")
 
@@ -35,11 +37,13 @@ app.add_typer(pools_app, name="pools")
 app.add_typer(drafts_app, name="drafts")
 app.add_typer(jobs_app, name="jobs")
 app.add_typer(saves_app, name="saves")
+app.add_typer(setpieces_app, name="setpieces")
 app.add_typer(artifacts_app, name="artifacts")
 app.add_typer(settings_app, name="settings")
 app.add_typer(concurrency_app, name="concurrency")
 app.add_typer(experiments_app, name="experiments")
 app.add_typer(catalog_app, name="catalog")
+app.add_typer(formations_app, name="formations")
 app.add_typer(results_app, name="results")
 app.add_typer(system_app, name="system")
 
@@ -278,10 +282,35 @@ def pools_create(
     _emit(_invoke(ctx, lambda client: client.request_json("POST", "/api/pools", body=body)))
 
 
+@pools_app.command("update")
+def pools_update(
+    ctx: typer.Context,
+    entry_id: str = typer.Argument(..., help="条目 ID"),
+    name: str | None = typer.Option(None, "--name", help="条目名称"),
+    weight: int | None = typer.Option(None, "--weight", min=1, max=1000, help="抽取权重"),
+) -> None:
+    """更新战术池条目的名称或权重。"""
+    body = _changes(name=name, weight=weight)
+    _emit(_invoke(ctx, lambda client: client.request_json("PATCH", f"/api/pools/{entry_id}", body=body)))
+
+
 @pools_app.command("delete")
 def pools_delete(ctx: typer.Context, entry_id: str = typer.Argument(..., help="条目 ID")) -> None:
     """删除战术池条目。"""
     _delete(ctx, f"/api/pools/{entry_id}")
+
+
+@pools_app.command("import-fmf")
+def pools_import_fmf(
+    ctx: typer.Context,
+    file_path: str = typer.Option(..., "--file", help="FMF 文件路径"),
+    name: str | None = typer.Option(None, "--name", help="条目名称"),
+) -> None:
+    """从 FMF 文件导入战术池条目。"""
+    body: dict[str, Any] = {"content_base64": _base64_file(file_path, "FMF")}
+    if name is not None:
+        body["name"] = name
+    _emit(_invoke(ctx, lambda client: client.request_json("POST", "/api/pools/import-fmf", body=body)))
 
 
 @drafts_app.command("list")
@@ -641,6 +670,23 @@ def drafts_undo_roster(ctx: typer.Context, draft_id: str = typer.Argument(..., h
     _emit(_invoke(ctx, lambda client: client.request_json("POST", f"/api/drafts/{draft_id}/undo-roster")))
 
 
+@drafts_app.command("formation")
+def drafts_formation(
+    ctx: typer.Context,
+    draft_id: str = typer.Argument(..., help="草案 ID"),
+    formation_id: str = typer.Option(..., "--formation-id", help="阵型模板 ID"),
+    overwrite: bool = typer.Option(False, "--overwrite", help="重置职责与个人指令"),
+) -> None:
+    """按阵型模板重排场景草案阵型。"""
+    body = {"formation_id": formation_id, "overwrite": overwrite}
+    _emit(
+        _invoke(
+            ctx,
+            lambda client: client.request_json("POST", f"/api/drafts/{draft_id}/formation", body=body),
+        )
+    )
+
+
 @jobs_app.command("batch-action")
 def jobs_batch_actions(
     ctx: typer.Context,
@@ -952,6 +998,75 @@ def results_compare(
         ctx, lambda client: client.request_json("POST", "/api/results/compare", body=body)
     )
     typer.echo(json.dumps(value, ensure_ascii=False, indent=2))
+
+
+@setpieces_app.command("list")
+def setpieces_list(ctx: typer.Context) -> None:
+    """列出主客队定位球配置摘要。"""
+    _emit(_invoke(ctx, lambda client: client.request_json("GET", "/api/setpieces")))
+
+
+@setpieces_app.command("get")
+def setpieces_get(
+    ctx: typer.Context,
+    setpiece_id: str = typer.Argument(..., help="定位球条目 home 或 away"),
+) -> None:
+    """读取单队定位球配置。"""
+    _emit(_invoke(ctx, lambda client: client.request_json("GET", f"/api/setpieces/{setpiece_id}")))
+
+
+@setpieces_app.command("update")
+def setpieces_update(
+    ctx: typer.Context,
+    setpiece_id: str = typer.Argument(..., help="定位球条目 home 或 away"),
+    value: str = typer.Option(..., "--value", help="定位球配置 JSON 或 @文件路径"),
+) -> None:
+    """校验并保存定位球配置。"""
+    body = {"value": _json_value(value, "value")}
+    _emit(
+        _invoke(
+            ctx,
+            lambda client: client.request_json("PATCH", f"/api/setpieces/{setpiece_id}", body=body),
+        )
+    )
+
+
+@setpieces_app.command("import-file")
+def setpieces_import_file(
+    ctx: typer.Context,
+    setpiece_id: str = typer.Argument(..., help="定位球条目 home 或 away"),
+    file_path: str = typer.Option(..., "--file", help="定位球 JSON 文档路径"),
+) -> None:
+    """导入定位球 JSON 文档。"""
+    body = {"content_base64": _base64_file(file_path, "定位球文档")}
+    _emit(
+        _invoke(
+            ctx,
+            lambda client: client.request_json(
+                "POST", f"/api/setpieces/{setpiece_id}/import-file", body=body
+            ),
+        )
+    )
+
+
+@setpieces_app.command("export-file")
+def setpieces_export_file(
+    ctx: typer.Context,
+    setpiece_id: str = typer.Argument(..., help="定位球条目 home 或 away"),
+    output: Path = typer.Option(..., "--output", help="写入的文件路径"),
+) -> None:
+    """导出定位球 JSON 文档。"""
+    _download(
+        ctx,
+        lambda client: client.request_bytes("GET", f"/api/setpieces/{setpiece_id}/export-file"),
+        output,
+    )
+
+
+@formations_app.command("list")
+def formations_list(ctx: typer.Context) -> None:
+    """列出内置阵型模板。"""
+    _emit(_invoke(ctx, lambda client: client.request_json("GET", "/api/formations")))
 
 
 def main() -> None:

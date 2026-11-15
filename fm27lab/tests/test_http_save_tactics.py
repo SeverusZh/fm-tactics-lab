@@ -24,9 +24,21 @@ from fm27lab.interfaces.http.app import create_app
 from fm27lab.tests.test_http_drafts import auth
 from fm27lab.tests.test_http_drafts import scenario as draft_scenario
 from fm27lab.tests.test_http_health import make_app
+from fm27lab.tests.test_tactics_validation import phases as tactic_phases
 
 LIST_PATH = "/api/saves/{save_id}/tactics"
 IMPORT_PATH = "/api/saves/{save_id}/tactics/{tactic_index}/import"
+EXPORT_PATH = "/api/saves/{save_id}/tactics/{tactic_index}/export.fmf"
+POOL_PATH = "/api/saves/{save_id}/tactics/{tactic_index}/pool"
+EXPORTED = ("Direct", b"fmf-bytes")
+ENTRY = {
+    "id": "entry-1",
+    "name": "Direct",
+    "weight": 1,
+    "tactic": {},
+    "roster": None,
+    "created_at": "2026-01-01T00:00:00Z",
+}
 ERROR_FIELDS = {"code", "message", "details", "retriable", "retry_after_seconds"}
 ITEMS = [
     {
@@ -62,10 +74,12 @@ ROW = StoredTactic(
 
 
 class FakeService:
-    def __init__(self, *, items=None, draft=None, error=None):
+    def __init__(self, *, items=None, draft=None, error=None, exported=None, entry=None):
         self.items = items
         self.draft = draft
         self.error = error
+        self.exported = exported
+        self.entry = entry
         self.calls = []
 
     def list_tactics(self, save_id):
@@ -79,6 +93,28 @@ class FakeService:
         if self.error is not None:
             raise self.error
         return self.draft
+
+    def export_tactic(self, save_id, tactic_index):
+        self.calls.append(("export", save_id, tactic_index))
+        if self.error is not None:
+            raise self.error
+        return self.exported
+
+    def add_to_pool(self, save_id, tactic_index):
+        self.calls.append(("pool", save_id, tactic_index))
+        if self.error is not None:
+            raise self.error
+        return self.entry
+
+
+class FakeExporter:
+    def __init__(self, payload: bytes = b"fmf-bytes"):
+        self.payload = payload
+        self.calls = []
+
+    def export(self, **kwargs):
+        self.calls.append(kwargs)
+        return self.payload
 
 
 def make_client(tmp_path: Path, service=None):
@@ -96,7 +132,18 @@ def assert_error(response, status: int, code: str) -> dict:
     return error
 
 
-def make_integration_client(tmp_path: Path, *, engine: bool = True):
+def save_scenario(assets=None, plan=None, *, tactic_name=None):
+    value = draft_scenario()
+    home = value["teams"][0]
+    home["tactic_name"] = "Direct"
+    home["mentality"] = 5
+    home["instructions"] = {"1": 3}
+    home["native_extra_team_bits"] = "0"
+    home["phases"] = [list(phase) for phase in tactic_phases()]
+    return value
+
+
+def make_integration_client(tmp_path: Path, *, engine: bool = True, builder=None):
     settings = Settings.create(
         data_dir=tmp_path / "data",
         token="c" * 64,
@@ -117,7 +164,9 @@ def make_integration_client(tmp_path: Path, *, engine: bool = True):
         stream_reader=lambda path, index: b"raw-stream",
         parser=lambda payload, **kwargs: PLAN,
         assets_loader=lambda root: object(),
-        builder=lambda assets, plan, tactic_name=None: draft_scenario(),
+        builder=builder or (lambda assets, plan, tactic_name=None: draft_scenario()),
+        pools=app.state.pools,
+        exporter=FakeExporter(),
     )
     app.state.save_tactics = service
     return client, settings
@@ -352,6 +401,10 @@ def test_save_tactics_http_openapi_documents_paths(tmp_path: Path):
 
     assert LIST_PATH in document["paths"]
     assert IMPORT_PATH in document["paths"]
+    assert EXPORT_PATH in document["paths"]
+    assert POOL_PATH in document["paths"]
+    assert "get" in document["paths"][EXPORT_PATH]
+    assert "post" in document["paths"][POOL_PATH]
     schemas = document["components"]["schemas"]
     for name in (
         "SaveTacticImportInput",
@@ -449,3 +502,166 @@ def test_save_tactics_http_reports_missing_save_file_integration(tmp_path: Path)
 
     error = assert_error(response, 400, "validation_failed")
     assert error["message"] == SAVE_MISSING_ERROR
+
+
+def test_save_tactic_export_and_pool_require_token(tmp_path: Path):
+    client, _ = make_client(tmp_path)
+
+    export = client.get(EXPORT_PATH.format(save_id="save-1", tactic_index=0))
+    pool = client.post(POOL_PATH.format(save_id="save-1", tactic_index=0))
+
+    assert export.status_code == 401
+    assert pool.status_code == 401
+    assert export.headers["www-authenticate"] == "Bearer"
+    assert pool.headers["www-authenticate"] == "Bearer"
+
+
+def test_save_tactic_export_returns_fmf_download(tmp_path: Path):
+    service = FakeService(exported=EXPORTED)
+    client, settings = make_client(tmp_path, service)
+
+    response = client.get(EXPORT_PATH.format(save_id="save-1", tactic_index=0), headers=auth(settings))
+
+    assert response.status_code == 200
+    assert response.content == b"fmf-bytes"
+    assert response.headers["content-type"] == "application/octet-stream"
+    assert response.headers["content-disposition"] == 'attachment; filename="Direct.fmf"'
+    assert response.headers["etag"] == f'"{hashlib.sha256(b"fmf-bytes").hexdigest()}"'
+    assert response.headers["x-fmf-format"] == "fmfv8"
+    assert service.calls == [("export", "save-1", 0)]
+
+
+def test_save_tactic_export_keeps_single_fmf_suffix(tmp_path: Path):
+    service = FakeService(exported=("Direct.fmf", b"payload"))
+    client, settings = make_client(tmp_path, service)
+
+    response = client.get(EXPORT_PATH.format(save_id="save-1", tactic_index=0), headers=auth(settings))
+
+    assert response.status_code == 200
+    assert response.headers["content-disposition"] == 'attachment; filename="Direct.fmf"'
+
+
+def test_save_tactic_export_escapes_non_ascii_filename(tmp_path: Path):
+    service = FakeService(exported=("我的战术", b"payload"))
+    client, settings = make_client(tmp_path, service)
+
+    response = client.get(EXPORT_PATH.format(save_id="save-1", tactic_index=0), headers=auth(settings))
+
+    assert response.status_code == 200
+    disposition = response.headers["content-disposition"]
+    assert 'filename="tactic.fmf"' in disposition
+    assert "filename*=UTF-8''" in disposition
+
+
+def test_save_tactic_export_maps_unknown_save_to_not_found(tmp_path: Path):
+    service = FakeService(exported=None)
+    client, settings = make_client(tmp_path, service)
+
+    error = assert_error(
+        client.get(EXPORT_PATH.format(save_id="missing", tactic_index=0), headers=auth(settings)),
+        404,
+        "not_found",
+    )
+
+    assert error["message"] == "存档不存在"
+
+
+def test_save_tactic_export_reports_unconfigured_engine(tmp_path: Path):
+    service = FakeService(error=TacticFileError(UNCONFIGURED_ERROR))
+    client, settings = make_client(tmp_path, service)
+
+    response = client.get(EXPORT_PATH.format(save_id="save-1", tactic_index=0), headers=auth(settings))
+
+    error = assert_error(response, 503, "engine_unavailable")
+    assert error["message"] == ENGINE_UNAVAILABLE_MESSAGE
+    assert error["retriable"] is True
+
+
+def test_save_tactic_export_reports_export_failure(tmp_path: Path):
+    service = FakeService(error=ValueError("战术数据不完整，无法导出"))
+    client, settings = make_client(tmp_path, service)
+
+    response = client.get(EXPORT_PATH.format(save_id="save-1", tactic_index=0), headers=auth(settings))
+
+    error = assert_error(response, 400, "validation_failed")
+    assert error["message"] == "战术数据不完整，无法导出"
+
+
+def test_save_tactic_pool_creates_entry(tmp_path: Path):
+    service = FakeService(entry=ENTRY)
+    client, settings = make_client(tmp_path, service)
+
+    response = client.post(POOL_PATH.format(save_id="save-1", tactic_index=0), headers=auth(settings))
+
+    assert response.status_code == 201
+    assert response.json() == ENTRY
+    assert service.calls == [("pool", "save-1", 0)]
+
+
+def test_save_tactic_pool_maps_unknown_save_to_not_found(tmp_path: Path):
+    service = FakeService(entry=None)
+    client, settings = make_client(tmp_path, service)
+
+    error = assert_error(
+        client.post(POOL_PATH.format(save_id="missing", tactic_index=0), headers=auth(settings)),
+        404,
+        "not_found",
+    )
+
+    assert error["message"] == "存档不存在"
+
+
+def test_save_tactic_pool_reports_missing_tactic(tmp_path: Path):
+    service = FakeService(error=ValueError(TACTIC_MISSING_ERROR))
+    client, settings = make_client(tmp_path, service)
+
+    error = assert_error(
+        client.post(POOL_PATH.format(save_id="save-1", tactic_index=2), headers=auth(settings)),
+        404,
+        "not_found",
+    )
+
+    assert error["message"] == TACTIC_MISSING_ERROR
+
+
+def test_save_tactic_pool_reports_unavailable_pool(tmp_path: Path):
+    service = FakeService(error=ValueError("客队战术池不可用"))
+    client, settings = make_client(tmp_path, service)
+
+    error = assert_error(
+        client.post(POOL_PATH.format(save_id="save-1", tactic_index=0), headers=auth(settings)),
+        400,
+        "validation_failed",
+    )
+
+    assert error["message"] == "客队战术池不可用"
+
+
+def test_save_tactic_export_and_pool_round_trip_with_real_services(tmp_path: Path):
+    client, settings = make_integration_client(tmp_path, builder=save_scenario)
+    source = tmp_path / "save.fm"
+    source.write_bytes(b"save-bytes")
+    save = create_save(client, settings, source)
+
+    exported = client.get(
+        EXPORT_PATH.format(save_id=save["id"], tactic_index=0), headers=auth(settings)
+    )
+    assert exported.status_code == 200, exported.text
+    assert exported.content == b"fmf-bytes"
+    assert exported.headers["content-disposition"] == 'attachment; filename="Direct.fmf"'
+
+    pooled = client.post(POOL_PATH.format(save_id=save["id"], tactic_index=0), headers=auth(settings))
+    assert pooled.status_code == 201, pooled.text
+    entry = pooled.json()
+    assert entry["name"] == "Direct"
+    assert entry["weight"] == 1
+    home = save_scenario()["teams"][0]
+    assert entry["tactic"]["tactic_name"] == "Direct"
+    assert entry["tactic"]["mentality"] == 5
+    assert entry["tactic"]["instructions"] == {"1": 3}
+    assert entry["tactic"]["native_extra_team_bits"] == "0"
+    assert entry["tactic"]["phases"] == home["phases"]
+
+    listed = client.get("/api/pools", headers=auth(settings))
+    assert listed.status_code == 200
+    assert [item["id"] for item in listed.json()["items"]] == [entry["id"]]

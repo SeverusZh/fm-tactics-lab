@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hmac
 from typing import Annotated, Any
+from urllib.parse import quote
 
 from fastapi import Depends, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -53,6 +54,23 @@ def require_token(
             detail={"code": "unauthorized", "message": "invalid bearer token", "retriable": False},
             headers={"WWW-Authenticate": "Bearer"},
         )
+
+
+def attachment_filename(name: str, fallback: str, suffix: str = ".fmf") -> str:
+    cleaned = "".join(char for char in name if char.isprintable() and char not in '\\/:*?"<>|').strip(" .")
+    if cleaned.lower().endswith(suffix):
+        cleaned = cleaned[: -len(suffix)].strip(" .")
+    return (cleaned or fallback) + suffix
+
+
+def attachment_disposition(name: str, fallback: str, suffix: str = ".fmf") -> str:
+    filename = attachment_filename(name, fallback, suffix)
+    if filename.isascii() and '"' not in filename and "\\" not in filename:
+        return f'attachment; filename="{filename}"'
+    plain = "".join(
+        char for char in fallback if char.isascii() and char.isprintable() and char not in '\\/:*?"<>|'
+    ).strip(" .") or "attachment"
+    return f'attachment; filename="{plain}{suffix}"; filename*=UTF-8\'\'' + quote(filename, safe="")
 
 
 def _query_integer(value: str, name: str, low: int, high: int) -> int:

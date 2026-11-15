@@ -17,7 +17,12 @@ from fm27lab.adapters.fmf import FmfCodec
 from fm27lab.adapters.save_fmsave import FmsaveReader
 from fm27lab.adapters.storage_sqlite.db import Database
 from fm27lab.adapters.storage_sqlite.idempotency import IdempotencyRepository
-from fm27lab.adapters.storage_sqlite.repositories import DraftRepository, JobRepository, PoolRepository
+from fm27lab.adapters.storage_sqlite.repositories import (
+    DraftRepository,
+    JobRepository,
+    PoolRepository,
+    SettingsRepository,
+)
 from fm27lab.adapters.storage_sqlite.saves import SavesRepository
 from fm27lab.application.catalog import CatalogService
 from fm27lab.application.draft_attributes import DraftAttributeService
@@ -25,11 +30,14 @@ from fm27lab.application.drafts import DraftService
 from fm27lab.application.events import EventPublisher
 from fm27lab.application.experiment_material import ExperimentMaterializer
 from fm27lab.application.experiments import ExperimentService
+from fm27lab.application.formations import FormationsService
 from fm27lab.application.idempotency import IdempotencyService
 from fm27lab.application.jobs import JobService
 from fm27lab.application.pools import PoolService
 from fm27lab.application.save_import import SaveImportService
 from fm27lab.application.saves import SavesService
+from fm27lab.application.setpieces import SetpiecesService
+from fm27lab.application.settings import SettingsService
 from fm27lab.application.tactics_validation import TacticalValidator
 from fm27lab.config import Settings
 from fm27lab.interfaces.http.common import (
@@ -102,6 +110,8 @@ def create_app(
     catalog_service: CatalogService | None = None,
     engine: EnginePort | None = None,
     tactics_validator: TacticalValidator | None = None,
+    formations_service: FormationsService | None = None,
+    setpieces_service: SetpiecesService | None = None,
 ) -> FastAPI:
     app = FastAPI(
         title="FM Tactics Lab Sidecar",
@@ -125,6 +135,10 @@ def create_app(
         validator=tactics_validator,
     )
     app.state.draft_attributes = draft_attribute_service or DraftAttributeService(app.state.drafts)
+    app.state.formations = formations_service or FormationsService(
+        app.state.drafts,
+        catalog_repository,
+    )
     app.state.fmf_service = fmf_service or FmfService(FmfCodec(), app.state.drafts, settings)
     app.state.jobs = job_service or JobService(JobRepository(database), publisher=app.state.events)
     if experiment_service is not None:
@@ -164,6 +178,10 @@ def create_app(
         app.state.saves,
         app.state.drafts,
         FmsaveReader,
+    )
+    app.state.setpieces = setpieces_service or SetpiecesService(
+        SettingsService(SettingsRepository(database)),
+        settings,
     )
     app.state.catalog_service = catalog_service or CatalogService(catalog_repository)
     app.state.idempotency = idempotency_service or IdempotencyService(IdempotencyRepository(database))

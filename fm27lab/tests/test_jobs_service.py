@@ -130,6 +130,36 @@ def test_list_filters_by_status_and_validates_paging(tmp_path: Path):
         jobs.list(status="unknown")
 
 
+def test_list_filters_by_query_and_keeps_pagination_semantics(tmp_path: Path):
+    jobs = service(tmp_path)
+    jobs.create("experiment", job_id="job-alpha-1", name="种子扫描 A")
+    jobs.create("experiment", job_id="job-alpha-2", name="种子扫描 B")
+    jobs.create("experiment", job_id="job-beta", name="其他实验")
+    jobs.update("job-alpha-2", {"status": "running"})
+    filtered = jobs.list(q="种子")
+    assert [item["id"] for item in filtered["items"]] == ["job-alpha-2", "job-alpha-1"]
+    assert filtered["total"] == 2
+    assert filtered["next_offset"] is None
+    page = jobs.list(q="种子", limit=1)
+    assert [item["id"] for item in page["items"]] == ["job-alpha-2"]
+    assert page["total"] == 2
+    assert page["next_offset"] == 1
+    tail = jobs.list(q="种子", limit=1, offset=1)
+    assert [item["id"] for item in tail["items"]] == ["job-alpha-1"]
+    assert tail["total"] == 2
+    assert tail["next_offset"] is None
+    combined = jobs.list(status="running", q="种子")
+    assert [item["id"] for item in combined["items"]] == ["job-alpha-2"]
+    assert combined["total"] == 1
+    assert [item["id"] for item in jobs.list(q="beta")["items"]] == ["job-beta"]
+    assert jobs.list(q="missing") == {"items": [], "total": 0, "next_offset": None}
+    assert jobs.list(q="   ")["total"] == 3
+    with pytest.raises(ValueError, match="关键字"):
+        jobs.list(q="x" * 101)
+    with pytest.raises(ValueError, match="关键字"):
+        jobs.list(q=["种子"])
+
+
 @pytest.mark.parametrize(
     ("source", "target"),
     [

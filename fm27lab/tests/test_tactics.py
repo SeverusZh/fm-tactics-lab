@@ -210,6 +210,73 @@ def test_context_must_cover_four_buckets_and_all_positions():
         Catalog.from_mapping(missing_position)
 
 
+def catalog_with_instructions():
+    document = catalog_data()
+    document["player_instructions"] = [
+        {"id": 14, "label": "指定盯防", "options": [{"id": 34}, {"id": 35}, {"id": 0}]},
+        {"id": 8, "label": "传球风险", "options": [{"id": 0}, {"id": 3}, {"id": 4}]},
+    ]
+    return document
+
+
+def test_catalog_rejects_malformed_instruction_groups():
+    duplicate = catalog_with_instructions()
+    duplicate["player_instructions"].append({"id": 14, "options": [{"id": 0}]})
+    with pytest.raises(ValueError, match="个人指令组重复"):
+        Catalog.from_mapping(duplicate)
+    empty = catalog_with_instructions()
+    empty["player_instructions"][0]["options"] = []
+    with pytest.raises(ValueError, match="个人指令选项"):
+        Catalog.from_mapping(empty)
+    repeated = catalog_with_instructions()
+    repeated["player_instructions"][0]["options"] = [{"id": 0}, {"id": 0}]
+    with pytest.raises(ValueError, match="个人指令选项重复"):
+        Catalog.from_mapping(repeated)
+
+
+def test_instruction_groups_fill_defaults_and_check_options():
+    catalog = Catalog.from_mapping(catalog_with_instructions())
+    result = validate_phases(phases(), catalog)
+    assert result[0][0]["instructions"] == {"8": 0, "14": 0}
+    asserted = phases()
+    asserted[0][0]["instructions"] = {"8": 4}
+    assert validate_phases(asserted, catalog)[0][0]["instructions"] == {"8": 4, "14": 0}
+    unknown = phases()
+    unknown[0][0]["instructions"] = {"8": 5}
+    with pytest.raises(ValueError, match="个人指令选项"):
+        validate_phases(unknown, catalog)
+
+
+def test_instruction_groups_drop_unknown_keys():
+    catalog = Catalog.from_mapping(catalog_with_instructions())
+    value = phases()
+    value[0][0]["instructions"] = {"99": 7}
+    assert validate_phases(value, catalog)[0][0]["instructions"] == {"8": 0, "14": 0}
+
+
+def test_target_rules_follow_instruction_group():
+    catalog = Catalog.from_mapping(catalog_with_instructions())
+    missing_player = phases()
+    missing_player[0][0]["instructions"] = {"14": 34}
+    with pytest.raises(ValueError, match="对方名单序号"):
+        validate_phases(missing_player, catalog)
+    missing_position = phases()
+    missing_position[0][0]["instructions"] = {"14": 35}
+    missing_position[0][0]["target_player"] = 3
+    with pytest.raises(ValueError, match="选择位置"):
+        validate_phases(missing_position, catalog)
+    unknown_mask = phases()
+    unknown_mask[0][0]["target_position"] = 7
+    with pytest.raises(ValueError, match="盯防位置"):
+        validate_phases(unknown_mask, catalog)
+    valid = phases()
+    valid[0][0]["instructions"] = {"14": 34}
+    valid[0][0]["target_player"] = 3
+    result = validate_phases(valid, catalog)
+    assert result[0][0]["instructions"]["14"] == 34
+    assert result[0][0]["target_player"] == 3
+
+
 def test_missing_cell_fields_use_documented_defaults():
     catalog = Catalog.from_mapping(catalog_data())
     value = phases()

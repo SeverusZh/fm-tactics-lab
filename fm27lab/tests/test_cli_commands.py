@@ -92,6 +92,8 @@ def test_root_help_lists_command_groups():
         "experiments",
         "catalog",
         "results",
+        "setpieces",
+        "formations",
         "system",
     ):
         assert name in result.stdout, name
@@ -100,7 +102,7 @@ def test_root_help_lists_command_groups():
 def test_pools_help_lists_crud_commands():
     result = CliRunner().invoke(cli.app, ["pools", "--help"])
     assert result.exit_code == 0, result.output
-    for name in ("list", "get", "create", "delete"):
+    for name in ("list", "get", "create", "update", "delete", "import-fmf"):
         assert name in result.stdout, name
 
 
@@ -119,6 +121,7 @@ def test_drafts_help_lists_crud_commands():
         "import-fmf-file",
         "apply-roster",
         "undo-roster",
+        "formation",
     ):
         assert name in result.stdout, name
 
@@ -247,6 +250,63 @@ def test_pools_create_omits_optional_body_fields(monkeypatch):
     result, fake = invoke(monkeypatch, ["pools", "create", "--name", "X", "--tactic", "{}"], [{"id": "p1"}])
     assert result.exit_code == 0, result.output
     assert fake.calls[0]["body"] == {"name": "X", "weight": 1, "tactic": {}}
+
+
+def test_pools_update_patches_changed_fields(monkeypatch):
+    updated = {"id": "p1", "name": "改名", "weight": 5}
+    result, fake = invoke(
+        monkeypatch,
+        ["pools", "update", "p1", "--name", "改名", "--weight", "5"],
+        [updated],
+    )
+    assert result.exit_code == 0, result.output
+    assert parse_output(result) == updated
+    call = fake.calls[0]
+    assert (call["method"], call["path"]) == ("PATCH", "/api/pools/p1")
+    assert call["body"] == {"name": "改名", "weight": 5}
+
+
+def test_pools_update_requires_a_field(monkeypatch):
+    result, fake = invoke(monkeypatch, ["pools", "update", "p1"])
+    assert result.exit_code == 2
+    assert fake.calls == []
+    assert "至少需要提供一项更新字段" in result.stderr
+
+
+def test_pools_import_fmf_posts_base64_content(monkeypatch, tmp_path):
+    path = tmp_path / "tactic.fmf"
+    content = b"FMFV2payload"
+    path.write_bytes(content)
+    expected = {"items": [{"id": "p1"}], "total": 1}
+    result, fake = invoke(monkeypatch, ["pools", "import-fmf", "--file", str(path)], [expected])
+    assert result.exit_code == 0, result.output
+    assert parse_output(result) == expected
+    call = fake.calls[0]
+    assert (call["method"], call["path"]) == ("POST", "/api/pools/import-fmf")
+    assert call["body"] == {"content_base64": base64.b64encode(content).decode("ascii")}
+
+
+def test_pools_import_fmf_sends_optional_name(monkeypatch, tmp_path):
+    path = tmp_path / "tactic.fmf"
+    path.write_bytes(b"FMFV2")
+    result, fake = invoke(
+        monkeypatch,
+        ["pools", "import-fmf", "--file", str(path), "--name", "导入"],
+        [{"items": [], "total": 0}],
+    )
+    assert result.exit_code == 0, result.output
+    assert fake.calls[0]["body"] == {
+        "content_base64": base64.b64encode(b"FMFV2").decode("ascii"),
+        "name": "导入",
+    }
+
+
+def test_pools_import_fmf_rejects_missing_file(monkeypatch, tmp_path):
+    missing = tmp_path / "missing.fmf"
+    result, fake = invoke(monkeypatch, ["pools", "import-fmf", "--file", str(missing)])
+    assert result.exit_code == 2
+    assert fake.calls == []
+    assert "无法读取" in result.stderr
 
 
 def test_pools_delete_reports_deleted(monkeypatch):
@@ -1068,6 +1128,46 @@ def test_drafts_undo_roster_requires_draft_id(monkeypatch):
     result, fake = invoke(monkeypatch, ["drafts", "undo-roster"])
     assert result.exit_code == 2
     assert fake.calls == []
+
+
+def test_drafts_formation_posts_body(monkeypatch):
+    payload = {"formation_id": "4-2-3-1", "scenario": {"schema": 3, "teams": []}, "notes": []}
+    result, fake = invoke(
+        monkeypatch,
+        ["drafts", "formation", "d1", "--formation-id", "4-2-3-1", "--overwrite"],
+        [payload],
+    )
+    assert result.exit_code == 0, result.output
+    assert parse_output(result) == payload
+    assert fake.calls == [
+        {
+            "method": "POST",
+            "path": "/api/drafts/d1/formation",
+            "body": {"formation_id": "4-2-3-1", "overwrite": True},
+            "query": None,
+        }
+    ]
+
+
+def test_drafts_formation_defaults_overwrite_to_false(monkeypatch):
+    payload = {"formation_id": "4-4-2", "scenario": {}, "notes": []}
+    result, fake = invoke(monkeypatch, ["drafts", "formation", "d1", "--formation-id", "4-4-2"], [payload])
+    assert result.exit_code == 0, result.output
+    assert fake.calls[0]["body"] == {"formation_id": "4-4-2", "overwrite": False}
+
+
+def test_drafts_formation_requires_formation_id(monkeypatch):
+    result, fake = invoke(monkeypatch, ["drafts", "formation", "d1"])
+    assert result.exit_code == 2
+    assert fake.calls == []
+
+
+def test_formations_list_requests_templates(monkeypatch):
+    payload = {"formations": [{"id": "4-4-2", "name": "4-4-2", "phases": [[], []]}], "editing": None}
+    result, fake = invoke(monkeypatch, ["formations", "list"], [payload])
+    assert result.exit_code == 0, result.output
+    assert parse_output(result) == payload
+    assert fake.calls == [{"method": "GET", "path": "/api/formations", "body": None, "query": None}]
 
 
 def test_jobs_batch_actions_posts_action_and_ids(monkeypatch):
@@ -2023,6 +2123,95 @@ def test_catalog_show_maps_server_error_to_exit_1(monkeypatch):
     )
     assert result.exit_code == 1
     assert "internal_error" in result.stderr
+
+
+def test_setpieces_help_lists_commands():
+    result = CliRunner().invoke(cli.app, ["setpieces", "--help"])
+    assert result.exit_code == 0, result.output
+    for name in ("list", "get", "update", "import-file", "export-file"):
+        assert name in result.stdout, name
+
+
+def test_setpieces_list_requests_collection(monkeypatch):
+    payload = {"catalog": {"types": []}, "setpieces": []}
+    result, fake = invoke(monkeypatch, ["setpieces", "list"], [payload])
+    assert result.exit_code == 0, result.output
+    assert parse_output(result) == payload
+    assert fake.calls == [{"method": "GET", "path": "/api/setpieces", "body": None, "query": None}]
+
+
+def test_setpieces_get_requests_entry_by_id(monkeypatch):
+    payload = {"setpiece_id": "home", "value": {"throw_styles": [0, 1, 0]}}
+    result, fake = invoke(monkeypatch, ["setpieces", "get", "home"], [payload])
+    assert result.exit_code == 0, result.output
+    assert parse_output(result) == payload
+    assert fake.calls == [{"method": "GET", "path": "/api/setpieces/home", "body": None, "query": None}]
+
+
+def test_setpieces_update_sends_value_body(monkeypatch):
+    value = {"throw_styles": [0, 1, 0]}
+    payload = {"setpiece_id": "home", "value": value}
+    result, fake = invoke(
+        monkeypatch,
+        ["setpieces", "update", "home", "--value", json.dumps(value)],
+        [payload],
+    )
+    assert result.exit_code == 0, result.output
+    assert parse_output(result) == payload
+    assert fake.calls == [
+        {"method": "PATCH", "path": "/api/setpieces/home", "body": {"value": value}, "query": None}
+    ]
+
+
+def test_setpieces_import_file_posts_base64_document(monkeypatch, fake_data_dir: Path):
+    document = write_bytes(fake_data_dir / "setpieces.json", b'{"schema": "fm27-setpiece-document-v1"}')
+    payload = {"setpiece_id": "home", "value": {}}
+    result, fake = invoke(
+        monkeypatch,
+        ["setpieces", "import-file", "home", "--file", str(document)],
+        [payload],
+    )
+    assert result.exit_code == 0, result.output
+    assert parse_output(result) == payload
+    assert fake.calls == [
+        {
+            "method": "POST",
+            "path": "/api/setpieces/home/import-file",
+            "body": {"content_base64": encode_base64(document.read_bytes())},
+            "query": None,
+        }
+    ]
+
+
+def test_setpieces_import_file_rejects_unreadable_document(monkeypatch, fake_data_dir: Path):
+    result, fake = invoke(
+        monkeypatch,
+        ["setpieces", "import-file", "home", "--file", str(fake_data_dir / "missing.json")],
+    )
+    assert result.exit_code == 2
+    assert fake.calls == []
+
+
+def test_setpieces_export_file_downloads_document(monkeypatch, fake_data_dir: Path):
+    payload = b'{"schema": "fm27-setpiece-document-v1"}'
+    output = fake_data_dir / "setpieces-home.json"
+    result, fake = invoke(
+        monkeypatch,
+        ["setpieces", "export-file", "home", "--output", str(output)],
+        download=payload,
+    )
+    assert result.exit_code == 0, result.output
+    assert output.read_bytes() == payload
+    assert parse_output(result) == {"path": str(output), "bytes": len(payload)}
+    assert fake.calls == [
+        {"method": "GET", "path": "/api/setpieces/home/export-file", "body": None, "query": None}
+    ]
+
+
+def test_setpieces_export_file_requires_output_option(monkeypatch):
+    result, fake = invoke(monkeypatch, ["setpieces", "export-file", "home"])
+    assert result.exit_code == 2
+    assert fake.calls == []
 
 
 ROOT = Path(__file__).resolve().parents[2]

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 PHASE_COUNT = 2
@@ -33,6 +33,7 @@ class Catalog:
     duties: tuple[str, ...]
     eligibility: Mapping[tuple[str, int], frozenset[str]]
     eligibility_context: Mapping[tuple[str, str, int], frozenset[str]]
+    player_instructions: Mapping[str, tuple[int, ...]] = field(default_factory=dict)
 
     @classmethod
     def from_mapping(cls, value: Mapping[str, Any]) -> Catalog:
@@ -142,7 +143,14 @@ class Catalog:
                         if role_phases[role_id] != phase:
                             raise ValueError("catalog 角色资格上下文阶段不一致")
                     context_eligibility[(context_key, position_id, phase)] = frozenset(role_ids)
-        return cls(tuple(positions), tuple(roles), duties, eligibility, context_eligibility)
+        return cls(
+            tuple(positions),
+            tuple(roles),
+            duties,
+            eligibility,
+            context_eligibility,
+            _instruction_groups(value.get("player_instructions", [])),
+        )
 
     def position(self, position_id: str) -> Position:
         for item in self.positions:
@@ -174,6 +182,31 @@ def _number(value: Any, label: str) -> float:
     if type(value) not in (int, float) or not 0 <= value <= 100:
         raise ValueError(label + "无效")
     return float(value)
+
+
+def _instruction_groups(value: Any) -> dict[str, tuple[int, ...]]:
+    if not isinstance(value, list):
+        raise ValueError("catalog 个人指令列表无效")
+    groups: dict[str, tuple[int, ...]] = {}
+    for item in value:
+        if not isinstance(item, Mapping):
+            raise ValueError("catalog 个人指令格式无效")
+        group_id = _integer(item.get("id"), 0, 255, "个人指令组")
+        options = item.get("options")
+        if not isinstance(options, list) or not options:
+            raise ValueError("catalog 个人指令选项无效")
+        option_ids: list[int] = []
+        for option in options:
+            if not isinstance(option, Mapping):
+                raise ValueError("catalog 个人指令选项无效")
+            option_ids.append(_integer(option.get("id"), 0, 0xFFFFFFFF, "个人指令选项"))
+        if len(set(option_ids)) != len(option_ids):
+            raise ValueError("catalog 个人指令选项重复")
+        key = str(group_id)
+        if key in groups:
+            raise ValueError("catalog 个人指令组重复")
+        groups[key] = tuple(option_ids)
+    return groups
 
 
 def _instructions(value: Any) -> dict[str, int]:
@@ -230,14 +263,40 @@ def _cell(value: Any, phase: int, catalog: Catalog, context: str) -> dict[str, A
         raise ValueError("战术职责无效")
     target_player = _integer(value.get("target_player", 255), 0, 255, "盯防球员")
     target_position = _integer(value.get("target_position", 0), 0, 0xFFFFFFFFFFFFFFFF, "盯防位置")
+    instructions = _instructions(value.get("instructions", {}))
+    if catalog.player_instructions:
+        instructions = _checked_instructions(instructions, target_player, target_position, catalog)
     return {
         "position": position,
         "role": role,
         "duty": duty,
-        "instructions": _instructions(value.get("instructions", {})),
+        "instructions": instructions,
         "target_player": target_player,
         "target_position": target_position,
     }
+
+
+def _checked_instructions(
+    instructions: Mapping[str, int],
+    target_player: int,
+    target_position: int,
+    catalog: Catalog,
+) -> dict[str, int]:
+    masks = {position.mask for position in catalog.positions}
+    if target_position != 0 and target_position not in masks:
+        raise ValueError("盯防位置不存在")
+    result: dict[str, int] = {}
+    for group_id in sorted(catalog.player_instructions, key=int):
+        options = catalog.player_instructions[group_id]
+        value = instructions.get(group_id, 0 if 0 in options else options[0])
+        if value not in options:
+            raise ValueError("未知个人指令选项")
+        result[group_id] = value
+    if result.get("14") == 34 and target_player == 255:
+        raise ValueError("指定盯防需要选择对方名单序号")
+    if result.get("14") == 35 and target_position == 0:
+        raise ValueError("指定盯防需要选择位置")
+    return result
 
 
 def validate_phases(value: Any, catalog: Catalog) -> tuple[tuple[dict[str, Any], ...], ...]:

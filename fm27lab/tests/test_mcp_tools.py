@@ -17,7 +17,9 @@ EXPECTED_TOOL_NAMES = (
     "pools_list",
     "pools_get",
     "pools_create",
+    "pools_update",
     "pools_delete",
+    "pools_import_fmf",
     "drafts_list",
     "drafts_get",
     "drafts_create",
@@ -63,6 +65,13 @@ EXPECTED_TOOL_NAMES = (
     "experiments_resume",
     "catalog_snapshot",
     "results_compare",
+    "setpieces_list",
+    "setpieces_get",
+    "setpieces_update",
+    "setpieces_import_file",
+    "setpieces_export_file",
+    "formations_list",
+    "drafts_formation",
 )
 
 PAGINATION_SCHEMAS = {
@@ -104,7 +113,23 @@ REQUEST_CASES = (
             "id": "pool-2",
         },
     ),
+    (
+        "pools_update",
+        {"entry_id": "pool-1", "name": "改名", "weight": 4},
+        "PATCH",
+        "/api/pools/pool-1",
+        None,
+        {"name": "改名", "weight": 4},
+    ),
     ("pools_delete", {"entry_id": "pool-1"}, "DELETE", "/api/pools/pool-1", None, None),
+    (
+        "pools_import_fmf",
+        {"content_base64": "Rk1GVjI=", "name": "导入"},
+        "POST",
+        "/api/pools/import-fmf",
+        None,
+        {"content_base64": "Rk1GVjI=", "name": "导入"},
+    ),
     ("drafts_list", {"limit": 128}, "GET", "/api/drafts", {"limit": 128}, None),
     ("drafts_get", {"draft_id": "draft-1"}, "GET", "/api/drafts/draft-1", None, None),
     (
@@ -363,6 +388,33 @@ REQUEST_CASES = (
         None,
         {"baseline_job_id": "job-1", "candidate_job_ids": ["job-2"]},
     ),
+    ("setpieces_list", {}, "GET", "/api/setpieces", None, None),
+    ("setpieces_get", {"setpiece_id": "home"}, "GET", "/api/setpieces/home", None, None),
+    (
+        "setpieces_update",
+        {"setpiece_id": "home", "value": {"throw_styles": [0, 1, 0]}},
+        "PATCH",
+        "/api/setpieces/home",
+        None,
+        {"value": {"throw_styles": [0, 1, 0]}},
+    ),
+    (
+        "setpieces_import_file",
+        {"setpiece_id": "home", "content_base64": "e30="},
+        "POST",
+        "/api/setpieces/home/import-file",
+        None,
+        {"content_base64": "e30="},
+    ),
+    ("formations_list", {}, "GET", "/api/formations", None, None),
+    (
+        "drafts_formation",
+        {"draft_id": "draft-1", "formation_id": "4-2-3-1", "overwrite": True},
+        "POST",
+        "/api/drafts/draft-1/formation",
+        None,
+        {"formation_id": "4-2-3-1", "overwrite": True},
+    ),
 )
 
 INVALID_CASES = (
@@ -381,6 +433,11 @@ INVALID_CASES = (
     ("pools_create", {"name": "x", "tactic": []}, "参数 tactic 类型必须是对象"),
     ("pools_create", {"name": "x", "tactic": {}, "weight": 1001}, "参数 weight 不能大于 1000"),
     ("pools_create", {"name": "x", "tactic": {}, "id": "bad id"}, "参数 id 格式无效"),
+    ("pools_update", {"entry_id": "pool-1"}, "至少需要提供一项更新字段"),
+    ("pools_update", {"entry_id": "pool-1", "weight": 1001}, "参数 weight 不能大于 1000"),
+    ("pools_update", {"entry_id": "pool-1", "name": ""}, "参数 name 长度不能小于 1"),
+    ("pools_import_fmf", {}, "缺少必填参数：content_base64"),
+    ("pools_import_fmf", {"content_base64": 1}, "参数 content_base64 类型必须是字符串"),
     ("drafts_update", {"draft_id": "draft-1"}, "至少需要提供一项更新字段"),
     ("jobs_update", {"job_id": "job-1"}, "至少需要提供一项更新字段"),
     ("saves_update", {"save_id": "save-1"}, "至少需要提供一项更新字段"),
@@ -601,6 +658,11 @@ ENCODING_CASES = (
         ["/api/drafts/d%2F1/apply-roster"],
     ),
     ("drafts_export_fmf", {"draft_id": "x y"}, ["/api/drafts/x%20y/export.fmf"]),
+    (
+        "drafts_formation",
+        {"draft_id": "d/1", "formation_id": "4-4-2", "overwrite": False},
+        ["/api/drafts/d%2F1/formation"],
+    ),
     ("artifacts_get", {"artifact_id": "art/一"}, ["/api/artifacts/art%2F%E4%B8%80"]),
     ("artifacts_content", {"artifact_id": "art/1"}, ["/api/artifacts/art%2F1/content"]),
     ("settings_get", {"key": "a/b"}, ["/api/settings/a%2Fb"]),
@@ -610,6 +672,7 @@ ENCODING_CASES = (
     ("jobs_pool_summary", {"job_id": "j/1"}, ["/api/jobs/j%2F1/pool-summary"]),
     ("experiments_cancel", {"job_id": "j/1"}, ["/api/experiments/j%2F1/cancel"]),
     ("experiments_resume", {"job_id": "j/1"}, ["/api/experiments/j%2F1/resume"]),
+    ("setpieces_export_file", {"setpiece_id": "a/b"}, ["/api/setpieces/a%2Fb/export-file"]),
 )
 
 DOWNLOAD_CASES = (
@@ -636,6 +699,14 @@ DOWNLOAD_CASES = (
         "/api/jobs/job-1/export.csv",
         None,
         "text/csv; charset=utf-8",
+    ),
+    (
+        "setpieces_export_file",
+        {"setpiece_id": "home"},
+        "GET",
+        "/api/setpieces/home/export-file",
+        None,
+        "application/json",
     ),
 )
 
@@ -685,7 +756,7 @@ def assert_chinese(text):
 
 def test_tool_inventory_is_stable():
     assert tool_names() == EXPECTED_TOOL_NAMES
-    assert len(tool_names()) == 49
+    assert len(tool_names()) == 58
     assert [tool.name for tool in build_tools(RecordingClient())] == list(EXPECTED_TOOL_NAMES)
 
 
@@ -723,6 +794,8 @@ def test_required_fields_match_create_contracts():
         "pools_get": ["entry_id"],
         "pools_delete": ["entry_id"],
         "pools_create": ["name", "tactic"],
+        "pools_update": ["entry_id"],
+        "pools_import_fmf": ["content_base64"],
         "drafts_get": ["draft_id"],
         "drafts_delete": ["draft_id"],
         "drafts_create": ["name", "scenario"],
@@ -774,6 +847,10 @@ def test_required_fields_match_create_contracts():
         "experiments_cancel": ["job_id"],
         "experiments_resume": ["job_id"],
         "results_compare": ["baseline_job_id", "candidate_job_ids"],
+        "setpieces_get": ["setpiece_id"],
+        "setpieces_update": ["setpiece_id", "value"],
+        "setpieces_import_file": ["setpiece_id"],
+        "setpieces_export_file": ["setpiece_id"],
     }
     for name, required in expected.items():
         assert tools_by_name()[name].input_schema["required"] == required, name
@@ -808,10 +885,12 @@ def test_update_body_contains_only_supplied_fields():
     handler_for("jobs_update", client)({"job_id": "job-1", "completed": 2})
     handler_for("saves_update", client)({"save_id": "save-1", "stage": "ready"})
     handler_for("drafts_update", client)({"draft_id": "draft-1", "name": "新名"})
+    handler_for("pools_update", client)({"entry_id": "pool-1", "weight": 7})
     assert [call["body"] for call in client.calls] == [
         {"completed": 2},
         {"stage": "ready"},
         {"name": "新名"},
+        {"weight": 7},
     ]
 
 
