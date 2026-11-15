@@ -13,7 +13,21 @@ import type {
   HostResources,
   Job,
 } from "../lib/api";
+import {
+  deletePool,
+  importPoolsFmf,
+  listPools,
+  updatePool,
+  type PoolEntry,
+} from "../lib/api-pools";
 import { ExperimentsPage } from "./ExperimentsPage";
+
+vi.mock("../lib/api-pools", () => ({
+  listPools: vi.fn(),
+  updatePool: vi.fn(),
+  deletePool: vi.fn(),
+  importPoolsFmf: vi.fn(),
+}));
 
 const GIB = 1024 ** 3;
 const connection = { url: "http://127.0.0.1:43210", token: "test-token", api: "fm27lab/v2" };
@@ -36,6 +50,30 @@ function openEventStream(): Response {
     },
   });
   return new Response(stream);
+}
+
+type EventStreamControl = {
+  response: Response;
+  send(text: string): void;
+  close(): void;
+};
+
+function controllableEventStream(): EventStreamControl {
+  let controller: ReadableStreamDefaultController<Uint8Array> | null = null;
+  const stream = new ReadableStream<Uint8Array>({
+    start(inner) {
+      controller = inner;
+    },
+  });
+  return {
+    response: new Response(stream),
+    send(text) {
+      controller?.enqueue(new TextEncoder().encode(text));
+    },
+    close() {
+      controller?.close();
+    },
+  };
 }
 
 function stubFetch(handler: FetchHandler, eventsHandler: EventStreamHandler = openEventStream) {
@@ -160,6 +198,18 @@ const poolScenario = {
   },
 };
 
+function poolEntry(overrides: Partial<PoolEntry> = {}): PoolEntry {
+  return {
+    id: "pool-1",
+    name: "长传冲吊",
+    weight: 3,
+    tactic: { tactic_name: "长传冲吊", mentality: 3 },
+    roster: null,
+    created_at: "2026-11-13T10:00:00+00:00",
+    ...overrides,
+  };
+}
+
 function makeDraft(id: string): Draft {
   return {
     id,
@@ -197,6 +247,7 @@ type ScenarioOptions = {
   check?: (url: string) => Response;
   submit?: (body: ExperimentSubmitInput) => Response | Promise<Response>;
   start?: () => Response;
+  job?: (jobId: string) => Response;
   events?: EventStreamHandler;
 };
 
@@ -209,6 +260,7 @@ function stubScenario(options: ScenarioOptions = {}) {
   const submit = options.submit ?? (() => jsonResponse(makeJob(), 201));
   const start =
     options.start ?? (() => jsonResponse({ job: makeJob({ status: "running" }) }));
+  const job = options.job ?? (() => jsonResponse(makeJob({ status: "running" })));
   stubFetch((url, init) => {
     if (url.endsWith("/api/drafts")) {
       if (draftsResponse !== undefined) return draftsResponse();
@@ -221,6 +273,10 @@ function stubScenario(options: ScenarioOptions = {}) {
     if (url.endsWith("/api/system/resources")) return resources();
     if (url.includes("/api/concurrency/check")) return check(url);
     if (url.endsWith("/api/experiments/start")) return start();
+    if (url.includes("/api/jobs/")) {
+      const jobId = decodeURIComponent(url.slice(url.indexOf("/api/jobs/") + 10));
+      return job(jobId);
+    }
     if (url.endsWith("/api/experiments") && init.method === "POST") {
       return submit(JSON.parse(String(init.body)) as ExperimentSubmitInput);
     }
@@ -276,10 +332,21 @@ async function readyWithDraft() {
   await selectDraft();
 }
 
+async function poolItem(name: string): Promise<HTMLElement> {
+  const list = await screen.findByRole("list", { name: "客队战术池条目" });
+  const item = within(list).getByDisplayValue(name).closest("li");
+  if (item === null) throw new Error("客队战术条目未渲染");
+  return item;
+}
+
 describe("ExperimentsPage", () => {
   beforeEach(() => {
     fetchMock.mockReset();
     vi.stubGlobal("fetch", fetchMock);
+    vi.mocked(listPools).mockReset().mockResolvedValue({ items: [], total: 0, next_offset: null });
+    vi.mocked(updatePool).mockReset();
+    vi.mocked(deletePool).mockReset();
+    vi.mocked(importPoolsFmf).mockReset();
   });
 
   afterEach(() => {
@@ -565,6 +632,59 @@ describe("ExperimentsPage", () => {
       expect(seed).toBeGreaterThanOrEqual(0);
       expect(seed).toBeLessThanOrEqual(4294967295);
     }
+  });
+
+  it("提交成功后展示任务实时进度与预计剩余", async () => {
+    const startedAt = new Date(Date.now() - 120_000).toISOString();
+    stubScenario({
+      start: () =>
+        jsonResponse({
+          job: makeJob({ status: "running", total: 6, completed: 0, started_at: startedAt }),
+        }),
+      job: () =>
+        jsonResponse(
+          makeJob({ status: "running", total: 6, completed: 3, started_at: startedAt }),
+        ),
+    });
+    renderExperimentsPage();
+    await waitForResources();
+    await selectDraft();
+
+    fireEvent.click(submitButton());
+
+    const panel = await screen.findByLabelText("启动结果");
+    const bar = await within(panel).findByRole("progressbar");
+    expect(bar).toHaveAttribute("aria-valuenow", "3");
+    expect(bar).toHaveAttribute("aria-valuemax", "6");
+    expect(bar).toHaveAttribute("aria-valuetext", "已完成 3 / 6");
+    expect(within(panel).getByText("50%")).toBeInTheDocument();
+    expect(within(panel).getByText("3 / 6")).toBeInTheDocument();
+    expect(within(panel).getByText(/^预计剩余 \d+ 分/)).toBeInTheDocument();
+  });
+
+  it("任务事件到达后刷新提交面板进度", async () => {
+    const stream = controllableEventStream();
+    let completed = 0;
+    stubScenario({
+      events: () => stream.response,
+      start: () =>
+        jsonResponse({ job: makeJob({ status: "running", total: 6, completed: 0 }) }),
+      job: () => jsonResponse(makeJob({ status: "running", total: 6, completed })),
+    });
+    renderExperimentsPage();
+    await waitForResources();
+    await selectDraft();
+
+    fireEvent.click(submitButton());
+    const panel = await screen.findByLabelText("启动结果");
+    expect(await within(panel).findByText("0%")).toBeInTheDocument();
+
+    completed = 4;
+    stream.send(
+      'event: job.updated\ndata: {"id":"job-123","status":"running","completed":4,"total":6}\n\n',
+    );
+
+    expect(await within(panel).findByText("66%")).toBeInTheDocument();
   });
 
   it("提交请求未返回前不会启动任务", async () => {
@@ -970,6 +1090,8 @@ describe("ExperimentsPage", () => {
 
     fireEvent.click(submitButton());
     expect(await screen.findByText("实验已启动：种子扫描")).toBeInTheDocument();
+    const outcome = screen.getByLabelText("启动结果");
+    expect(await within(outcome).findByRole("progressbar")).toBeInTheDocument();
 
     expect(screen.getByText("实验已启动，等待运行结束后才能再次提交。")).toBeInTheDocument();
     expect(screen.getByLabelText("草案")).toBeDisabled();
@@ -1124,5 +1246,190 @@ describe("ExperimentsPage", () => {
     expect(within(list).getByText("场数需为 1 到 10000 的整数")).toBeInTheDocument();
     expect(within(list).getByText("实验名称最多 100 个字符")).toBeInTheDocument();
     expect(within(list).getAllByRole("listitem")).toHaveLength(3);
+  });
+
+  it("客队战术池面板展示条目名称与权重", async () => {
+    vi.mocked(listPools).mockResolvedValue({
+      items: [poolEntry()],
+      total: 1,
+      next_offset: null,
+    });
+    stubScenario();
+    renderExperimentsPage();
+
+    const item = await poolItem("长传冲吊");
+    expect(within(item).getByLabelText("名称")).toHaveValue("长传冲吊");
+    expect(within(item).getByLabelText("权重")).toHaveValue(3);
+  });
+
+  it("客队战术池加载中展示提示", async () => {
+    const pending = deferred<{ items: PoolEntry[]; total: number; next_offset: number | null }>();
+    vi.mocked(listPools).mockReturnValue(pending.promise);
+    stubScenario();
+    renderExperimentsPage();
+
+    expect(await screen.findByText("正在加载客队战术池…")).toBeInTheDocument();
+
+    pending.resolve({ items: [poolEntry()], total: 1, next_offset: null });
+    await poolItem("长传冲吊");
+  });
+
+  it("没有客队战术时展示空态", async () => {
+    stubScenario();
+    renderExperimentsPage();
+
+    expect(
+      await screen.findByText("还没有客队战术。导入 FMF 文件后，条目会出现在这里。"),
+    ).toBeInTheDocument();
+  });
+
+  it("修改名称后保存只提交名称", async () => {
+    vi.mocked(listPools).mockResolvedValue({
+      items: [poolEntry()],
+      total: 1,
+      next_offset: null,
+    });
+    vi.mocked(updatePool).mockResolvedValue(poolEntry({ name: "边路传中" }));
+    stubScenario();
+    renderExperimentsPage();
+
+    const item = await poolItem("长传冲吊");
+    fireEvent.change(within(item).getByLabelText("名称"), {
+      target: { value: "边路传中" },
+    });
+    fireEvent.click(within(item).getByRole("button", { name: "保存" }));
+
+    await waitFor(() =>
+      expect(updatePool).toHaveBeenCalledWith(connection, "pool-1", { name: "边路传中" }),
+    );
+    expect(await screen.findByText("已保存")).toBeInTheDocument();
+  });
+
+  it("修改权重后保存提交权重", async () => {
+    vi.mocked(listPools).mockResolvedValue({
+      items: [poolEntry()],
+      total: 1,
+      next_offset: null,
+    });
+    vi.mocked(updatePool).mockResolvedValue(poolEntry({ weight: 7 }));
+    stubScenario();
+    renderExperimentsPage();
+
+    const item = await poolItem("长传冲吊");
+    fireEvent.change(within(item).getByLabelText("权重"), { target: { value: "7" } });
+    fireEvent.click(within(item).getByRole("button", { name: "保存" }));
+
+    await waitFor(() =>
+      expect(updatePool).toHaveBeenCalledWith(connection, "pool-1", { weight: 7 }),
+    );
+  });
+
+  it("权重超出范围时阻止保存", async () => {
+    vi.mocked(listPools).mockResolvedValue({
+      items: [poolEntry()],
+      total: 1,
+      next_offset: null,
+    });
+    stubScenario();
+    renderExperimentsPage();
+
+    const item = await poolItem("长传冲吊");
+    fireEvent.change(within(item).getByLabelText("权重"), { target: { value: "1001" } });
+
+    expect(within(item).getByRole("button", { name: "保存" })).toBeDisabled();
+    expect(within(item).getByText("权重需为 1–1000 的整数")).toBeInTheDocument();
+  });
+
+  it("删除条目需要二次确认", async () => {
+    vi.mocked(listPools)
+      .mockResolvedValueOnce({ items: [poolEntry()], total: 1, next_offset: null })
+      .mockResolvedValue({ items: [], total: 0, next_offset: null });
+    vi.mocked(deletePool).mockResolvedValue(undefined);
+    stubScenario();
+    renderExperimentsPage();
+
+    const item = await poolItem("长传冲吊");
+    fireEvent.click(within(item).getByRole("button", { name: "删除" }));
+
+    const dialog = await screen.findByRole("alertdialog");
+    expect(deletePool).not.toHaveBeenCalled();
+    fireEvent.click(within(dialog).getByRole("button", { name: "确认删除" }));
+
+    await waitFor(() => expect(deletePool).toHaveBeenCalledWith(connection, "pool-1"));
+    await waitFor(() =>
+      expect(screen.queryByRole("list", { name: "客队战术池条目" })).not.toBeInTheDocument(),
+    );
+  });
+
+
+  it("删除确认支持键盘关闭并将焦点还给删除按钮", async () => {
+    vi.mocked(listPools).mockResolvedValue({ items: [poolEntry()], total: 1, next_offset: null });
+    stubScenario();
+    renderExperimentsPage();
+
+    const item = await poolItem("长传冲吊");
+    const trigger = within(item).getByRole("button", { name: "删除" });
+    fireEvent.click(trigger);
+
+    const dialog = await screen.findByRole("alertdialog");
+    expect(dialog).toHaveAttribute("aria-modal", "true");
+    expect(dialog).toHaveAttribute("aria-describedby", "pools-confirm-text-pool-1");
+    expect(within(dialog).getByRole("button", { name: "确认删除" })).toHaveFocus();
+
+    fireEvent.keyDown(dialog, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument());
+    expect(trigger).toHaveFocus();
+    expect(deletePool).not.toHaveBeenCalled();
+  });
+
+  it("没有改动时保存按钮禁用并说明原因", async () => {
+    vi.mocked(listPools).mockResolvedValue({ items: [poolEntry()], total: 1, next_offset: null });
+    stubScenario();
+    renderExperimentsPage();
+
+    const item = await poolItem("长传冲吊");
+    const save = within(item).getByRole("button", { name: "保存" });
+    expect(save).toBeDisabled();
+    expect(save).toHaveAttribute("title", "没有需要保存的修改");
+  });
+
+  it("导入 FMF 文件后提示导入数量并刷新列表", async () => {
+    vi.mocked(listPools)
+      .mockResolvedValueOnce({ items: [], total: 0, next_offset: null })
+      .mockResolvedValue({ items: [poolEntry()], total: 1, next_offset: null });
+    vi.mocked(importPoolsFmf).mockResolvedValue({ items: [poolEntry()], total: 1 });
+    stubScenario();
+    renderExperimentsPage();
+
+    await screen.findByText("还没有客队战术。导入 FMF 文件后，条目会出现在这里。");
+    const file = new File([new Uint8Array([70, 77, 70, 86, 50])], "tactic.fmf");
+    fireEvent.change(screen.getByLabelText("FMF 文件"), { target: { files: [file] } });
+
+    await waitFor(() =>
+      expect(importPoolsFmf).toHaveBeenCalledWith(connection, {
+        content_base64: "Rk1GVjI=",
+        name: "tactic.fmf",
+      }),
+    );
+    expect(await screen.findByText("已导入 1 套客队战术")).toBeInTheDocument();
+    expect(
+      await screen.findByRole("list", { name: "客队战术池条目" }),
+    ).toBeInTheDocument();
+  });
+
+  it("客队战术池读取失败时展示错误并可重试", async () => {
+    vi.mocked(listPools)
+      .mockRejectedValueOnce(new Error("池读取失败"))
+      .mockResolvedValue({ items: [], total: 0, next_offset: null });
+    stubScenario();
+    renderExperimentsPage();
+
+    const alert = await screen.findByRole("alert");
+    expect(within(alert).getByText("池读取失败")).toBeInTheDocument();
+    fireEvent.click(within(alert).getByRole("button", { name: "重试" }));
+
+    expect(
+      await screen.findByText("还没有客队战术。导入 FMF 文件后，条目会出现在这里。"),
+    ).toBeInTheDocument();
   });
 });

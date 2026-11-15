@@ -4,14 +4,17 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import { useAppContext } from "../app-context";
 import { EmptyState } from "../components/EmptyState";
+import { JobProgress } from "../components/JobProgress";
 import { Panel } from "../components/Panel";
 import {
   cancelJob,
   deleteJob,
   deleteJobsBatch,
   listJobs,
+  updateJob,
   type Job,
   type JobBatchDeleteResult,
+  type JobList,
   type JobStatus,
 } from "../lib/api";
 import type { EventStatus } from "../lib/events";
@@ -19,6 +22,7 @@ import { useAppEvents } from "../lib/useAppEvents";
 import { useEventRefresh } from "../lib/useEventRefresh";
 
 const PAGE_SIZE = 20;
+const SEARCH_DEBOUNCE_MS = 300;
 
 const STATUS_LABELS: Record<JobStatus, string> = {
   queued: "排队中",
@@ -92,6 +96,8 @@ export function JobsPage() {
   const { connection } = useAppContext();
   const queryClient = useQueryClient();
   const [status, setStatus] = useState<JobStatus | "">("");
+  const [searchText, setSearchText] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
   const [offset, setOffset] = useState(0);
   const [confirmation, setConfirmation] = useState<{ id: string; action: "cancel" | "delete" } | null>(
     null,
@@ -102,15 +108,27 @@ export function JobsPage() {
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set<string>());
   const [batchConfirmOpen, setBatchConfirmOpen] = useState(false);
   const [batchResult, setBatchResult] = useState<JobBatchDeleteResult | null>(null);
+  const [renameJobId, setRenameJobId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState("");
+  const [renameError, setRenameError] = useState<string | null>(null);
   const batchTriggerRef = useRef<HTMLButtonElement>(null);
   const batchCancelRef = useRef<HTMLButtonElement>(null);
   const batchResultRef = useRef<HTMLDivElement>(null);
 
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setSearchQuery(searchText.trim());
+      setOffset(0);
+    }, SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [searchText]);
+
   const jobs = useQuery({
-    queryKey: ["jobs", connection?.url, status, offset],
+    queryKey: ["jobs", connection?.url, status, searchQuery, offset],
     queryFn: () =>
       listJobs(connection!, {
         status: status === "" ? undefined : status,
+        q: searchQuery === "" ? undefined : searchQuery,
         limit: PAGE_SIZE,
         offset,
       }),
@@ -141,6 +159,8 @@ export function JobsPage() {
   const allSelected = deletableIds.length > 0 && selectedCount === deletableIds.length;
   const someSelected = selectedCount > 0 && !allSelected;
   const hasPageJobs = pageJobs.length > 0;
+  const hasFilter = status !== "" || searchQuery !== "";
+  const now = Date.now();
 
   const clearSelection = () => {
     setSelected(new Set<string>());
@@ -235,6 +255,74 @@ export function JobsPage() {
     },
   });
 
+  const rename = useMutation({
+    mutationFn: (variables: { jobId: string; name: string }) =>
+      updateJob(connection!, variables.jobId, { name: variables.name }),
+    onMutate: async (variables) => {
+      const key = ["jobs", connection?.url, status, searchQuery, offset] as const;
+      await queryClient.cancelQueries({ queryKey: key });
+      const previous = queryClient.getQueryData<JobList>(key);
+      if (previous !== undefined) {
+        queryClient.setQueryData<JobList>(key, {
+          ...previous,
+          items: previous.items.map((job) =>
+            job.id === variables.jobId ? { ...job, name: variables.name } : job,
+          ),
+        });
+      }
+      return { key, previous };
+    },
+    onError: (error, _variables, context) => {
+      if (context?.previous !== undefined) {
+        queryClient.setQueryData(context.key, context.previous);
+      }
+      setRenameError(errorMessage(error));
+    },
+    onSuccess: (_job, variables) => {
+      setRenameJobId(null);
+      setRenameValue("");
+      setRenameError(null);
+      setActionError(null);
+      setNotice(`已重命名任务「${variables.name}」`);
+      invalidateJobs();
+    },
+  });
+
+  const startRename = (job: Job) => {
+    if (rename.isPending) return;
+    setConfirmation(null);
+    setActionError(null);
+    setNotice(null);
+    setRenameJobId(job.id);
+    setRenameValue(job.name ?? "");
+    setRenameError(null);
+  };
+
+  const cancelRename = () => {
+    setRenameJobId(null);
+    setRenameValue("");
+    setRenameError(null);
+  };
+
+  const submitRename = (job: Job) => {
+    const name = renameValue.trim();
+    if (name.length === 0) {
+      setRenameError("任务名称不能为空");
+      return;
+    }
+    if (name.length > 100) {
+      setRenameError("任务名称不能超过 100 个字符");
+      return;
+    }
+    if (name === (job.name ?? "")) {
+      cancelRename();
+      return;
+    }
+    if (connection === null || rename.isPending) return;
+    setRenameError(null);
+    rename.mutate({ jobId: job.id, name });
+  };
+
   const changeStatus = (next: JobStatus | "") => {
     setStatus(next);
     setOffset(0);
@@ -242,12 +330,26 @@ export function JobsPage() {
     setActionError(null);
     setNotice(null);
     setBatchResult(null);
+    cancelRename();
     clearSelection();
   };
 
   const changePage = (next: number) => {
     setOffset(next);
     setBatchResult(null);
+    cancelRename();
+    clearSelection();
+  };
+
+  const clearSearch = () => {
+    setSearchText("");
+    setSearchQuery("");
+    setOffset(0);
+    setConfirmation(null);
+    setActionError(null);
+    setNotice(null);
+    setBatchResult(null);
+    cancelRename();
     clearSelection();
   };
 
@@ -255,6 +357,7 @@ export function JobsPage() {
     setActionError(null);
     setNotice(null);
     setBatchResult(null);
+    cancelRename();
     clearSelection();
     void jobs.refetch();
   };
@@ -356,11 +459,13 @@ export function JobsPage() {
       <>
         <EmptyState
           icon={ListChecks}
-          title={status === "" ? "尚无任务" : "没有符合条件的任务"}
+          title={hasFilter ? "没有符合条件的任务" : "尚无任务"}
           description={
-            status === ""
-              ? "任务由实验页提交批次后产生，运行状态、进度与取消入口会显示在这里。"
-              : "当前筛选条件下没有任务，切换状态后重试。"
+            searchQuery !== ""
+              ? "没有匹配该关键字的任务，调整关键字或清空搜索后重试。"
+              : status !== ""
+                ? "当前筛选条件下没有任务，切换状态后重试。"
+                : "任务由实验页提交批次后产生，运行状态、进度与取消入口会显示在这里。"
           }
         />
         {data !== undefined && data.total > 0 ? pager : null}
@@ -419,6 +524,44 @@ export function JobsPage() {
                     <td>
                       <span className="jobs-name">{job.name ?? "未命名"}</span>
                       <span className="jobs-id">{job.id}</span>
+                      {renameJobId === job.id ? (
+                        <form
+                          className="jobs-rename"
+                          onSubmit={(event) => {
+                            event.preventDefault();
+                            submitRename(job);
+                          }}
+                        >
+                          <input
+                            aria-label={`重命名任务 ${job.name ?? job.id}`}
+                            value={renameValue}
+                            autoFocus
+                            onChange={(event) => setRenameValue(event.target.value)}
+                            onKeyDown={(event) => {
+                              if (event.key === "Escape") {
+                                event.preventDefault();
+                                cancelRename();
+                              }
+                            }}
+                          />
+                          <button
+                            className="button small primary"
+                            type="submit"
+                            disabled={rename.isPending}
+                            title={rename.isPending ? "正在保存任务名称" : undefined}
+                          >
+                            保存名称
+                          </button>
+                          <button className="button small" type="button" onClick={cancelRename}>
+                            放弃重命名
+                          </button>
+                          {renameError === null ? null : (
+                            <span className="jobs-rename-error" role="alert">
+                              {renameError}
+                            </span>
+                          )}
+                        </form>
+                      ) : null}
                     </td>
                     <td className="jobs-kind">{job.kind}</td>
                     <td>
@@ -427,12 +570,19 @@ export function JobsPage() {
                       </span>
                     </td>
                     <td className="jobs-progress">
-                      {job.completed} / {job.total}
+                      <JobProgress job={job} now={now} />
                     </td>
                     <td className="jobs-number">{job.workers}</td>
                     <td className="jobs-time">{formatTime(job.created_at)}</td>
                     <td>
                       <div className="jobs-actions">
+                        <button
+                          className="button small"
+                          type="button"
+                          onClick={() => startRename(job)}
+                        >
+                          重命名
+                        </button>
                         {CANCELLABLE.has(job.status) ? (
                           confirming && confirmation.action === "cancel" ? (
                             <>
@@ -516,6 +666,22 @@ export function JobsPage() {
       action={
         <div className="jobs-toolbar">
           <JobStatusFilter value={status} onChange={changeStatus} />
+          <label className="field jobs-search">
+            搜索任务
+            <input
+              type="search"
+              value={searchText}
+              maxLength={100}
+              placeholder="搜索任务名称或 ID"
+              aria-label="搜索任务名称或 ID"
+              onChange={(event) => setSearchText(event.target.value)}
+            />
+          </label>
+          {searchText === "" ? null : (
+            <button className="button small" type="button" onClick={clearSearch}>
+              清空搜索
+            </button>
+          )}
           {eventsStatus === "reconnecting" ? (
             <span className="jobs-hint" role="status">
               实时连接中断，正在重连

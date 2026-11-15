@@ -1,6 +1,6 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { ChartBar } from "@phosphor-icons/react";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 
 import { useAppContext } from "../app-context";
 import { EmptyState } from "../components/EmptyState";
@@ -17,10 +17,21 @@ import {
   type Job,
   type JobBatchDeleteResult,
   type JobMetrics,
+  type JobRun,
   type JobStatus,
   type JobSummary,
   type PoolSummary,
+  type PoolSummaryEntry,
 } from "../lib/api";
+import {
+  drawText,
+  formatPossession,
+  jobFailureReason,
+  runDraw,
+  runEvents,
+  runTeams,
+  type TeamStats,
+} from "../lib/results-runs";
 import { useAppEvents } from "../lib/useAppEvents";
 import { useEventRefresh } from "../lib/useEventRefresh";
 
@@ -185,6 +196,112 @@ function eventPayloadField(payload: unknown, key: string): unknown {
   return Object.getOwnPropertyDescriptor(payload, key)?.value;
 }
 
+type RunStatKey = "xg" | "possession" | "shots" | "shotsOnTarget" | "passes" | "completedPasses";
+
+const RUN_STAT_ROWS: { key: RunStatKey; label: string; format: (value: number | null) => string }[] = [
+  { key: "xg", label: "xG", format: (value) => formatNumber(value, 2) },
+  { key: "possession", label: "控球", format: formatPossession },
+  { key: "shots", label: "射门", format: (value) => formatNumber(value, 0) },
+  { key: "shotsOnTarget", label: "射正", format: (value) => formatNumber(value, 0) },
+  { key: "passes", label: "传球", format: (value) => formatNumber(value, 0) },
+  { key: "completedPasses", label: "传球成功", format: (value) => formatNumber(value, 0) },
+];
+
+function teamStat(team: TeamStats | null, key: RunStatKey): number | null {
+  return team === null ? null : team[key];
+}
+
+function RunDetail({
+  id,
+  label,
+  run,
+  entries,
+}: {
+  id: string;
+  label: string;
+  run: JobRun;
+  entries: PoolSummaryEntry[] | null;
+}) {
+  const teams = runTeams(run.stats);
+  const home = teams.find((team) => team.side === 0) ?? null;
+  const away = teams.find((team) => team.side === 1) ?? null;
+  const draw = runDraw(run.stats);
+  const events = runEvents(run.events);
+  return (
+    <div className="run-detail" id={id} role="region" aria-label={label}>
+      {run.score === null ? (
+        <div className="inline-alert" role="alert">
+          该场未产出有效比分，未计入任务汇总。服务端未保留该场的失败原因文本，可结合日志路径与事件采集状态排查。
+        </div>
+      ) : null}
+      <dl className="run-detail-meta">
+        <div>
+          <dt>比分</dt>
+          <dd>{run.score === null ? "无有效比分" : `${run.score[0]}–${run.score[1]}`}</dd>
+        </div>
+        <div>
+          <dt>种子</dt>
+          <dd>{run.seed}</dd>
+        </div>
+        <div>
+          <dt>变体</dt>
+          <dd>{run.variant}</dd>
+        </div>
+        <div>
+          <dt>校验</dt>
+          <dd>{run.verified ? "已验证" : "未验证"}</dd>
+        </div>
+        <div>
+          <dt>创建时间</dt>
+          <dd>{formatTime(run.created_at)}</dd>
+        </div>
+        <div>
+          <dt>客队战术抽签</dt>
+          <dd>{draw === null ? "未记录" : drawText(draw, entries)}</dd>
+        </div>
+        <div>
+          <dt>日志路径</dt>
+          <dd className="run-detail-path">{run.log_path ?? "无日志"}</dd>
+        </div>
+      </dl>
+      {teams.length === 0 ? (
+        <p className="results-note">该场没有球队统计</p>
+      ) : (
+        <table className="jobs-table run-detail-table">
+          <caption className="sr-only">单场球队统计</caption>
+          <thead>
+            <tr>
+              <th scope="col">指标</th>
+              <th scope="col" className="jobs-number">
+                主队
+              </th>
+              <th scope="col" className="jobs-number">
+                客队
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {RUN_STAT_ROWS.map((row) => (
+              <tr key={row.key}>
+                <th scope="row">{row.label}</th>
+                <td className="jobs-number">{row.format(teamStat(home, row.key))}</td>
+                <td className="jobs-number">{row.format(teamStat(away, row.key))}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      <p className="run-detail-events">
+        {events === null
+          ? "事件：无事件数据"
+          : events.collected
+            ? `事件：进球 ${events.goals}，红黄牌 ${events.cards}`
+            : `事件：未采集${events.reason === null ? "" : `（${events.reason}）`}`}
+      </p>
+    </div>
+  );
+}
+
 export function ResultsPage() {
   const { connection } = useAppContext();
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
@@ -205,6 +322,7 @@ export function ResultsPage() {
   const [batchConfirmOpen, setBatchConfirmOpen] = useState(false);
   const [batchResult, setBatchResult] = useState<JobBatchDeleteResult | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [expandedRuns, setExpandedRuns] = useState<ReadonlySet<string>>(() => new Set<string>());
   const compareRequestRef = useRef(0);
   const batchTriggerRef = useRef<HTMLButtonElement>(null);
   const batchCancelRef = useRef<HTMLButtonElement>(null);
@@ -403,6 +521,7 @@ export function ResultsPage() {
   const changeJob = (jobId: string) => {
     setSelectedJobId(jobId);
     setRunsOffset(0);
+    setExpandedRuns(new Set<string>());
     setDownloadError(null);
     setSelectedCandidateIds(new Set());
     clearCompare();
@@ -412,6 +531,7 @@ export function ResultsPage() {
     setJobStatus(next);
     setSelectedJobId(null);
     setRunsOffset(0);
+    setExpandedRuns(new Set<string>());
     setDownloadError(null);
     setActionError(null);
     setBatchResult(null);
@@ -495,6 +615,17 @@ export function ResultsPage() {
     }
   };
 
+  const poolEntries = poolSummary.data?.entries ?? null;
+
+  const toggleRun = (key: string) => {
+    setExpandedRuns((previous) => {
+      const next = new Set(previous);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
   let runsContent: ReactNode;
   if (runs.isPending) {
     runsContent = (
@@ -533,18 +664,53 @@ export function ResultsPage() {
               </tr>
             </thead>
             <tbody>
-              {page.items.map((run) => (
-                <tr key={`${run.job_id}-${run.sequence}`}>
-                  <td className="jobs-number">{run.sequence}</td>
-                  <td>{run.variant}</td>
-                  <td className="jobs-number">{run.seed}</td>
-                  <td className="jobs-number">
-                    {run.score === null ? "—" : `${run.score[0]}–${run.score[1]}`}
-                  </td>
-                  <td>{run.verified ? "已验证" : "未验证"}</td>
-                  <td className="jobs-time">{formatTime(run.created_at)}</td>
-                </tr>
-              ))}
+              {page.items.map((run) => {
+                const runKey = `${run.job_id}-${run.sequence}`;
+                const expanded = expandedRuns.has(runKey);
+                return (
+                  <Fragment key={runKey}>
+                    <tr>
+                      <td className="jobs-number">
+                        <button
+                          className="run-toggle"
+                          type="button"
+                          aria-expanded={expanded}
+                          aria-controls={`run-detail-${runKey}`}
+                          aria-label={`${expanded ? "收起" : "展开"}第 ${run.sequence} 场明细`}
+                          onClick={() => toggleRun(runKey)}
+                        >
+                          {run.sequence}
+                        </button>
+                      </td>
+                      <td>{run.variant}</td>
+                      <td className="jobs-number">{run.seed}</td>
+                      <td className="jobs-number">
+                        {run.score === null ? (
+                          <span className="badge" data-tone="error">
+                            失败
+                          </span>
+                        ) : (
+                          `${run.score[0]}–${run.score[1]}`
+                        )}
+                      </td>
+                      <td>{run.verified ? "已验证" : "未验证"}</td>
+                      <td className="jobs-time">{formatTime(run.created_at)}</td>
+                    </tr>
+                    {expanded ? (
+                      <tr className="run-detail-row">
+                        <td colSpan={6}>
+                          <RunDetail
+                            id={`run-detail-${runKey}`}
+                            label={`第 ${run.sequence} 场明细`}
+                            run={run}
+                            entries={poolEntries}
+                          />
+                        </td>
+                      </tr>
+                    ) : null}
+                  </Fragment>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -593,6 +759,7 @@ export function ResultsPage() {
     const metrics = data.metrics;
     const poolData = poolSummary.data;
     const poolExpanded = activeJobId !== null && (poolExpandedJobs[activeJobId] ?? false);
+    const jobFailure = jobFailureReason(data.job);
 
     let poolContent: ReactNode = null;
     if (poolSummary.isError) {
@@ -702,6 +869,12 @@ export function ResultsPage() {
             完成 {data.job.completed} / {data.job.total}
           </span>
         </div>
+        {jobFailure === null ? null : (
+          <div className="inline-alert" role="alert">
+            <strong>任务失败原因</strong>
+            <span>{jobFailure}</span>
+          </div>
+        )}
         {metrics === null ? (
           <>
             <EmptyState

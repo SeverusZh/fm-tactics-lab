@@ -344,3 +344,38 @@
     grid-column: span 12;
   }
 }
+
+@media (max-width: 640px) {
+  .topbar {
+    flex-wrap: wrap;
+    min-height: 0;
+    padding: var(--space-3) var(--space-4);
+  }
+
+  .topbar h1 {
+    font-size: var(--type-h2);
+  }
+
+  .topbar-status {
+    width: 100%;
+    margin-left: 0;
+    justify-content: flex-start;
+  }
+
+  .workspace {
+    padding: var(--space-4);
+  }
+
+  .panel-header {
+    flex-wrap: wrap;
+    padding: var(--space-3) var(--space-4);
+  }
+
+  .panel-body {
+    padding: var(--space-4);
+  }
+
+  .rail-link {
+    min-height: 44px;
+  }
+}

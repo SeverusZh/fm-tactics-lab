@@ -100,7 +100,22 @@
 }
 
 @media (max-width: 640px) {
+  .players-row {
+    min-height: 44px;
+  }
+
   .players-attribute-input {
     width: 4.5rem;
+    min-height: 44px;
+  }
+
+  .players-advanced summary {
+    display: flex;
+    align-items: center;
+    min-height: 44px;
+  }
+
+  .players-bulk-value input {
+    width: 100%;
   }
 }

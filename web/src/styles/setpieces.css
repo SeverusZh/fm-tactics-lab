@@ -1,0 +1,245 @@
+@media (min-width: 1025px) {
+  .setpieces-page .setpieces-side {
+    align-content: start;
+  }
+}
+
+.setpieces-status {
+  margin: 0;
+  padding: var(--space-6);
+  color: var(--text-muted);
+}
+
+.setpieces-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-4);
+  margin-bottom: var(--space-5);
+}
+
+.setpieces-toolbar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-left: auto;
+}
+
+.setpieces-confirm {
+  display: grid;
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
+  padding: var(--space-3);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-control);
+  background: var(--surface-raised);
+}
+
+.setpieces-confirm p {
+  margin: 0;
+  color: var(--text);
+  font-size: var(--type-caption);
+}
+
+.setpieces-fields {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-4);
+  margin-bottom: var(--space-4);
+}
+
+.setpieces-hint {
+  margin: 0;
+  color: var(--text-subtle);
+  font-size: var(--type-caption);
+}
+
+.setpieces-groups {
+  display: grid;
+  gap: var(--space-3);
+  margin-top: var(--space-3);
+}
+
+.setpieces-group {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--surface-raised);
+}
+
+.setpieces-group-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.setpieces-group-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.setpieces-rank {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  min-height: 22px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  color: var(--text-muted);
+  font-size: var(--type-caption);
+}
+
+.setpieces-count {
+  color: var(--text-subtle);
+  font-size: var(--type-caption);
+  white-space: nowrap;
+}
+
+.setpieces-slots {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.setpieces-slot {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 120px auto;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.setpieces-slot select {
+  min-height: 34px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  color: var(--text);
+}
+
+.setpieces-add {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.setpieces-add select {
+  min-height: 34px;
+  min-width: 0;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  color: var(--text);
+}
+
+.setpieces-problem,
+.setpieces-notice,
+.setpieces-alert {
+  margin: var(--space-3) 0 0;
+  font-size: var(--type-caption);
+}
+
+.setpieces-problem {
+  color: var(--amber);
+}
+
+.setpieces-notice {
+  color: var(--pitch);
+}
+
+.setpieces-alert {
+  color: var(--danger);
+}
+
+.setpieces-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-5);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--border);
+}
+
+.setpieces-actions .setpieces-hint {
+  margin-left: auto;
+}
+
+.setpieces-throws {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.setpieces-roles {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.setpieces-role {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+}
+
+.setpieces-role-list {
+  display: grid;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.setpieces-role-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 28px;
+}
+
+.setpieces-role-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text);
+  font-size: var(--type-caption);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.setpieces-row-actions {
+  display: flex;
+  gap: var(--space-1);
+}
+
+.setpieces-row-actions .button {
+  min-height: 28px;
+  padding: 0 var(--space-2);
+  font-size: var(--type-caption);
+}
+
+.setpieces-side {
+  display: grid;
+  gap: var(--space-5);
+  align-content: start;
+}
+
+@media (max-width: 1024px) {
+  .setpieces-fields {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .setpieces-slot {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

@@ -290,10 +290,12 @@ describe("PlayersPage", () => {
     renderPlayersPage();
 
     expect(screen.getByRole("status")).toHaveTextContent("正在加载草稿");
+    expect(screen.getByTestId("skeleton")).toBeInTheDocument();
 
     await waitFor(() =>
       expect(screen.getByRole("status")).toHaveTextContent("正在加载球员属性"),
     );
+    expect(screen.getByTestId("skeleton")).toHaveAttribute("aria-live", "polite");
 
     pendingDetail.resolve(jsonResponse(makeDraft()));
 

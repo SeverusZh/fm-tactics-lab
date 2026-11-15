@@ -28,6 +28,12 @@ vi.mock("../lib/file-dialog", async (importOriginal) => {
   };
 });
 
+const desktopMocks = vi.hoisted(() => ({
+  openDataDirectoryMock: vi.fn(async () => null as string | null),
+}));
+
+vi.mock("../lib/desktop", () => ({ openDataDirectory: desktopMocks.openDataDirectoryMock }));
+
 const GIB = 1024 ** 3;
 
 const CONNECTION: Connection = {
@@ -287,6 +293,8 @@ beforeEach(() => {
   fileDialogMocks.isDesktopShellMock.mockReturnValue(false);
   fileDialogMocks.chooseLocalDirectoryMock.mockReset();
   fileDialogMocks.chooseLocalDirectoryMock.mockResolvedValue(null);
+  desktopMocks.openDataDirectoryMock.mockReset();
+  desktopMocks.openDataDirectoryMock.mockResolvedValue(null);
   fetchMock = stubApi();
 });
 
@@ -341,12 +349,80 @@ describe("引擎与游戏目录", () => {
     expect(screen.getByText("引擎目录不可用")).toBeInTheDocument();
     expect(screen.getByText("游戏目录可用")).toBeInTheDocument();
     expect(screen.getByText("缺少以下文件：")).toBeInTheDocument();
-    expect(screen.getByText("fm27_native/catalog.json")).toBeInTheDocument();
+    const engineAvailability = screen
+      .getByText("引擎目录不可用")
+      .closest(".settings-availability") as HTMLElement;
+    expect(within(engineAvailability).getByText("fm27_native/catalog.json")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "诊断引擎兼容性" })).toBeDisabled();
     expect(screen.getByText("引擎目录缺少必需文件，无法诊断")).toBeInTheDocument();
     const engineInput = screen.getByLabelText("引擎目录") as HTMLInputElement;
     await waitFor(() => expect(engineInput.value).toBe("D:/FM27"));
     expect(screen.getByRole("button", { name: "保存配置" })).toBeEnabled();
+  });
+
+  it("已配置引擎目录但资源缺失时提示可能来自旧版本并列出缺项", async () => {
+    fetchMock = stubApi({ engineStatus: () => jsonResponse(MISSING_STATUS) });
+    renderSettingsPage();
+    const migration = await screen.findByTestId("engine-migration");
+    expect(migration).toHaveAttribute("role", "note");
+    expect(migration).toHaveTextContent("可能来自旧版本安装目录");
+    expect(within(migration).getByText("fm27_native/FM27Simulator.exe")).toBeInTheDocument();
+    expect(within(migration).getByText("fm27_native/catalog.json")).toBeInTheDocument();
+    expect(within(migration).getByRole("button", { name: "前往导入引擎资源" })).toBeInTheDocument();
+  });
+
+  it("迁移提示按钮把焦点移到导入来源目录", async () => {
+    fetchMock = stubApi({ engineStatus: () => jsonResponse(MISSING_STATUS) });
+    renderSettingsPage();
+    const migration = await screen.findByTestId("engine-migration");
+    fireEvent.click(within(migration).getByRole("button", { name: "前往导入引擎资源" }));
+    expect(document.getElementById("engine-import-source")).toHaveFocus();
+  });
+
+  it("引擎资源完整时不显示迁移提示", async () => {
+    fetchMock = stubApi({ engineStatus: () => jsonResponse(CONFIGURED_STATUS) });
+    renderSettingsPage();
+    await screen.findByRole("button", { name: "保存配置" });
+    expect(screen.queryByTestId("engine-migration")).toBeNull();
+  });
+
+  it("未配置引擎目录时不显示迁移提示", async () => {
+    fetchMock = stubApi({ engineStatus: () => jsonResponse(UNCONFIGURED_STATUS) });
+    renderSettingsPage();
+    expect(await screen.findByText("引擎目录不可用")).toBeInTheDocument();
+    expect(screen.queryByTestId("engine-migration")).toBeNull();
+  });
+
+  it("缺项过多时只列出前六项并提示剩余数量", async () => {
+    const missing = Array.from({ length: 8 }, (_, index) => `fm27_native/missing-${index + 1}.json`);
+    fetchMock = stubApi({
+      engineStatus: () =>
+        jsonResponse({ ...MISSING_STATUS, engine: { available: false, missing } }),
+    });
+    renderSettingsPage();
+    const migration = await screen.findByTestId("engine-migration");
+    expect(within(migration).getByText("fm27_native/missing-6.json")).toBeInTheDocument();
+    expect(within(migration).queryByText("fm27_native/missing-7.json")).toBeNull();
+    expect(within(migration).getByText("另有 2 项未列出")).toBeInTheDocument();
+  });
+
+  it("读取引擎配置时显示加载骨架", async () => {
+    let resolveStatus: (response: Response) => void = () => {};
+    fetchMock = stubApi({
+      engineStatus: () =>
+        new Promise<Response>((resolve) => {
+          resolveStatus = resolve;
+        }),
+    });
+    renderSettingsPage();
+    const skeletons = await screen.findAllByTestId("skeleton");
+    const engineSkeleton = skeletons.find((item) =>
+      item.textContent?.includes("正在读取引擎配置"),
+    );
+    expect(engineSkeleton).toBeDefined();
+    expect(engineSkeleton as HTMLElement).toHaveAttribute("role", "status");
+    resolveStatus(jsonResponse(CONFIGURED_STATUS));
+    expect(await screen.findByRole("button", { name: "保存配置" })).toBeEnabled();
   });
 
   it("引擎配置读取失败后可以重试", async () => {
@@ -1045,5 +1121,39 @@ describe("导入引擎资源", () => {
     const importButton = await screen.findByRole("button", { name: "导入" });
     expect(importButton).toBeDisabled();
     expect(screen.getByText("请填写来源目录")).toBeInTheDocument();
+  });
+});
+
+describe("本机数据", () => {
+  it("浏览器环境说明无法打开本机目录", async () => {
+    renderSettingsPage();
+
+    expect(await screen.findByText(/浏览器环境无法打开本机目录/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "打开数据目录" })).toBeNull();
+    expect(desktopMocks.openDataDirectoryMock).not.toHaveBeenCalled();
+  });
+
+  it("桌面壳打开数据目录并显示路径", async () => {
+    fileDialogMocks.isDesktopShellMock.mockReturnValue(true);
+    const dataDirectory = "C:\\AppData\\Local\\com.severuszh.fm27lab";
+    desktopMocks.openDataDirectoryMock.mockResolvedValue(dataDirectory);
+    renderSettingsPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "打开数据目录" }));
+
+    await waitFor(() =>
+      expect(desktopMocks.openDataDirectoryMock).toHaveBeenCalledTimes(1),
+    );
+    expect(await screen.findByText(`已在文件管理器中打开 ${dataDirectory}`)).toBeInTheDocument();
+  });
+
+  it("打开数据目录失败时展示错误", async () => {
+    fileDialogMocks.isDesktopShellMock.mockReturnValue(true);
+    desktopMocks.openDataDirectoryMock.mockRejectedValue(new Error("数据目录不可用"));
+    renderSettingsPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "打开数据目录" }));
+
+    expect(await screen.findByText("数据目录不可用")).toBeInTheDocument();
   });
 });

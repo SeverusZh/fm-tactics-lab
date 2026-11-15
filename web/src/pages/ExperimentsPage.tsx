@@ -5,12 +5,15 @@ import { Link } from "react-router-dom";
 
 import { useAppContext } from "../app-context";
 import { EmptyState } from "../components/EmptyState";
+import { JobProgress } from "../components/JobProgress";
 import { Panel } from "../components/Panel";
+import { PoolManager } from "../components/PoolManager";
 import {
   ApiError,
   checkConcurrency,
   getDraft,
   getHostResources,
+  getJob,
   listDrafts,
   startExperiment,
   submitExperiment,
@@ -270,6 +273,12 @@ export function ExperimentsPage() {
     queryFn: () => getHostResources(connection!),
     enabled: connection !== null,
   });
+  const startedJobId = outcome?.kind === "started" ? outcome.job.id : null;
+  const startedJobQuery = useQuery({
+    queryKey: ["jobs", "detail", connection?.url, startedJobId],
+    queryFn: () => getJob(connection!, startedJobId!),
+    enabled: connection !== null && startedJobId !== null,
+  });
 
   const resources = resourcesQuery.data;
   useEffect(() => {
@@ -440,6 +449,8 @@ export function ExperimentsPage() {
   if (name.trim().length > NAME_LIMIT) {
     problems.push({ text: "实验名称最多 " + String(NAME_LIMIT) + " 个字符", tone: "error" });
   }
+  const outcomeJob =
+    outcome?.kind === "started" ? (startedJobQuery.data ?? outcome.job) : null;
   const formLocked = outcome !== null || failure?.phase === "start";
   const lockedNotice =
     outcome?.kind === "started"
@@ -911,6 +922,11 @@ export function ExperimentsPage() {
                     <p className="experiment-outcome-title">
                       实验已启动：{jobLabel(outcome.job)}
                     </p>
+                    {outcomeJob === null ? null : (
+                      <div className="experiment-outcome-progress">
+                        <JobProgress job={outcomeJob} now={Date.now()} showFraction />
+                      </div>
+                    )}
                     <div className="experiment-outcome-meta">
                       <span>总场数 {String(outcome.job.total)}</span>
                       <Link className="button small" to="/jobs">
@@ -968,6 +984,7 @@ export function ExperimentsPage() {
           </>
         )}
       </Panel>
+      {connection !== null ? <PoolManager connection={connection} /> : null}
     </div>
   );
 }

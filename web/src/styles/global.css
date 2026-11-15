@@ -99,3 +99,72 @@ a:hover {
     outline: 2px solid Highlight;
   }
 }
+
+.skeleton {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.skeleton-label {
+  color: var(--text-subtle);
+  font-size: var(--type-body-sm);
+}
+
+.skeleton-lines,
+.skeleton-rows {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.skeleton-line,
+.skeleton-block {
+  display: block;
+  border-radius: var(--radius-tag);
+  background: linear-gradient(
+    90deg,
+    var(--surface-raised) 0%,
+    var(--hover) 50%,
+    var(--surface-raised) 100%
+  );
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.6s ease-in-out infinite;
+}
+
+.skeleton-line {
+  height: 12px;
+}
+
+.skeleton-line:nth-child(2n) {
+  width: 84%;
+}
+
+.skeleton-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 56px 72px;
+  gap: var(--space-3);
+  align-items: center;
+}
+
+.skeleton-block {
+  height: 16px;
+}
+
+.skeleton-row .skeleton-block:last-child {
+  width: 64%;
+}
+
+@keyframes skeleton-shimmer {
+  from {
+    background-position: 200% 0;
+  }
+
+  to {
+    background-position: -200% 0;
+  }
+}
+
+@media (max-width: 640px) {
+  .skeleton-row {
+    grid-template-columns: minmax(0, 1fr) 48px 56px;
+  }
+}

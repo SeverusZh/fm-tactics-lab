@@ -6,6 +6,7 @@ import {
   ListChecks,
   Question,
   SquaresFour,
+  Target,
   UsersThree,
 } from "@phosphor-icons/react";
 import { NavLink } from "react-router-dom";
@@ -14,6 +15,7 @@ import { useAppContext } from "../app-context";
 
 const links = [
   { to: "/tactics", label: "战术板", icon: SquaresFour },
+  { to: "/setpieces", label: "定位球", icon: Target },
   { to: "/players", label: "球员属性", icon: UsersThree },
   { to: "/library", label: "存档战术库", icon: Archive },
   { to: "/experiments", label: "实验", icon: Flask },

@@ -326,6 +326,7 @@ function DraftQueryNavigator({ draftId }: { draftId: string }) {
         清除草稿参数
       </button>
       <span aria-label="当前草稿参数">{searchParams.get("draft") ?? ""}</span>
+      <span aria-label="查询参数">{searchParams.toString()}</span>
     </>
   );
 }
@@ -606,6 +607,27 @@ function withNativeCellRole(
   return next;
 }
 
+function withNativeCellFields(
+  scenario: Record<string, unknown>,
+  side: 0 | 1,
+  phase: 0 | 1,
+  slot: number,
+  patch: Record<string, unknown>,
+): Record<string, unknown> {
+  const next = cloneRecord(scenario);
+  const team = requiredTeam(next, side);
+  const phases = team.phases;
+  if (!Array.isArray(phases)) throw new Error("phases missing");
+  Object.assign(requiredCells(phases[phase])[slot], patch);
+  return next;
+}
+
+function formationPosts(): Record<string, unknown>[] {
+  return callsTo("/formation")
+    .filter((call) => call.init.method === "POST")
+    .map((call) => asRecord(JSON.parse(String(call.init.body))));
+}
+
 function withLegacyCellRole(
   scenario: Record<string, unknown>,
   side: 0 | 1,
@@ -701,7 +723,9 @@ function detailGets() {
 type EditableHandlerOptions = {
   scenario?: Record<string, unknown>;
   catalogBody?: unknown;
+  formationsBody?: unknown;
   onPatch?: (body: Record<string, unknown>) => Response | Promise<Response>;
+  onFormation?: (body: Record<string, unknown>) => Response | Promise<Response>;
   details?: Record<string, Draft>;
   items?: DraftSummary[];
 };
@@ -713,11 +737,20 @@ function editableHandlers(options: EditableHandlerOptions = {}): FetchHandler {
   return (url, init) => {
     if (url.endsWith("/api/catalog")) return jsonResponse(catalogBody);
     if (url.endsWith("/api/drafts")) return jsonResponse(makeDraftList(items));
+    if (url.endsWith("/api/formations")) {
+      return jsonResponse(options.formationsBody ?? { formations: [], editing: null });
+    }
     if (init.method === "PATCH") {
       const body = asRecord(JSON.parse(String(init.body)));
       return options.onPatch === undefined
         ? jsonResponse(makeDraft({ id: "draft-1", scenario }))
         : options.onPatch(body);
+    }
+    if (init.method === "POST" && url.endsWith("/formation")) {
+      const body = asRecord(JSON.parse(String(init.body)));
+      return options.onFormation === undefined
+        ? jsonResponse({ formation_id: String(body.formation_id), scenario, notes: [] })
+        : options.onFormation(body);
     }
     const id = url.slice(url.lastIndexOf("/") + 1);
     return jsonResponse(options.details?.[id] ?? makeDraft({ id, scenario }));
@@ -1606,6 +1639,9 @@ describe("TacticsPage 初始草稿参数", () => {
     expect(screen.getByRole("combobox", { name: "选择草稿" })).toHaveValue("draft-1");
     expect(callsTo("/api/drafts/draft-1")).toHaveLength(1);
     expect(callsTo("/api/drafts/missing")).toHaveLength(0);
+    await waitFor(() =>
+      expect(screen.getByLabelText("当前草稿参数")).toHaveTextContent("draft-1"),
+    );
   });
 
   it("地址栏参数变化后更新选中草稿", async () => {
@@ -1738,6 +1774,66 @@ describe("TacticsPage 初始草稿参数", () => {
     const items = await pitchSlots();
     expect(within(items[0]).getByText("西城队球员 01")).toBeInTheDocument();
     expect(patchedBodies()[0]?.scenario).toEqual(withLineupSwap(makeScenario(), 0, 2, 5));
+  });
+
+  it("手动选择草稿后写入地址栏参数并保留其他查询参数", async () => {
+    stubFetch(parameterHandlers());
+    renderTacticsPage(connection, ["/tactics?view=board"]);
+
+    const select = await screen.findByRole("combobox", { name: "选择草稿" });
+    expect(select).toHaveValue("draft-1");
+    fireEvent.change(select, { target: { value: "draft-2" } });
+
+    await waitFor(() =>
+      expect(screen.getByLabelText("当前草稿参数")).toHaveTextContent("draft-2"),
+    );
+    const params = screen.getByLabelText("查询参数");
+    expect(params).toHaveTextContent("view=board");
+    expect(params).toHaveTextContent("draft=draft-2");
+    expect(screen.getByRole("combobox", { name: "选择草稿" })).toHaveValue("draft-2");
+    const slots = await pitchSlots();
+    expect(within(slots[0]).getByText("西城队球员 01")).toBeInTheDocument();
+  });
+
+  it("手动选择草稿后按地址栏参数可恢复选择", async () => {
+    stubFetch(parameterHandlers());
+    const first = renderTacticsPage(connection, ["/tactics"]);
+
+    const select = await screen.findByRole("combobox", { name: "选择草稿" });
+    fireEvent.change(select, { target: { value: "draft-2" } });
+    await waitFor(() =>
+      expect(screen.getByLabelText("当前草稿参数")).toHaveTextContent("draft-2"),
+    );
+    first.unmount();
+
+    renderTacticsPage(connection, ["/tactics?draft=draft-2"]);
+    const restored = await screen.findByRole("combobox", { name: "选择草稿" });
+    await waitFor(() => expect(restored).toHaveValue("draft-2"));
+    const slots = await pitchSlots();
+    expect(within(slots[0]).getByText("西城队球员 01")).toBeInTheDocument();
+  });
+
+  it("未保存修改时手动切换草稿不写入地址栏参数", async () => {
+    stubFetch(parameterHandlers());
+    renderTacticsPage(connection, ["/tactics"]);
+
+    const slots = await startEditing();
+    fireEvent.dragStart(slots[2]);
+    fireEvent.dragOver(slots[5]);
+    fireEvent.drop(slots[5]);
+
+    fireEvent.change(screen.getByRole("combobox", { name: "选择草稿" }), {
+      target: { value: "draft-2" },
+    });
+    const dialog = await screen.findByRole("dialog", { name: "切换草案" });
+    expect(screen.getByLabelText("当前草稿参数")).toHaveTextContent("");
+    expect(screen.getByLabelText("查询参数")).toHaveTextContent("");
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "取消" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(screen.getByRole("combobox", { name: "选择草稿" })).toHaveValue("draft-1");
+    expect(screen.getByRole("button", { name: "保存" })).toBeInTheDocument();
+    expect(screen.getByLabelText("查询参数")).toHaveTextContent("");
   });
 });
 type LifecycleOptions = {
@@ -3211,5 +3307,300 @@ describe("TacticsPage 球队级编辑", () => {
     expect(bodies[1]?.scenario).toEqual(expected);
     expect(patchCount).toBe(2);
     expect(screen.queryByRole("alert")).toBeNull();
+  });
+});
+
+const FORMATION_POSITIONS = [
+  { id: "GK", mask: 1 },
+  { id: "DR", mask: 16 },
+  { id: "DCR", mask: 16 },
+  { id: "DCL", mask: 16 },
+  { id: "DL", mask: 16 },
+  { id: "DMC", mask: 128 },
+  { id: "MCR", mask: 256 },
+  { id: "MCL", mask: 256 },
+  { id: "AMR", mask: 512 },
+  { id: "AML", mask: 512 },
+  { id: "ST", mask: 64 },
+];
+
+const FORMATION_DUTIES = ["0", "2097152"];
+
+const FORMATION_PLAYER_INSTRUCTIONS = [
+  {
+    id: 14,
+    label: "盯防方式",
+    options: [
+      { id: 0, label: "默认" },
+      { id: 34, label: "指定盯人" },
+      { id: 35, label: "区域盯人" },
+    ],
+  },
+  {
+    id: 8,
+    label: "压迫强度",
+    options: [
+      { id: 0, label: "默认" },
+      { id: 1, label: "加强" },
+    ],
+  },
+];
+
+const FORMATIONS_RESPONSE = {
+  formations: [
+    { id: "4-4-2", name: "4-4-2", phases: [] },
+    { id: "4-2-3-1", name: "4-2-3-1", phases: [] },
+  ],
+  editing: {
+    duties: FORMATION_DUTIES,
+    player_instructions: FORMATION_PLAYER_INSTRUCTIONS,
+    positions: FORMATION_POSITIONS,
+    role_eligibility: {
+      DCR: [["CentreBack"], ["OPCentreBack"]],
+      ST: [["CentreForward", "Winger"], ["OPCentreForward"]],
+    },
+    role_eligibility_context: null,
+  },
+};
+
+const FORMATIONS_CONTEXT_RESPONSE = {
+  formations: FORMATIONS_RESPONSE.formations,
+  editing: {
+    duties: FORMATION_DUTIES,
+    player_instructions: FORMATION_PLAYER_INSTRUCTIONS,
+    positions: FORMATION_POSITIONS,
+    role_eligibility: {
+      DCR: [["FullBack", "CentreBack"], ["OPFullBack", "OPCentreBack"]],
+    },
+    role_eligibility_context: {
+      "3:1": { DCR: [["CentreBack"], ["OPCentreBack"]] },
+    },
+  },
+};
+
+const FORMATIONS_PHASE_RESPONSE = {
+  formations: FORMATIONS_RESPONSE.formations,
+  editing: {
+    duties: FORMATION_DUTIES,
+    player_instructions: [
+      { id: 8, label: "有球指令", phase: 0, options: [{ id: 0, label: "默认" }] },
+      { id: 9, label: "无球指令", phase: 1, options: [{ id: 0, label: "默认" }] },
+      { id: 10, label: "通用指令", options: [{ id: 0, label: "默认" }] },
+    ],
+    positions: FORMATION_POSITIONS,
+    role_eligibility: {},
+    role_eligibility_context: null,
+  },
+};
+
+function formationDialog(): HTMLElement {
+  const dialog = screen.queryByRole("dialog", { name: "应用阵型" });
+  if (dialog === null) throw new Error("formation dialog missing");
+  return dialog;
+}
+
+describe("TacticsPage 阵型模板与单元编辑", () => {
+  beforeEach(() => {
+    fetchMock.mockReset();
+    vi.stubGlobal("fetch", fetchMock);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    Reflect.deleteProperty(window, "matchMedia");
+  });
+
+  it("编辑态载入阵型模板与职责、个人指令选项", async () => {
+    stubFetch(editableHandlers({ formationsBody: FORMATIONS_RESPONSE }));
+    renderTacticsPage();
+    const slots = await startEditing();
+
+    const templateSelect = await screen.findByRole("combobox", { name: "阵型模板" });
+    expect(templateSelect).toHaveValue("4-4-2");
+    expect(optionLabels(templateSelect)).toEqual(["4-4-2", "4-2-3-1"]);
+
+    fireEvent.click(slots[2]);
+    const dutySelect = screen.getByRole("combobox", { name: "职责" });
+    expect(optionValues(dutySelect)).toEqual(FORMATION_DUTIES);
+    expect(roleOptionValues(screen.getByRole("combobox", { name: "角色" }))).toEqual([
+      "CentreBack",
+    ]);
+    expect(
+      optionValues(screen.getByRole("combobox", { name: "个人指令：盯防方式" })),
+    ).toEqual(["", "0", "34", "35"]);
+    const targetSelect = screen.getByRole("combobox", { name: "盯人位置" });
+    expect(optionValues(targetSelect)).toContain("64");
+    expect(optionLabels(targetSelect)).toContain("ST");
+    const playerSelect = screen.getByRole("combobox", { name: "盯防球员" });
+    expect(optionValues(playerSelect)).toContain("255");
+    expect(optionValues(playerSelect)).toContain("5");
+    expect(optionLabels(playerSelect)).toContain("5 南港队球员 06");
+  });
+
+  it("角色下拉按资格上下文过滤", async () => {
+    stubFetch(editableHandlers({ formationsBody: FORMATIONS_CONTEXT_RESPONSE }));
+    renderTacticsPage();
+    const slots = await startEditing();
+    fireEvent.click(slots[2]);
+
+    expect(roleOptionValues(screen.getByRole("combobox", { name: "角色" }))).toEqual([
+      "CentreBack",
+    ]);
+  });
+
+  it("个人指令按阶段过滤", async () => {
+    stubFetch(editableHandlers({ formationsBody: FORMATIONS_PHASE_RESPONSE }));
+    renderTacticsPage();
+    const slots = await startEditing();
+    await screen.findByRole("combobox", { name: "阵型模板" });
+
+    fireEvent.click(slots[2]);
+    expect(screen.getByRole("combobox", { name: "个人指令：有球指令" })).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "个人指令：通用指令" })).toBeInTheDocument();
+    expect(screen.queryByRole("combobox", { name: "个人指令：无球指令" })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "无球" }));
+    fireEvent.click(slots[2]);
+    expect(screen.getByRole("combobox", { name: "个人指令：无球指令" })).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "个人指令：通用指令" })).toBeInTheDocument();
+    expect(screen.queryByRole("combobox", { name: "个人指令：有球指令" })).toBeNull();
+  });
+
+  it("修改职责、个人指令与盯人位置后保存", async () => {
+    const scenario = makeNativeScenario();
+    stubFetch(editableHandlers({ scenario, formationsBody: FORMATIONS_RESPONSE }));
+    renderTacticsPage();
+    const slots = await startEditing();
+    await screen.findByRole("combobox", { name: "阵型模板" });
+    fireEvent.click(slots[3]);
+
+    fireEvent.change(screen.getByRole("combobox", { name: "职责" }), {
+      target: { value: "2097152" },
+    });
+    fireEvent.change(screen.getByRole("combobox", { name: "盯人位置" }), {
+      target: { value: "64" },
+    });
+    fireEvent.change(screen.getByRole("combobox", { name: "个人指令：盯防方式" }), {
+      target: { value: "34" },
+    });
+    fireEvent.change(screen.getByRole("combobox", { name: "盯防球员" }), {
+      target: { value: "5" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+
+    expect(await screen.findByRole("status")).toHaveTextContent("已保存");
+    expect(patchedBodies()[0]?.scenario).toEqual(
+      withNativeCellFields(scenario, 0, 0, 3, {
+        duty: "2097152",
+        target_player: 5,
+        target_position: 64,
+        instructions: { "14": 34 },
+      }),
+    );
+  });
+
+  it("清空个人指令写入空对象", async () => {
+    const scenario = withNativeCellFields(makeNativeScenario(), 0, 0, 3, {
+      instructions: { "14": 35, "8": 1 },
+    });
+    stubFetch(editableHandlers({ scenario, formationsBody: FORMATIONS_RESPONSE }));
+    renderTacticsPage();
+    const slots = await startEditing();
+    await screen.findByRole("combobox", { name: "阵型模板" });
+    fireEvent.click(slots[3]);
+
+    expect(screen.getByRole("combobox", { name: "个人指令：盯防方式" })).toHaveValue("35");
+    fireEvent.click(screen.getByRole("button", { name: "清空个人指令" }));
+    expect(screen.getByRole("combobox", { name: "个人指令：盯防方式" })).toHaveValue("");
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+
+    expect(await screen.findByRole("status")).toHaveTextContent("已保存");
+    expect(patchedBodies()[0]?.scenario).toEqual(
+      withNativeCellFields(scenario, 0, 0, 3, { instructions: {} }),
+    );
+  });
+
+  it("应用阵型需二次确认，确认后板面更新且不保存", async () => {
+    const scenario = makeNativeScenario();
+    const applied = withNativeCellRole(scenario, 0, 0, 10, "Winger");
+    stubFetch(
+      editableHandlers({
+        scenario,
+        formationsBody: FORMATIONS_RESPONSE,
+        onFormation: (body) => {
+          if (body.formation_id !== "4-2-3-1") {
+            return jsonResponse({ error: { code: "validation_failed", message: "阵型模板不存在" } }, 400);
+          }
+          return jsonResponse({
+            formation_id: "4-2-3-1",
+            scenario: applied,
+            notes: ["主队：缺少球员名单，按位置顺序填充"],
+          });
+        },
+      }),
+    );
+    renderTacticsPage();
+    await startEditing();
+    const templateSelect = await screen.findByRole("combobox", { name: "阵型模板" });
+    fireEvent.change(templateSelect, { target: { value: "4-2-3-1" } });
+    fireEvent.click(screen.getByRole("button", { name: "应用阵型" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "应用阵型" });
+    expect(within(dialog).getByText(/会覆盖两阶段全部位置与角色/)).toBeInTheDocument();
+    expect(formationPosts()).toHaveLength(0);
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "应用" }));
+
+    await waitFor(() => expect(formationPosts()).toHaveLength(1));
+    expect(formationPosts()[0]).toMatchObject({ formation_id: "4-2-3-1" });
+    expect(formationPosts()[0]?.scenario).toEqual(scenario);
+    expect(await screen.findByText("已应用阵型 4-2-3-1")).toBeInTheDocument();
+    expect(screen.getByText("主队：缺少球员名单，按位置顺序填充")).toBeInTheDocument();
+    expect((await slotButtons())[10]).toHaveTextContent("边锋");
+    expect(screen.getByText("有未保存修改，切换或放弃前需要确认")).toBeInTheDocument();
+    expect(patchedBodies()).toHaveLength(0);
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("取消阵型应用保持原阵型", async () => {
+    const scenario = makeNativeScenario();
+    stubFetch(editableHandlers({ scenario, formationsBody: FORMATIONS_RESPONSE }));
+    renderTacticsPage();
+    await startEditing();
+    await screen.findByRole("combobox", { name: "阵型模板" });
+    fireEvent.click(screen.getByRole("button", { name: "应用阵型" }));
+    fireEvent.click(within(await screen.findByRole("dialog", { name: "应用阵型" })).getByRole("button", {
+      name: "取消",
+    }));
+
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(formationPosts()).toHaveLength(0);
+    expect((await slotButtons())[10]).toHaveTextContent("中锋");
+    expect(screen.queryByText("有未保存修改，切换或放弃前需要确认")).toBeNull();
+  });
+
+  it("阵型应用失败展示原因并保留原阵型", async () => {
+    const scenario = makeNativeScenario();
+    stubFetch(
+      editableHandlers({
+        scenario,
+        formationsBody: FORMATIONS_RESPONSE,
+        onFormation: () =>
+          jsonResponse({ error: { code: "validation_failed", message: "阵型模板不存在" } }, 400),
+      }),
+    );
+    renderTacticsPage();
+    await startEditing();
+    await screen.findByRole("combobox", { name: "阵型模板" });
+    fireEvent.click(screen.getByRole("button", { name: "应用阵型" }));
+    fireEvent.click(within(await screen.findByRole("dialog", { name: "应用阵型" })).getByRole("button", {
+      name: "应用",
+    }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("阵型模板不存在");
+    expect(formationPosts()).toHaveLength(1);
+    expect(formationDialog()).toBeInTheDocument();
+    expect((await slotButtons())[10]).toHaveTextContent("中锋");
+    expect(screen.queryByText("有未保存修改，切换或放弃前需要确认")).toBeNull();
   });
 });

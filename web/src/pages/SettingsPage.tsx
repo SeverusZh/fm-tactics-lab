@@ -12,6 +12,7 @@ import {
 import { useAppContext } from "../app-context";
 import { EmptyState } from "../components/EmptyState";
 import { Panel } from "../components/Panel";
+import { Skeleton } from "../components/Skeleton";
 import {
   apiJson,
   checkConcurrency,
@@ -33,6 +34,7 @@ import {
   type Setting,
 } from "../lib/api";
 import type { Connection } from "../lib/connection";
+import { openDataDirectory } from "../lib/desktop";
 import { chooseLocalDirectory, isDesktopShell } from "../lib/file-dialog";
 import "../styles/settings.css";
 
@@ -43,6 +45,7 @@ const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f]/;
 const RESTART_TIMEOUT_MS = 60_000;
 const RESTART_POLL_INTERVAL_MS = 1_000;
 const SHA_PREFIX_LENGTH = 12;
+const MIGRATION_MISSING_LIMIT = 6;
 
 type EngineAvailability = EngineStatus["engine"];
 type RestartPhase = "idle" | "confirming" | "pending" | "recovered" | "timeout";
@@ -299,11 +302,7 @@ function AdvancedSettingsPanel() {
       />
     );
   } else if (settings.isPending) {
-    settingsBody = (
-      <p className="jobs-loading" role="status">
-        正在加载设置…
-      </p>
-    );
+    settingsBody = <Skeleton label="正在加载设置…" variant="rows" count={4} />;
   } else if (settings.isError) {
     settingsBody = (
       <div className="inline-alert" role="alert">
@@ -323,7 +322,7 @@ function AdvancedSettingsPanel() {
     );
   } else {
     settingsBody = (
-      <div className="jobs-table-wrap">
+      <div className="jobs-table-wrap" tabIndex={0} role="region" aria-label="设置列表">
         <table className="jobs-table settings-table">
           <caption className="sr-only">设置列表</caption>
           <thead>
@@ -532,6 +531,8 @@ export function SettingsPage() {
   const [importSource, setImportSource] = useState("");
   const [importResult, setImportResult] = useState<EngineImportResult | null>(null);
   const [importError, setImportError] = useState<string | null>(null);
+  const [dataDirError, setDataDirError] = useState<string | null>(null);
+  const [dataDirNotice, setDataDirNotice] = useState<string | null>(null);
 
   const editedEngine = useRef(false);
   const editedGame = useRef(false);
@@ -545,6 +546,17 @@ export function SettingsPage() {
   const confirmWasOpen = useRef(false);
   const refreshRef = useRef(refresh);
   const preflightKeyRef = useRef("");
+
+  async function revealDataDirectory() {
+    setDataDirError(null);
+    setDataDirNotice(null);
+    try {
+      const path = await openDataDirectory();
+      setDataDirNotice(path === null ? null : `已在文件管理器中打开 ${path}`);
+    } catch (error) {
+      setDataDirError(errorMessage(error));
+    }
+  }
 
   useEffect(() => {
     refreshRef.current = refresh;
@@ -854,6 +866,21 @@ export function SettingsPage() {
     });
   };
 
+  const engineMissing = engineAvailability?.missing ?? [];
+  const migrationVisible =
+    engineStatusData?.engine_root != null &&
+    engineAvailability?.available === false &&
+    engineMissing.length > 0;
+  const migrationMissing = engineMissing.slice(0, MIGRATION_MISSING_LIMIT);
+  const migrationHiddenCount = engineMissing.length - migrationMissing.length;
+
+  const focusImportSource = () => {
+    const target = document.getElementById("engine-import-source");
+    if (target === null) return;
+    target.scrollIntoView?.({ block: "center" });
+    target.focus();
+  };
+
   let engineBody: ReactNode;
   if (connection === null) {
     engineBody = (
@@ -864,11 +891,7 @@ export function SettingsPage() {
       />
     );
   } else if (engineQuery.isPending) {
-    engineBody = (
-      <p className="jobs-loading" role="status">
-        正在读取引擎配置…
-      </p>
-    );
+    engineBody = <Skeleton label="正在读取引擎配置…" count={3} />;
   } else if (engineQuery.isError) {
     engineBody = (
       <div className="inline-alert" role="alert">
@@ -881,6 +904,26 @@ export function SettingsPage() {
   } else {
     engineBody = (
       <div className="settings-engine" data-testid="settings-engine">
+        {migrationVisible ? (
+          <div className="settings-migration" data-testid="engine-migration" role="note">
+            <p className="settings-migration-title">
+              引擎目录缺少必需资源，可能来自旧版本安装目录。
+            </p>
+            <ul className="settings-missing">
+              {migrationMissing.map((item) => (
+                <li key={item}>
+                  <code>{item}</code>
+                </li>
+              ))}
+              {migrationHiddenCount > 0 ? <li>另有 {migrationHiddenCount} 项未列出</li> : null}
+            </ul>
+            <div className="settings-actions">
+              <button className="button" type="button" onClick={focusImportSource}>
+                前往导入引擎资源
+              </button>
+            </div>
+          </div>
+        ) : null}
         <form
           className="settings-engine-form"
           aria-label="引擎与游戏目录配置"
@@ -1447,6 +1490,31 @@ export function SettingsPage() {
           <dt>数据库</dt>
           <dd>{health?.database ?? "未知"}</dd>
         </dl>
+      </Panel>
+
+      <Panel title="本机数据" className="span-12">
+        <div className="settings-data-dir">
+          <p className="field-hint">数据目录存放数据库、日志与 sidecar 的 endpoint.json。</p>
+          {desktop ? (
+            <div className="settings-actions">
+              <button className="button" type="button" onClick={() => void revealDataDirectory()}>
+                打开数据目录
+              </button>
+            </div>
+          ) : (
+            <p className="field-hint">浏览器环境无法打开本机目录，请在桌面应用中使用。</p>
+          )}
+          {dataDirError === null ? null : (
+            <div className="inline-alert" role="alert">
+              {dataDirError}
+            </div>
+          )}
+          {dataDirNotice === null ? null : (
+            <p className="jobs-notice" role="status">
+              {dataDirNotice}
+            </p>
+          )}
+        </div>
       </Panel>
 
       <details className="panel span-12 settings-advanced" data-testid="settings-advanced">

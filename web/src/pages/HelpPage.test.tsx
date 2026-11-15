@@ -1,8 +1,14 @@
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { HelpPage } from "./HelpPage";
+
+const desktopMocks = vi.hoisted(() => ({
+  openExternalUrlMock: vi.fn(async (url: string) => url.length > 0),
+}));
+
+vi.mock("../lib/desktop", () => ({ openExternalUrl: desktopMocks.openExternalUrlMock }));
 
 const PAGE_NAMES = [
   "战术板",
@@ -11,6 +17,7 @@ const PAGE_NAMES = [
   "实验",
   "实验结果",
   "任务管理",
+  "定位球",
   "设置",
   "帮助",
 ];
@@ -37,6 +44,11 @@ function renderHelp() {
 }
 
 describe("HelpPage", () => {
+  beforeEach(() => {
+    desktopMocks.openExternalUrlMock.mockReset();
+    desktopMocks.openExternalUrlMock.mockImplementation(async (url: string) => url.length > 0);
+  });
+
   it("提供三步上手与各页面用途", () => {
     renderHelp();
 
@@ -101,6 +113,36 @@ describe("HelpPage", () => {
       expect(within(faq).getByText(question)).toBeInTheDocument();
     }
     expect(within(faq).getByText(/引擎目录未配置/)).toBeInTheDocument();
+  });
+
+  it("外部链接交给系统浏览器打开", async () => {
+    renderHelp();
+
+    const section = screen.getByRole("region", { name: "外部链接" });
+    const repo = within(section).getByRole("link", { name: "项目仓库" });
+    expect(repo).toHaveAttribute("href", "https://github.com/SeverusZh/fm-tactics-lab");
+    expect(within(section).getByRole("link", { name: "问题反馈" })).toHaveAttribute(
+      "href",
+      "https://github.com/SeverusZh/fm-tactics-lab/issues",
+    );
+
+    fireEvent.click(repo);
+
+    await waitFor(() =>
+      expect(desktopMocks.openExternalUrlMock).toHaveBeenCalledWith(
+        "https://github.com/SeverusZh/fm-tactics-lab",
+      ),
+    );
+    expect(within(section).queryByRole("alert")).toBeNull();
+  });
+
+  it("外部链接打开失败时提示手动复制", async () => {
+    desktopMocks.openExternalUrlMock.mockResolvedValue(false);
+    renderHelp();
+
+    fireEvent.click(screen.getByRole("link", { name: "问题反馈" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("手动复制地址");
   });
 
   it("提供页面跳转按钮", () => {

@@ -1,7 +1,8 @@
-import { Fragment } from "react";
+import { Fragment, useState } from "react";
 import { Link } from "react-router-dom";
 
 import { Panel } from "../components/Panel";
+import { openExternalUrl } from "../lib/desktop";
 
 const STEPS = [
   "在存档战术库导入 .fm 存档，查看球队名单并把阵容同步为草案。",
@@ -19,6 +20,7 @@ const PAGES = [
   { name: "实验", purpose: "选择草案与固定对手或客队战术池，提交并启动批次。" },
   { name: "实验结果", purpose: "查看批次汇总、指标、配对差值与逐场比分。" },
   { name: "任务管理", purpose: "查看任务状态与进度，取消或删除任务。" },
+  { name: "定位球", purpose: "编辑定位球套路、任务与角色分配，并导入导出定位球文档。" },
   { name: "设置", purpose: "配置引擎目录与游戏目录、诊断兼容性，并管理高级设置。" },
   { name: "帮助", purpose: "查看上手步骤、能力边界与常见问题。" },
 ];
@@ -34,6 +36,11 @@ const WITH_ENGINE = [
   "导入真实 FMF 战术文件：由游戏自身的序列化器解析归档内容。",
   "运行模拟比赛与批量实验：需要可用的 FM27 宿主与游戏目录。",
   "引擎诊断：校验宿主与游戏版本是否匹配。",
+];
+
+const EXTERNAL_LINKS = [
+  { label: "项目仓库", url: "https://github.com/SeverusZh/fm-tactics-lab" },
+  { label: "问题反馈", url: "https://github.com/SeverusZh/fm-tactics-lab/issues" },
 ];
 
 const FAQ = [
@@ -55,6 +62,14 @@ const FAQ = [
 ];
 
 export function HelpPage() {
+  const [linkError, setLinkError] = useState<string | null>(null);
+
+  async function followLink(url: string) {
+    setLinkError(null);
+    const opened = await openExternalUrl(url).catch(() => false);
+    if (!opened) setLinkError("当前环境无法打开外部链接，请手动复制地址访问。");
+  }
+
   return (
     <div className="page-grid">
       <Panel title="帮助" className="span-12">
@@ -110,6 +125,31 @@ export function HelpPage() {
               </Fragment>
             ))}
           </dl>
+        </section>
+        <section className="help-section" aria-label="外部链接">
+          <h3>外部链接</h3>
+          <nav className="help-links" aria-label="外部链接列表">
+            {EXTERNAL_LINKS.map((link) => (
+              <a
+                key={link.url}
+                className="button"
+                href={link.url}
+                target="_blank"
+                rel="noreferrer"
+                onClick={(event) => {
+                  event.preventDefault();
+                  void followLink(link.url);
+                }}
+              >
+                {link.label}
+              </a>
+            ))}
+          </nav>
+          {linkError === null ? null : (
+            <div className="inline-alert" role="alert">
+              {linkError}
+            </div>
+          )}
         </section>
         <nav className="help-links" aria-label="页面跳转">
           <Link className="button" to="/tactics">

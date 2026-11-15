@@ -11,6 +11,7 @@ import {
 import { useAppContext } from "../app-context";
 import { EmptyState } from "../components/EmptyState";
 import { Panel } from "../components/Panel";
+import { Skeleton } from "../components/Skeleton";
 import {
   applyDraftAttributes,
   getDraft,
@@ -859,11 +860,7 @@ export function PlayersPage() {
       />
     );
   } else if (drafts.isPending) {
-    body = (
-      <p className="jobs-loading" role="status">
-        正在加载草稿…
-      </p>
-    );
+    body = <Skeleton label="正在加载草稿…" variant="rows" count={6} />;
   } else if (drafts.isError) {
     body = (
       <div className="inline-alert" role="alert">
@@ -884,11 +881,7 @@ export function PlayersPage() {
   } else {
     let content: ReactNode;
     if (detail.isPending) {
-      content = (
-        <p className="jobs-loading" role="status">
-          正在加载球员属性…
-        </p>
-      );
+      content = <Skeleton label="正在加载球员属性…" count={6} />;
     } else if (detail.isError) {
       content = (
         <div className="inline-alert" role="alert">

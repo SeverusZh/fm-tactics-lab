@@ -186,3 +186,39 @@
   margin: 0;
   overflow-wrap: anywhere;
 }
+
+.settings-migration {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border: 1px solid var(--amber);
+  border-radius: var(--radius-control);
+  background: var(--surface-raised);
+}
+
+.settings-migration-title {
+  margin: 0;
+  color: var(--text);
+  font-size: var(--type-body-sm);
+  font-weight: 600;
+}
+
+@media (max-width: 640px) {
+  .settings-engine-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-path-row {
+    flex-wrap: wrap;
+  }
+
+  .settings-path-row .button {
+    flex: 1 1 100%;
+  }
+
+  .settings-diagnosis-meta,
+  .settings-import-meta {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-1);
+  }
+}

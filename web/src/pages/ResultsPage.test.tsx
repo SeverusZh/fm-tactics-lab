@@ -1959,3 +1959,163 @@ describe("ResultsPage 实时事件", () => {
     expect(signal?.aborted).toBe(true);
   });
 });
+
+describe("ResultsPage 单场明细", () => {
+  beforeEach(() => {
+    fetchMock.mockReset();
+    vi.stubGlobal("fetch", fetchMock);
+    sessionStorage.clear();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("展开逐场记录显示单场统计、抽签与日志路径", async () => {
+    const run = makeRun({
+      stats: {
+        teams: [
+          {
+            side: 0,
+            xg: 1.42,
+            possession: 0.58,
+            shots: 12,
+            shots_on_target: 5,
+            passes: 420,
+            completed_passes: 351,
+          },
+          {
+            side: 1,
+            xg: 0.85,
+            possession: 0.42,
+            shots: 8,
+            shots_on_target: 3,
+            passes: 312,
+            completed_passes: 250,
+          },
+        ],
+        tactic_pool_entry: { index: 0, name: "诺维奇城客场战术" },
+      },
+      events: { collected: true, goals: [{ minute: 12 }, { minute: 77 }], cards: [{ minute: 54 }] },
+      log_path: "/tmp/fm27/match-1.log",
+    });
+    stubFetch(resultsFetch({ runs: () => ({ items: [run], total: 1, next_offset: null }) }));
+    renderResultsPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "展开第 1 场明细" }));
+    const detail = await screen.findByRole("region", { name: "第 1 场明细" });
+    expect(within(detail).getByText("诺维奇城客场战术")).toBeInTheDocument();
+    expect(within(detail).getByText("1.42")).toBeInTheDocument();
+    expect(within(detail).getByText("58.0%")).toBeInTheDocument();
+    expect(within(detail).getByText("12")).toBeInTheDocument();
+    expect(within(detail).getByText("351")).toBeInTheDocument();
+    expect(within(detail).getByText("/tmp/fm27/match-1.log")).toBeInTheDocument();
+    expect(within(detail).getByText("事件：进球 2，红黄牌 1")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "收起第 1 场明细" })).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "收起第 1 场明细" }));
+    await waitFor(() =>
+      expect(screen.queryByRole("region", { name: "第 1 场明细" })).not.toBeInTheDocument(),
+    );
+  });
+
+  it("失败场展示失败状态与缺失原因说明", async () => {
+    stubFetch(
+      resultsFetch({
+        runs: () => ({
+          items: [makeRun({ score: null, verified: false })],
+          total: 1,
+          next_offset: null,
+        }),
+      }),
+    );
+    renderResultsPage();
+
+    expect(await screen.findByText("失败")).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("button", { name: "展开第 1 场明细" }));
+    const detail = await screen.findByRole("region", { name: "第 1 场明细" });
+    expect(within(detail).getByRole("alert")).toHaveTextContent(
+      "该场未产出有效比分，未计入任务汇总。",
+    );
+    expect(within(detail).getByText("无有效比分")).toBeInTheDocument();
+    expect(within(detail).getByText("该场没有球队统计")).toBeInTheDocument();
+    expect(within(detail).getByText("未记录")).toBeInTheDocument();
+    expect(within(detail).getByText("无日志")).toBeInTheDocument();
+    expect(within(detail).getByText("事件：无事件数据")).toBeInTheDocument();
+  });
+
+  it("逐场抽签仅记录索引时用客队战术池条目名称", async () => {
+    stubFetch(
+      resultsFetch({
+        runs: () => ({
+          items: [makeRun({ stats: { tactic_pool_entry: 1 } })],
+          total: 1,
+          next_offset: null,
+        }),
+        pool: makePoolSummary(),
+      }),
+    );
+    renderResultsPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "展开第 1 场明细" }));
+    const detail = await screen.findByRole("region", { name: "第 1 场明细" });
+    expect(within(detail).getByText("客队战术 2")).toBeInTheDocument();
+  });
+
+  it("任务级失败原因在结果页展示", async () => {
+    const failedJob = makeJob({ status: "error", summary: { error: "引擎在第 3 场后崩溃" } });
+    stubFetch(
+      resultsFetch({
+        jobs: { items: [failedJob], total: 1, next_offset: null },
+        summary: makeSummary({
+          job: failedJob,
+          metrics: null,
+          paired: { n: 0, goal_difference_delta: null },
+        }),
+      }),
+    );
+    renderResultsPage();
+
+    const reason = await screen.findByText("引擎在第 3 场后崩溃");
+    expect(reason.closest(".inline-alert")).not.toBeNull();
+    expect(screen.getByText("任务失败原因")).toBeInTheDocument();
+  });
+
+  it("逐场记录为空时提示", async () => {
+    stubFetch(
+      resultsFetch({
+        runs: () => ({ items: [], total: 0, next_offset: null }),
+      }),
+    );
+    renderResultsPage();
+
+    expect(await screen.findByText("暂无逐场记录")).toBeInTheDocument();
+  });
+
+  it("逐场记录加载失败时展示错误并可重试", async () => {
+    let attempts = 0;
+    stubFetch((url, init) => {
+      if (url.includes("/runs")) {
+        attempts += 1;
+        if (attempts === 1) {
+          return jsonResponse(
+            { error: { message: "逐场记录读取失败", code: "internal", retriable: false } },
+            500,
+          );
+        }
+        return jsonResponse({ items: [makeRun()], total: 1, next_offset: null });
+      }
+      return resultsFetch()(url, init);
+    });
+    renderResultsPage();
+
+    expect(await screen.findByText("逐场记录读取失败")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "重试" }));
+
+    expect(await screen.findByText("2–1")).toBeInTheDocument();
+    await waitFor(() => expect(attempts).toBe(2));
+  });
+});

@@ -8,7 +8,7 @@ import {
   type KeyboardEvent,
   type ReactNode,
 } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 
 import { useAppContext } from "../app-context";
 import { EmptyState } from "../components/EmptyState";
@@ -27,6 +27,7 @@ import {
   type Catalog,
   type CatalogTeamInstruction,
 } from "../lib/api";
+import { applyFormation, listFormations, type FormationList } from "../lib/api-formations";
 import "../styles/tactics.css";
 
 const SLOT_COUNT = 11;
@@ -34,6 +35,11 @@ const MAX_INSTRUCTION_ROWS = 8;
 const COMPACT_MAX_WIDTH = 640;
 const PHASE_LABELS = ["有球", "无球"] as const;
 const CATALOG_MISSING_NOTE = "未载入引擎目录，指令与角色显示原生编号";
+const FORMATION_METADATA_MISSING_NOTE = "引擎目录不可用，职责与个人指令暂不可编辑";
+const NO_TARGET_POSITION = "0";
+const NO_TARGET_LABEL = "不盯人";
+const NO_TARGET_PLAYER_LABEL = "不指定";
+const DEFAULT_TARGET_PLAYER = 255;
 
 const MENTALITY_LABELS: Record<number, string> = {
   1: "极度防守",
@@ -107,7 +113,14 @@ const POSITION_POINTS: Record<string, { x: number; y: number }> = {
   STR: { x: 67, y: 12 },
 };
 
-type PhaseCell = { position: string; role: string };
+type PhaseCell = {
+  position: string;
+  role: string;
+  duty: string;
+  instructions: Record<string, number>;
+  targetPlayer: number;
+  targetPosition: number;
+};
 type PhasePlan = { cells: PhaseCell[]; instructions: Record<string, unknown> };
 type TeamView = {
   name: string | null;
@@ -127,6 +140,20 @@ type CatalogLookup = {
   mentalityLabels: Map<string, string>;
 };
 type SlotDirection = "up" | "down" | "left" | "right";
+type FormationTemplateView = { id: string; name: string };
+type FormationInstructionGroupView = {
+  id: string;
+  label: string;
+  phase: 0 | 1 | null;
+  options: Array<{ id: string; label: string }>;
+};
+type FormationEditingView = {
+  duties: string[];
+  groups: FormationInstructionGroupView[];
+  positionMasks: Map<string, number>;
+  eligibility: Map<string, string[][]> | null;
+  eligibilityContext: Map<string, Map<string, string[][]>> | null;
+};
 
 const SLOT_DIRECTIONS: Partial<Record<string, SlotDirection>> = {
   ArrowUp: "up",
@@ -194,6 +221,14 @@ function entryPhase(entry: CatalogTeamInstruction | Record<string, unknown>): 0 
   return value === 0 || value === 1 ? value : null;
 }
 
+function parseCellInstructions(value: unknown): Record<string, number> {
+  const instructions: Record<string, number> = {};
+  for (const [key, option] of Object.entries(isRecord(value) ? value : {})) {
+    if (typeof option === "number" && Number.isInteger(option)) instructions[key] = option;
+  }
+  return instructions;
+}
+
 function parseCells(value: unknown): PhaseCell[] | null {
   if (!Array.isArray(value) || value.length !== SLOT_COUNT) return null;
   const cells: PhaseCell[] = [];
@@ -201,9 +236,130 @@ function parseCells(value: unknown): PhaseCell[] | null {
     if (!isRecord(entry)) return null;
     const position = entry.position;
     if (typeof position !== "string" || position === "") return null;
-    cells.push({ position, role: typeof entry.role === "string" ? entry.role : "" });
+    cells.push({
+      position,
+      role: typeof entry.role === "string" ? entry.role : "",
+      duty: typeof entry.duty === "string" ? entry.duty : "",
+      instructions: parseCellInstructions(entry.instructions),
+      targetPlayer:
+        typeof entry.target_player === "number" ? entry.target_player : DEFAULT_TARGET_PLAYER,
+      targetPosition: typeof entry.target_position === "number" ? entry.target_position : 0,
+    });
   }
   return cells;
+}
+
+function parsePhaseRoles(value: unknown): string[] | null {
+  if (!Array.isArray(value)) return null;
+  const roles: string[] = [];
+  for (const entry of value) {
+    if (typeof entry === "string" && entry !== "") roles.push(entry);
+  }
+  return roles;
+}
+
+function parseEligibilityTable(value: unknown): Map<string, string[][]> | null {
+  if (!isRecord(value)) return null;
+  const table = new Map<string, string[][]>();
+  for (const [position, entry] of Object.entries(value)) {
+    if (!Array.isArray(entry)) continue;
+    const phases: string[][] = [];
+    for (const item of entry) {
+      const roles = parsePhaseRoles(item);
+      if (roles !== null) phases.push(roles);
+    }
+    if (phases.length === 2) table.set(position, phases);
+  }
+  return table.size === 0 ? null : table;
+}
+
+function parseEligibilityContext(value: unknown): Map<string, Map<string, string[][]>> | null {
+  if (!isRecord(value)) return null;
+  const context = new Map<string, Map<string, string[][]>>();
+  for (const [key, entry] of Object.entries(value)) {
+    const table = parseEligibilityTable(entry);
+    if (table !== null) context.set(key, table);
+  }
+  return context.size === 0 ? null : context;
+}
+
+function parseFormationEditing(value: unknown): FormationEditingView | null {
+  if (!isRecord(value)) return null;
+  const duties: string[] = [];
+  for (const entry of Array.isArray(value.duties) ? value.duties : []) {
+    if (typeof entry === "string" && entry !== "") duties.push(entry);
+  }
+  const groups: FormationInstructionGroupView[] = [];
+  for (const entry of catalogEntries(value.player_instructions)) {
+    const id = catalogId(entry.id);
+    if (id === null) continue;
+    const options: Array<{ id: string; label: string }> = [];
+    for (const option of catalogEntries(entry.options)) {
+      const optionId = catalogId(option.id);
+      if (optionId === null) continue;
+      options.push({ id: optionId, label: catalogLabel(option, optionId) });
+    }
+    groups.push({ id, label: catalogLabel(entry, id), phase: entryPhase(entry), options });
+  }
+  const positionMasks = new Map<string, number>();
+  for (const entry of catalogEntries(value.positions)) {
+    const id = catalogId(entry.id);
+    const mask = entry.mask;
+    if (id !== null && typeof mask === "number" && Number.isInteger(mask)) {
+      positionMasks.set(id, mask);
+    }
+  }
+  return {
+    duties,
+    groups,
+    positionMasks,
+    eligibility: parseEligibilityTable(value.role_eligibility),
+    eligibilityContext: parseEligibilityContext(value.role_eligibility_context),
+  };
+}
+
+function parseFormationCatalog(value: FormationList | undefined): {
+  templates: FormationTemplateView[];
+  editing: FormationEditingView | null;
+} {
+  const templates: FormationTemplateView[] = [];
+  if (isRecord(value)) {
+    for (const entry of catalogEntries(value.formations)) {
+      const id = catalogId(entry.id);
+      if (id === null) continue;
+      templates.push({ id, name: catalogLabel(entry, id) });
+    }
+    return { templates, editing: parseFormationEditing(value.editing) };
+  }
+  return { templates, editing: null };
+}
+
+function eligibilityKey(cells: PhaseCell[], positionMasks: Map<string, number>): string | null {
+  let defenders = 0;
+  let holding = 0;
+  for (const cell of cells) {
+    const mask = positionMasks.get(cell.position);
+    if (mask === undefined) return null;
+    if ((mask & 16) !== 0) defenders += 1;
+    if ((mask & 128) !== 0) holding += 1;
+  }
+  return `${defenders >= 3 ? 3 : 0}:${holding === 1 ? 1 : 0}`;
+}
+
+function allowedRoles(
+  editing: FormationEditingView,
+  cells: PhaseCell[],
+  position: string,
+  phase: 0 | 1,
+): Set<string> | null {
+  let table: Map<string, string[][]> | null = null;
+  const context = eligibilityKey(cells, editing.positionMasks);
+  if (context !== null && editing.eligibilityContext !== null) {
+    table = editing.eligibilityContext.get(context) ?? null;
+  }
+  const entry = table === null ? editing.eligibility?.get(position) : table.get(position);
+  const roles = entry?.[phase];
+  return roles === undefined ? null : new Set(roles);
 }
 
 function parseInstructions(value: unknown): Record<string, unknown> {
@@ -282,6 +438,7 @@ type DraftDialog =
   | { kind: "rename" }
   | { kind: "delete" }
   | { kind: "abandon" }
+  | { kind: "formation" }
   | { kind: "switch"; draftId: string };
 
 function fmfFilename(name: string | null): string {
@@ -369,6 +526,19 @@ function updatePhaseCells(
   if (cells === null) return null;
   update(cells);
   return next;
+}
+
+function updatePhaseCell(
+  scenario: Record<string, unknown>,
+  side: 0 | 1,
+  phase: 0 | 1,
+  slot: number,
+  update: (cell: Record<string, unknown>) => void,
+): Record<string, unknown> | null {
+  return updatePhaseCells(scenario, side, phase, (cells) => {
+    const cell = cells[slot];
+    if (cell !== undefined) update(cell);
+  });
 }
 
 function updateTeamMentality(
@@ -550,6 +720,7 @@ export function TacticsPage() {
   const { connection } = useAppContext();
   const queryClient = useQueryClient();
   const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
   const draftParam = searchParams.get("draft");
   const [selectedDraftId, setSelectedDraftId] = useState<string | null>(draftParam);
   const [side, setSide] = useState<0 | 1>(0);
@@ -574,6 +745,9 @@ export function TacticsPage() {
   const [announcement, setAnnouncement] = useState("");
   const [dragFrom, setDragFrom] = useState<number | null>(null);
   const [dragOver, setDragOver] = useState<number | null>(null);
+  const [formationId, setFormationId] = useState("");
+  const [formationNotice, setFormationNotice] = useState<string | null>(null);
+  const [formationNotes, setFormationNotes] = useState<string[]>([]);
   const slotRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const dialogRef = useRef<HTMLDivElement | null>(null);
   const dialogTriggerRef = useRef<HTMLElement | null>(null);
@@ -589,6 +763,13 @@ export function TacticsPage() {
     queryKey: ["catalog", connection?.url],
     queryFn: () => getCatalog(connection!),
     enabled: connection !== null,
+    staleTime: Infinity,
+  });
+
+  const formationsQuery = useQuery({
+    queryKey: ["formations", connection?.url],
+    queryFn: () => listFormations(connection!),
+    enabled: connection !== null && editing,
     staleTime: Infinity,
   });
 
@@ -613,18 +794,73 @@ export function TacticsPage() {
   const shownScenario = editing && workingScenario !== null ? workingScenario : serverScenario;
   const scenario = shownScenario === null ? null : parseScenario(shownScenario);
   const team = scenario === null ? null : scenario.teams[side];
+  const opponentTeam = scenario === null ? null : scenario.teams[side === 0 ? 1 : 0];
   const activePlan = team === null ? null : team.plans[phase];
   const focusedCell = activePlan === null ? null : activePlan.cells[focusedSlot];
   const lookup = buildCatalogLookup(catalog.data ?? null);
   const catalogMissing = catalog.isSuccess && (catalog.data ?? null) === null;
+  const formationCatalog = parseFormationCatalog(formationsQuery.data);
+  const formationTemplates = formationCatalog.templates;
+  const editingMetadata = formationCatalog.editing;
+  const activeFormationId = formationTemplates.some((item) => item.id === formationId)
+    ? formationId
+    : (formationTemplates[0]?.id ?? "");
+  const activeFormationName =
+    formationTemplates.find((item) => item.id === activeFormationId)?.name ?? activeFormationId;
+  const eligibleRoles =
+    focusedCell === null || activePlan === null || editingMetadata === null
+      ? null
+      : allowedRoles(editingMetadata, activePlan.cells, focusedCell.position, phase);
   const phaseRoleOptions =
-    lookup === null ? [] : lookup.roleOptions.filter((option) => option.phase === phase);
+    lookup === null
+      ? []
+      : lookup.roleOptions.filter(
+          (option) =>
+            option.phase === phase &&
+            (eligibleRoles === null || eligibleRoles.size === 0 || eligibleRoles.has(option.id)),
+        );
   const fallbackRoleOption =
     focusedCell === null ||
     focusedCell.role === "" ||
     phaseRoleOptions.some((option) => option.id === focusedCell.role)
       ? null
       : { id: focusedCell.role, label: roleLabel(focusedCell.role, lookup) };
+  const dutyOptions = editingMetadata === null ? [] : editingMetadata.duties;
+  const dutyValue = focusedCell === null ? "" : focusedCell.duty;
+  const dutyFallback = dutyValue !== "" && !dutyOptions.includes(dutyValue) ? dutyValue : null;
+  const targetPlayerOptions =
+    opponentTeam === null
+      ? []
+      : opponentTeam.players.map((name, index) => ({ value: String(index), label: `${index} ${name}` }));
+  const targetPlayerValue =
+    focusedCell === null ? String(DEFAULT_TARGET_PLAYER) : String(focusedCell.targetPlayer);
+  const targetPlayerFallback =
+    focusedCell !== null &&
+    targetPlayerValue !== String(DEFAULT_TARGET_PLAYER) &&
+    !targetPlayerOptions.some((option) => option.value === targetPlayerValue)
+      ? targetPlayerValue
+      : null;
+  const targetPositionOptions =
+    editingMetadata === null
+      ? []
+      : Array.from(editingMetadata.positionMasks.entries()).map(([id, mask]) => ({
+          value: String(mask),
+          label: id,
+        }));
+  const targetPositionValue =
+    focusedCell === null ? NO_TARGET_POSITION : String(focusedCell.targetPosition);
+  const targetPositionFallback =
+    focusedCell !== null &&
+    targetPositionValue !== NO_TARGET_POSITION &&
+    !targetPositionOptions.some((option) => option.value === targetPositionValue)
+      ? targetPositionValue
+      : null;
+  const instructionGroups =
+    editingMetadata === null
+      ? []
+      : editingMetadata.groups.filter((group) => group.phase === null || group.phase === phase);
+  const cellInstructions = focusedCell === null ? {} : focusedCell.instructions;
+  const cellInstructionCount = Object.keys(cellInstructions).length;
 
   const saveMutation = useMutation({
     mutationFn: (input: { draftId: string; scenario: Record<string, unknown> }) =>
@@ -720,6 +956,8 @@ export function TacticsPage() {
       setDialogName("");
       setDialogError(null);
       setSelectedDraftId(variables.adjacentId);
+      appliedDraftParam.current = variables.adjacentId;
+      writeDraftParam(variables.adjacentId);
       setEditing(false);
       setBaselineScenario(null);
       setWorkingScenario(null);
@@ -757,9 +995,47 @@ export function TacticsPage() {
     },
   });
 
+  const formationMutation = useMutation({
+    mutationFn: (input: {
+      draftId: string;
+      formationId: string;
+      scenario: Record<string, unknown>;
+    }) =>
+      applyFormation(connection!, input.draftId, {
+        formation_id: input.formationId,
+        scenario: input.scenario,
+      }),
+    onMutate: () => {
+      setDialogError(null);
+    },
+    onSuccess: (result, variables) => {
+      const next = isRecord(result.scenario) ? result.scenario : null;
+      if (next === null) {
+        setDialogError("阵型应用返回的场景无效");
+        return;
+      }
+      const name =
+        formationTemplates.find((item) => item.id === variables.formationId)?.name ??
+        variables.formationId;
+      setDraftDialog(null);
+      setDialogName("");
+      setDialogError(null);
+      setWorkingScenario(next);
+      setDirty(true);
+      setSaveNotice(null);
+      setFormationNotice(`已应用阵型 ${name}`);
+      setFormationNotes(Array.isArray(result.notes) ? result.notes.filter((note) => typeof note === "string") : []);
+    },
+    onError: (error) => {
+      setDialogError(errorMessage(error));
+    },
+  });
+
   const busyReason = templateMutation.isPending
     ? "正在准备默认阵型，请稍候"
-    : saveMutation.isPending
+    : formationMutation.isPending
+      ? "正在应用阵型，请稍候"
+      : saveMutation.isPending
       ? "正在保存，请稍候"
       : createMutation.isPending
         ? "正在创建草案，请稍候"
@@ -777,7 +1053,8 @@ export function TacticsPage() {
     draftDialog !== null &&
     ((draftDialog.kind === "create" && createMutation.isPending) ||
       (draftDialog.kind === "rename" && renameMutation.isPending) ||
-      (draftDialog.kind === "delete" && deleteMutation.isPending));
+      (draftDialog.kind === "delete" && deleteMutation.isPending) ||
+      (draftDialog.kind === "formation" && formationMutation.isPending));
 
   const resetInteraction = () => {
     setPickedSlot(null);
@@ -797,6 +1074,8 @@ export function TacticsPage() {
     setDirty(false);
     setSaveError(null);
     setSaveNotice(null);
+    setFormationNotice(null);
+    setFormationNotes([]);
     setFocusedSlot(0);
     resetInteraction();
   };
@@ -808,6 +1087,8 @@ export function TacticsPage() {
     setEditing(false);
     setDirty(false);
     setSaveError(null);
+    setFormationNotice(null);
+    setFormationNotes([]);
     resetInteraction();
   };
 
@@ -882,6 +1163,14 @@ export function TacticsPage() {
     exportMutation.mutate(activeDraftId);
   };
 
+  const handleFormationDialog = () => {
+    if (busy || activeDraftId === null || workingScenario === null || activeFormationId === "") {
+      return;
+    }
+    rememberDialogTrigger();
+    openDraftDialog({ kind: "formation" });
+  };
+
   const handleConfirmDelete = () => {
     if (activeDraftId === null) return;
     const index = draftItems.findIndex((item) => item.id === activeDraftId);
@@ -911,6 +1200,15 @@ export function TacticsPage() {
     if (draftDialog.kind === "abandon") {
       closeDraftDialog();
       performAbandon();
+      return;
+    }
+    if (draftDialog.kind === "formation") {
+      if (activeDraftId === null || workingScenario === null || activeFormationId === "") return;
+      formationMutation.mutate({
+        draftId: activeDraftId,
+        formationId: activeFormationId,
+        scenario: workingScenario,
+      });
       return;
     }
     closeDraftDialog();
@@ -979,14 +1277,54 @@ export function TacticsPage() {
     swapSlots(pickedSlot, index);
   };
 
-  const handleRoleChange = (role: string) => {
+  const updateFocusedCell = (patch: (cell: Record<string, unknown>) => void) => {
     if (workingScenario === null) return;
-    applyEditedScenario(
-      updatePhaseCells(workingScenario, side, phase, (cells) => {
-        const cell = cells[focusedSlot];
-        if (cell !== undefined) cell.role = role;
-      }),
-    );
+    applyEditedScenario(updatePhaseCell(workingScenario, side, phase, focusedSlot, patch));
+  };
+
+  const handleRoleChange = (role: string) => {
+    updateFocusedCell((cell) => {
+      cell.role = role;
+    });
+  };
+
+  const handleDutyChange = (duty: string) => {
+    updateFocusedCell((cell) => {
+      cell.duty = duty;
+    });
+  };
+
+  const handleTargetPlayerChange = (value: string) => {
+    const target = Number(value);
+    if (value.trim() === "" || !Number.isInteger(target) || target < 0) return;
+    updateFocusedCell((cell) => {
+      cell.target_player = target;
+    });
+  };
+
+  const handleTargetPositionChange = (value: string) => {
+    const target = Number(value);
+    if (value.trim() === "" || !Number.isInteger(target) || target < 0) return;
+    updateFocusedCell((cell) => {
+      cell.target_position = target;
+    });
+  };
+
+  const handleCellInstructionChange = (groupId: string, value: string) => {
+    const option = Number(value);
+    if (value.trim() !== "" && !Number.isInteger(option)) return;
+    updateFocusedCell((cell) => {
+      const instructions = isRecord(cell.instructions) ? { ...cell.instructions } : {};
+      if (value.trim() === "") delete instructions[groupId];
+      else instructions[groupId] = option;
+      cell.instructions = instructions;
+    });
+  };
+
+  const handleClearCellInstructions = () => {
+    updateFocusedCell((cell) => {
+      cell.instructions = {};
+    });
   };
 
   const handleMentalityChange = (value: string) => {
@@ -1037,7 +1375,21 @@ export function TacticsPage() {
     setDragOver(null);
   };
 
+  const writeDraftParam = (draftId: string | null) => {
+    if (draftId === (searchParams.get("draft") ?? null)) return;
+    const next = new URLSearchParams(searchParams);
+    if (draftId === null) {
+      next.delete("draft");
+    } else {
+      next.set("draft", draftId);
+    }
+    const search = next.toString();
+    navigate({ search: search === "" ? "" : `?${search}` }, { replace: true });
+  };
+
   const applyDraftParam = (draftId: string) => {
+    appliedDraftParam.current = draftId;
+    writeDraftParam(draftId);
     setSelectedDraftId(draftId);
     setEditing(false);
     setBaselineScenario(null);
@@ -1045,6 +1397,8 @@ export function TacticsPage() {
     setDirty(false);
     setSaveNotice(null);
     setSaveError(null);
+    setFormationNotice(null);
+    setFormationNotes([]);
     setFocusedSlot(0);
     resetInteraction();
   };
@@ -1055,10 +1409,14 @@ export function TacticsPage() {
       return;
     }
     if (dirty) return;
+    if (drafts.isSuccess && !draftItems.some((item) => item.id === draftParam)) {
+      writeDraftParam(activeDraftId);
+      return;
+    }
     if (draftParam === appliedDraftParam.current) return;
     appliedDraftParam.current = draftParam;
     applyDraftParam(draftParam);
-  }, [draftParam, dirty]);
+  }, [activeDraftId, draftItems, draftParam, drafts.isSuccess, dirty]);
 
   useEffect(() => {
     if (!dirty) return;
@@ -1138,7 +1496,9 @@ export function TacticsPage() {
             ? "删除草案"
             : draftDialog.kind === "abandon"
               ? "放弃修改"
-              : "切换草案";
+              : draftDialog.kind === "formation"
+                ? "应用阵型"
+                : "切换草案";
 
   const confirmLabel =
     draftDialog === null
@@ -1151,7 +1511,9 @@ export function TacticsPage() {
             ? "确认删除"
             : draftDialog.kind === "abandon"
               ? "确认放弃"
-              : "确认切换";
+              : draftDialog.kind === "formation"
+                ? "应用"
+                : "确认切换";
 
   const dialogNeedsName =
     draftDialog !== null && (draftDialog.kind === "create" || draftDialog.kind === "rename");
@@ -1162,8 +1524,13 @@ export function TacticsPage() {
         ? `删除《${activeDraft?.name ?? ""}》后无法恢复。`
         : draftDialog.kind === "abandon"
           ? "放弃修改会丢失当前编辑内容。"
-          : "切换草案会丢失未保存的修改。";
-  const confirmBlocked = dialogPending || (dialogNeedsName && dialogName.trim() === "");
+          : draftDialog.kind === "formation"
+            ? `应用《${activeFormationName}》会覆盖两阶段全部位置与角色，未保存的修改将丢失。`
+            : "切换草案会丢失未保存的修改。";
+  const confirmBlocked =
+    dialogPending ||
+    (dialogNeedsName && dialogName.trim() === "") ||
+    (draftDialog?.kind === "formation" && (workingScenario === null || activeFormationId === ""));
   const confirmTitle = dialogPending
     ? (busyReason ?? undefined)
     : dialogNeedsName && dialogName.trim() === ""
@@ -1359,6 +1726,39 @@ export function TacticsPage() {
             无球
           </button>
         </div>
+        {editing ? (
+          <div className="tactics-formation" role="group" aria-label="阵型模板">
+            <label className="field tactics-formation-field">
+              阵型
+              <select
+                aria-label="阵型模板"
+                value={activeFormationId}
+                disabled={busy || formationTemplates.length === 0}
+                title={
+                  busyReason ??
+                  (formationTemplates.length === 0 ? "阵型模板不可用，请检查引擎目录" : undefined)
+                }
+                onChange={(event) => setFormationId(event.target.value)}
+              >
+                {formationTemplates.length === 0 ? <option value="">暂无模板</option> : null}
+                {formationTemplates.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button
+              className="button small"
+              type="button"
+              disabled={busy || activeFormationId === "" || workingScenario === null}
+              title={busyReason ?? undefined}
+              onClick={handleFormationDialog}
+            >
+              应用阵型
+            </button>
+          </div>
+        ) : null}
         <div className="tactics-actions">
           {editing ? (
             <>
@@ -1549,6 +1949,18 @@ export function TacticsPage() {
               {saveNotice}
             </p>
           )}
+          {formationNotice === null ? null : (
+            <div className="tactics-formation-notice">
+              <p className="tactics-note">{formationNotice}</p>
+              {formationNotes.length === 0 ? null : (
+                <ul className="tactics-formation-notes">
+                  {formationNotes.map((note) => (
+                    <li key={note}>{note}</li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
           {editing ? (
             <p className="tactics-note tactics-dirty-note">
               {dirty ? "有未保存修改，切换或放弃前需要确认" : "编辑阵型中，修改后请保存或放弃"}
@@ -1631,28 +2043,130 @@ export function TacticsPage() {
                 <span>{focusedCell.position}</span>
                 <span>{roleLabel(focusedCell.role, lookup)}</span>
               </div>
-              <label className="field tactics-role-field">
-                角色
-                <select
-                  aria-label="角色"
-                  value={focusedCell.role}
-                  disabled={lookup === null}
-                  title={
-                    lookup === null ? "运行时目录不可用，无法编辑角色" : undefined
-                  }
-                  onChange={(event) => handleRoleChange(event.target.value)}
-                >
-                  {phaseRoleOptions.map((option) => (
-                    <option key={option.id} value={option.id}>
-                      {option.label}
-                    </option>
-                  ))}
-                  {fallbackRoleOption === null ? null : (
-                    <option value={fallbackRoleOption.id}>{fallbackRoleOption.label}</option>
-                  )}
-                  {focusedCell.role === "" ? <option value="">—</option> : null}
-                </select>
-              </label>
+              <div className="tactics-cell-fields">
+                <label className="field tactics-role-field">
+                  角色
+                  <select
+                    aria-label="角色"
+                    value={focusedCell.role}
+                    disabled={lookup === null}
+                    title={
+                      lookup === null ? "运行时目录不可用，无法编辑角色" : undefined
+                    }
+                    onChange={(event) => handleRoleChange(event.target.value)}
+                  >
+                    {phaseRoleOptions.map((option) => (
+                      <option key={option.id} value={option.id}>
+                        {option.label}
+                      </option>
+                    ))}
+                    {fallbackRoleOption === null ? null : (
+                      <option value={fallbackRoleOption.id}>{fallbackRoleOption.label}</option>
+                    )}
+                    {focusedCell.role === "" ? <option value="">—</option> : null}
+                  </select>
+                </label>
+                {editingMetadata === null ? (
+                  <p className="tactics-note tactics-cell-note">{FORMATION_METADATA_MISSING_NOTE}</p>
+                ) : (
+                  <>
+                    <label className="field tactics-role-field">
+                      职责
+                      <select
+                        aria-label="职责"
+                        value={dutyValue}
+                        disabled={dutyOptions.length === 0}
+                        onChange={(event) => handleDutyChange(event.target.value)}
+                      >
+                        {dutyValue === "" ? <option value="">—</option> : null}
+                        {dutyOptions.map((option) => (
+                          <option key={option} value={option}>
+                            {option}
+                          </option>
+                        ))}
+                        {dutyFallback === null ? null : (
+                          <option value={dutyFallback}>{dutyFallback}</option>
+                        )}
+                      </select>
+                    </label>
+                    <label className="field tactics-role-field">
+                      盯防球员
+                      <select
+                        aria-label="盯防球员"
+                        value={targetPlayerValue}
+                        onChange={(event) => handleTargetPlayerChange(event.target.value)}
+                      >
+                        <option value={String(DEFAULT_TARGET_PLAYER)}>{NO_TARGET_PLAYER_LABEL}</option>
+                        {targetPlayerOptions.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                        {targetPlayerFallback === null ? null : (
+                          <option value={targetPlayerFallback}>{targetPlayerFallback}</option>
+                        )}
+                      </select>
+                    </label>
+                    <label className="field tactics-role-field">
+                      盯人位置
+                      <select
+                        aria-label="盯人位置"
+                        value={targetPositionValue}
+                        onChange={(event) => handleTargetPositionChange(event.target.value)}
+                      >
+                        <option value={NO_TARGET_POSITION}>{NO_TARGET_LABEL}</option>
+                        {targetPositionOptions.map((option) => (
+                          <option key={`${option.value}-${option.label}`} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                        {targetPositionFallback === null ? null : (
+                          <option value={targetPositionFallback}>{targetPositionFallback}</option>
+                        )}
+                      </select>
+                    </label>
+                    {instructionGroups.length === 0 ? null : (
+                      <div className="tactics-cell-instructions" role="group" aria-label="个人指令">
+                        {instructionGroups.map((group) => {
+                          const value =
+                            cellInstructions[group.id] === undefined
+                              ? ""
+                              : String(cellInstructions[group.id]);
+                          const missing = !group.options.some((option) => option.id === value);
+                          return (
+                            <label className="field tactics-role-field" key={group.id}>
+                              {group.label}
+                              <select
+                                aria-label={`个人指令：${group.label}`}
+                                value={value}
+                                onChange={(event) =>
+                                  handleCellInstructionChange(group.id, event.target.value)
+                                }
+                              >
+                                <option value="">默认</option>
+                                {group.options.map((option) => (
+                                  <option key={option.id} value={option.id}>
+                                    {option.label}
+                                  </option>
+                                ))}
+                                {value !== "" && missing ? <option value={value}>{value}</option> : null}
+                              </select>
+                            </label>
+                          );
+                        })}
+                        <button
+                          className="button small"
+                          type="button"
+                          disabled={cellInstructionCount === 0}
+                          onClick={handleClearCellInstructions}
+                        >
+                          清空个人指令
+                        </button>
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
             </div>
           ) : null}
           {editing ? (

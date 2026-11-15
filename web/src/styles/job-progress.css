@@ -1,0 +1,45 @@
+.job-progress {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.jobs-progress .job-progress {
+  justify-content: flex-end;
+}
+
+.job-progress-bar {
+  width: 96px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--border);
+  overflow: hidden;
+}
+
+.job-progress-fill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--accent);
+  transition: width 200ms ease;
+}
+
+.job-progress-fill[data-status="running"] {
+  background: var(--pitch);
+}
+
+.job-progress-text {
+  color: var(--text);
+  font-size: var(--type-body-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.job-progress-note {
+  color: var(--text-subtle);
+  font-size: var(--type-caption);
+}
+
+.job-progress-done {
+  font-variant-numeric: tabular-nums;
+}

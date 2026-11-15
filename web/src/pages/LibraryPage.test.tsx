@@ -22,11 +22,21 @@ import {
   type Save,
   type SaveTactic,
 } from "../lib/api";
+import {
+  addSaveTacticToPool,
+  exportSaveTacticFmf,
+  fmfDownloadName,
+} from "../lib/api-save-tactics";
 import { LibraryPage } from "./LibraryPage";
 
 const { isDesktopShellMock, chooseLocalFileMock } = vi.hoisted(() => ({
   isDesktopShellMock: vi.fn(),
   chooseLocalFileMock: vi.fn(),
+}));
+
+const { createObjectURL, revokeObjectURL } = vi.hoisted(() => ({
+  createObjectURL: vi.fn(() => "blob:fmf"),
+  revokeObjectURL: vi.fn(),
 }));
 
 vi.mock("../lib/file-dialog", () => ({
@@ -66,6 +76,14 @@ function jsonResponse(body: unknown, status = 200): Response {
     ok: status >= 200 && status < 300,
     status,
     json: async () => body,
+  } as unknown as Response;
+}
+
+function blobResponse(blob: Blob, status = 200): Response {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    blob: async () => blob,
   } as unknown as Response;
 }
 
@@ -199,6 +217,7 @@ describe("LibraryPage", () => {
     stubFetch(() => pending.promise);
     renderLibraryPage();
     expect(screen.getByRole("status")).toHaveTextContent("正在加载存档");
+    expect(screen.getByTestId("skeleton")).toBeInTheDocument();
 
     pending.resolve(jsonResponse(makeList([makeSave({ status: "reading" })])));
 
@@ -217,7 +236,7 @@ describe("LibraryPage", () => {
     expect(await screen.findByText("尚未导入存档")).toBeInTheDocument();
     expect(
       screen.getByText(
-        "这是唯一的存档导入入口。导入后可以浏览联赛战术、生成真实 AI 计划、导出 FMF 或加入客队战术池。没有存档也可以导入 FMF 战术文件使用战术板与固定对手实验。",
+        "这是唯一的存档导入入口。导入后可以浏览存档战术、导出 FMF 或加入客队战术池。没有存档也可以导入 FMF 战术文件使用战术板与固定对手实验。",
       ),
     ).toBeInTheDocument();
   });
@@ -608,6 +627,7 @@ describe("存档球队名单", () => {
     const section = await openSquad();
     expect(within(section).getByRole("group", { name: "经理俱乐部" })).toBeInTheDocument();
     expect(within(section).getByRole("status")).toHaveTextContent("正在加载名单");
+    expect(within(section).getByTestId("skeleton")).toBeInTheDocument();
 
     squadResponse.resolve(jsonResponse(SQUAD));
 
@@ -1523,6 +1543,9 @@ describe("存档存储战术", () => {
   beforeEach(() => {
     fetchMock.mockReset();
     vi.stubGlobal("fetch", fetchMock);
+    Object.defineProperty(URL, "createObjectURL", { configurable: true, value: createObjectURL });
+    Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: revokeObjectURL });
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
   });
 
   afterEach(() => {
@@ -1538,6 +1561,7 @@ describe("存档存储战术", () => {
 
     const section = openTactics();
     expect(within(section).getByRole("status")).toHaveTextContent("正在加载存档战术");
+    expect(within(section).getByTestId("skeleton")).toBeInTheDocument();
     expect(within(section).getByText("/saves/season-1.fm")).toBeInTheDocument();
 
     pending.resolve(
@@ -1696,6 +1720,101 @@ describe("存档存储战术", () => {
     );
     expect(screen.queryByTestId("tactics-placeholder")).not.toBeInTheDocument();
   });
+
+  it("导出 FMF 下载二进制并提示成功", async () => {
+    const blob = new Blob(["fmf"], { type: "application/octet-stream" });
+    stubFetch((url) => {
+      if (url.includes("/export.fmf")) return blobResponse(blob);
+      if (url.includes("/tactics")) return jsonResponse({ items: [makeSaveTactic()] });
+      return jsonResponse(makeList([makeSave()]));
+    });
+    renderLibraryPage();
+    await screen.findByText("/saves/season-1.fm");
+
+    const section = openTactics();
+    fireEvent.click(await within(section).findByRole("button", { name: "导出 FMF" }));
+
+    expect(await screen.findByText("已导出 FMF 文件")).toBeInTheDocument();
+    const calls = callsTo("/api/saves/save-1/tactics/0/export.fmf");
+    expect(calls).toHaveLength(1);
+    expect(calls[0].init.method).toBeUndefined();
+    expect(createObjectURL).toHaveBeenCalledWith(blob);
+    await waitFor(() => expect(revokeObjectURL).toHaveBeenCalledWith("blob:fmf"), { timeout: 2500 });
+  });
+
+  it("导出失败时展示后端消息", async () => {
+    stubFetch((url) => {
+      if (url.includes("/export.fmf")) {
+        return jsonResponse(
+          { error: { code: "engine_unavailable", message: "引擎资源未配置，无法导出存档战术" } },
+          503,
+        );
+      }
+      if (url.includes("/tactics")) return jsonResponse({ items: [makeSaveTactic()] });
+      return jsonResponse(makeList([makeSave()]));
+    });
+    renderLibraryPage();
+    await screen.findByText("/saves/season-1.fm");
+
+    const section = openTactics();
+    fireEvent.click(await within(section).findByRole("button", { name: "导出 FMF" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("引擎资源未配置");
+    expect(createObjectURL).not.toHaveBeenCalled();
+  });
+
+  it("加入客队战术池后提示并刷新池列表", async () => {
+    stubFetch((url, init) => {
+      if (url.includes("/pool") && init.method === "POST") {
+        return jsonResponse(
+          {
+            id: "entry-1",
+            name: "北岸联 4-4-2",
+            weight: 1,
+            tactic: {},
+            roster: null,
+            created_at: "2026-11-15T00:00:00Z",
+          },
+          201,
+        );
+      }
+      if (url.includes("/tactics")) return jsonResponse({ items: [makeSaveTactic()] });
+      return jsonResponse(makeList([makeSave()]));
+    });
+    const invalidateSpy = vi.spyOn(QueryClient.prototype, "invalidateQueries");
+    renderLibraryPage();
+    await screen.findByText("/saves/season-1.fm");
+
+    const section = openTactics();
+    fireEvent.click(await within(section).findByRole("button", { name: "加入客队池" }));
+
+    expect(await screen.findByText("已加入客队战术池：北岸联 4-4-2")).toBeInTheDocument();
+    const calls = callsTo("/api/saves/save-1/tactics/0/pool");
+    expect(calls).toHaveLength(1);
+    expect(calls[0].init.method).toBe("POST");
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["pools", connection.url] });
+  });
+
+  it("加入客队战术池失败时展示后端消息", async () => {
+    stubFetch((url, init) => {
+      if (url.includes("/pool") && init.method === "POST") {
+        return jsonResponse(
+          { error: { code: "validation_failed", message: "客队战术池不可用" } },
+          400,
+        );
+      }
+      if (url.includes("/tactics")) return jsonResponse({ items: [makeSaveTactic()] });
+      return jsonResponse(makeList([makeSave()]));
+    });
+    renderLibraryPage();
+    await screen.findByText("/saves/season-1.fm");
+
+    const section = openTactics();
+    fireEvent.click(await within(section).findByRole("button", { name: "加入客队池" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("客队战术池不可用");
+    expect(screen.queryByText(/已加入客队战术池/)).not.toBeInTheDocument();
+  });
 });
 
 describe("存档战术 API 客户端", () => {
@@ -1743,5 +1862,42 @@ describe("存档战术 API 客户端", () => {
     expect((caught as ApiError).status).toBe(503);
     expect((caught as ApiError).code).toBe("engine_unavailable");
     expect((caught as ApiError).message).toBe("引擎资源未配置");
+  });
+
+  it("fmfDownloadName 清洗非法字符并补扩展名", () => {
+    expect(fmfDownloadName("Direct/Plan")).toBe("DirectPlan.fmf");
+    expect(fmfDownloadName("  . ")).toBe("tactic.fmf");
+    expect(fmfDownloadName("北岸联 4-4-2")).toBe("北岸联 4-4-2.fmf");
+  });
+
+  it("exportSaveTacticFmf 请求导出端点并返回二进制", async () => {
+    const blob = new Blob(["fmf"], { type: "application/octet-stream" });
+    stubFetch(() => blobResponse(blob));
+
+    const result = await exportSaveTacticFmf(connection, "save-1", 2);
+
+    expect(result).toBe(blob);
+    const [call] = fetchCalls();
+    expect(call.url).toBe("http://127.0.0.1:43210/api/saves/save-1/tactics/2/export.fmf");
+    expect(call.init.method).toBeUndefined();
+  });
+
+  it("addSaveTacticToPool 以 POST 加入客队战术池", async () => {
+    const entry = {
+      id: "entry-1",
+      name: "北岸联 4-4-2",
+      weight: 1,
+      tactic: {},
+      roster: null,
+      created_at: "2026-11-15T00:00:00Z",
+    };
+    stubFetch(() => jsonResponse(entry, 201));
+
+    const result = await addSaveTacticToPool(connection, "save-1", 2);
+
+    expect(result.id).toBe("entry-1");
+    const [call] = fetchCalls();
+    expect(call.url).toBe("http://127.0.0.1:43210/api/saves/save-1/tactics/2/pool");
+    expect(call.init.method).toBe("POST");
   });
 });

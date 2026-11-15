@@ -6,6 +6,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { useAppContext } from "../app-context";
 import { EmptyState } from "../components/EmptyState";
 import { Panel } from "../components/Panel";
+import { Skeleton } from "../components/Skeleton";
 import {
   ApiError,
   applyRoster,
@@ -26,6 +27,8 @@ import {
   type SaveStatus,
   type SaveTactic,
 } from "../lib/api";
+import { addSaveTacticToPool, exportSaveTacticFmf, fmfDownloadName } from "../lib/api-save-tactics";
+import { downloadBlob } from "../lib/download";
 import { chooseLocalFile, isDesktopShell } from "../lib/file-dialog";
 import "../styles/library.css";
 
@@ -262,6 +265,41 @@ export function LibraryPage() {
     },
   });
 
+  const exportTactic = useMutation({
+    mutationFn: async (tactic: SaveTactic) => {
+      const blob = await exportSaveTacticFmf(connection!, tacticsSaveId!, tactic.index);
+      downloadBlob(blob, fmfDownloadName(tactic.name));
+    },
+    onSuccess: () => {
+      setActionError(null);
+      setNotice("已导出 FMF 文件");
+    },
+    onError: (error) => {
+      setNotice(null);
+      setActionError(errorMessage(error));
+    },
+  });
+
+  const poolTactic = useMutation({
+    mutationFn: (tactic: SaveTactic) =>
+      addSaveTacticToPool(connection!, tacticsSaveId!, tactic.index),
+    onSuccess: (entry, tactic) => {
+      setActionError(null);
+      setNotice(`已加入客队战术池：${entry.name === "" ? tactic.name : entry.name}`);
+      void queryClient.invalidateQueries({ queryKey: ["pools", connection?.url] });
+    },
+    onError: (error) => {
+      setNotice(null);
+      setActionError(errorMessage(error));
+    },
+  });
+
+  const resetTacticActions = () => {
+    importTactic.reset();
+    exportTactic.reset();
+    poolTactic.reset();
+  };
+
   const remove = useMutation({
     mutationFn: (save: Save) => deleteSave(connection!, save.id),
     onSuccess: (_result, save) => {
@@ -276,7 +314,7 @@ export function LibraryPage() {
       }
       if (tacticsSaveId === save.id) {
         setTacticsSaveId(null);
-        importTactic.reset();
+        resetTacticActions();
       }
       invalidateSaves();
     },
@@ -337,7 +375,7 @@ export function LibraryPage() {
     setSquadSaveId(null);
     setSquadClubUid(null);
     setTacticsSaveId(null);
-    importTactic.reset();
+    resetTacticActions();
   };
 
   const pickSaveFile = async () => {
@@ -419,7 +457,7 @@ export function LibraryPage() {
   const openSquad = (saveId: string) => {
     setSquadSaveId(saveId);
     setTacticsSaveId(null);
-    importTactic.reset();
+    resetTacticActions();
     setFmfFormOpen(false);
     setSquadClubUid(null);
     setRosterError(null);
@@ -446,12 +484,12 @@ export function LibraryPage() {
     setFmfFormOpen(false);
     setActionError(null);
     setNotice(null);
-    importTactic.reset();
+    resetTacticActions();
   };
 
   const closeTactics = () => {
     setTacticsSaveId(null);
-    importTactic.reset();
+    resetTacticActions();
   };
 
   const selectClub = (clubUid: number) => {
@@ -578,11 +616,7 @@ export function LibraryPage() {
       />
     );
   } else if (saves.isPending) {
-    body = (
-      <p className="jobs-loading" role="status">
-        正在加载存档…
-      </p>
-    );
+    body = <Skeleton label="正在加载存档…" variant="rows" count={5} />;
   } else if (saves.isError) {
     body = (
       <div className="inline-alert" role="alert">
@@ -600,7 +634,7 @@ export function LibraryPage() {
           title={status === "" ? "尚未导入存档" : "没有符合条件的存档"}
           description={
             status === ""
-              ? "这是唯一的存档导入入口。导入后可以浏览联赛战术、生成真实 AI 计划、导出 FMF 或加入客队战术池。没有存档也可以导入 FMF 战术文件使用战术板与固定对手实验。"
+              ? "这是唯一的存档导入入口。导入后可以浏览存档战术、导出 FMF 或加入客队战术池。没有存档也可以导入 FMF 战术文件使用战术板与固定对手实验。"
               : "当前筛选条件下没有存档，切换状态后重试。"
           }
         />
@@ -610,7 +644,7 @@ export function LibraryPage() {
   } else {
     body = (
       <>
-        <div className="jobs-table-wrap">
+        <div className="jobs-table-wrap" tabIndex={0} role="region" aria-label="存档列表">
           <table className="jobs-table">
             <caption className="sr-only">存档列表</caption>
             <thead>
@@ -814,11 +848,7 @@ export function LibraryPage() {
   let squadPanel: ReactNode = null;
   if (squadClubUid !== null) {
     if (squad.isPending) {
-      squadPanel = (
-        <p className="jobs-loading" role="status">
-          正在加载名单…
-        </p>
-      );
+      squadPanel = <Skeleton label="正在加载名单…" variant="rows" count={6} />;
     } else if (squad.isError) {
       squadPanel = (
         <div className="inline-alert" role="alert">
@@ -843,7 +873,12 @@ export function LibraryPage() {
                   ? "暂无上一场阵容记录"
                   : `首发 ${squadCounts.starters} 人 · 替补 ${squadCounts.substitutes} 人`}
               </p>
-              <div className="jobs-table-wrap">
+              <div
+                className="jobs-table-wrap"
+                tabIndex={0}
+                role="region"
+                aria-label="存档球队球员名单"
+              >
                 <table className="jobs-table saves-squad-table">
                   <caption className="sr-only">存档球队球员名单</caption>
                   <thead>
@@ -913,11 +948,7 @@ export function LibraryPage() {
 
   let tacticsPanel: ReactNode = null;
   if (saveTactics.isPending) {
-    tacticsPanel = (
-      <p className="jobs-loading" role="status">
-        正在加载存档战术…
-      </p>
-    );
+    tacticsPanel = <Skeleton label="正在加载存档战术…" variant="rows" count={4} />;
   } else if (saveTactics.isError) {
     tacticsPanel = (
       <div className="inline-alert" role="alert">
@@ -932,7 +963,12 @@ export function LibraryPage() {
       tactics.length === 0 ? (
         <p className="field-hint">该存档没有可用的存储战术</p>
       ) : (
-        <div className="jobs-table-wrap">
+        <div
+          className="jobs-table-wrap"
+          tabIndex={0}
+          role="region"
+          aria-label="存档存储战术列表"
+        >
           <table className="jobs-table saves-tactics-table">
             <caption className="sr-only">存档存储战术列表</caption>
             <thead>
@@ -950,6 +986,11 @@ export function LibraryPage() {
                 const blocker = tacticImportBlocker(tactic);
                 const importing =
                   importTactic.isPending && importTactic.variables === tactic.index;
+                const exporting =
+                  exportTactic.isPending && exportTactic.variables?.index === tactic.index;
+                const pooling =
+                  poolTactic.isPending && poolTactic.variables?.index === tactic.index;
+                const busy = importTactic.isPending || exportTactic.isPending || poolTactic.isPending;
                 return (
                   <tr key={tactic.index}>
                     <td>{tactic.name === "" ? "—" : tactic.name}</td>
@@ -973,14 +1014,29 @@ export function LibraryPage() {
                         <button
                           className="button small"
                           type="button"
-                          disabled={!tactic.importable || importTactic.isPending}
-                          title={
-                            blocker ??
-                            (importTactic.isPending ? "正在导入存档战术" : undefined)
-                          }
+                          disabled={!tactic.importable || busy}
+                          title={blocker ?? (importing ? "正在导入存档战术" : undefined)}
                           onClick={() => importTactic.mutate(tactic.index)}
                         >
                           {importing ? "导入中…" : "导入到战术板"}
+                        </button>
+                        <button
+                          className="button small"
+                          type="button"
+                          disabled={!tactic.importable || busy}
+                          title={blocker ?? (exporting ? "正在导出 FMF" : undefined)}
+                          onClick={() => exportTactic.mutate(tactic)}
+                        >
+                          {exporting ? "导出中…" : "导出 FMF"}
+                        </button>
+                        <button
+                          className="button small"
+                          type="button"
+                          disabled={!tactic.importable || busy}
+                          title={blocker ?? (pooling ? "正在加入客队战术池" : undefined)}
+                          onClick={() => poolTactic.mutate(tactic)}
+                        >
+                          {pooling ? "加入中…" : "加入客队池"}
                         </button>
                         {blocker === null ? null : (
                           <span className="field-hint">{blocker}</span>

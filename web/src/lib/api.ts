@@ -155,6 +155,7 @@ export type JobUpdate = JobUpdateInput;
 // 任务查询参数未在 OpenAPI 中单独建模，保留手写。
 export type JobQuery = {
   status?: JobStatus;
+  q?: string;
   limit?: number;
   offset?: number;
 };
@@ -182,7 +183,12 @@ function queryString(params: Record<string, string | number | boolean | undefine
 }
 
 export function listJobs(connection: Connection, query: JobQuery = {}): Promise<JobList> {
-  const search = queryString({ status: query.status, limit: query.limit, offset: query.offset });
+  const search = queryString({
+    status: query.status,
+    q: query.q,
+    limit: query.limit,
+    offset: query.offset,
+  });
   return apiJson<JobList>(connection, `/api/jobs${search}`);
 }
 

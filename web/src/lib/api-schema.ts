@@ -224,6 +224,36 @@ export interface FmfImportInput {
   source?: { [key: string]: unknown } | null;
 }
 
+export interface FormationApplyInput {
+  formation_id: string;
+  overwrite?: boolean;
+  scenario?: { [key: string]: unknown } | null;
+}
+
+export interface FormationApplyOutput {
+  formation_id: string;
+  scenario: { [key: string]: unknown };
+  notes: string[];
+}
+
+export interface FormationCellOutput {
+  position: string;
+  role: string;
+  x: number;
+  y: number;
+}
+
+export interface FormationListOutput {
+  formations: FormationOutput[];
+  editing: { [key: string]: unknown } | null;
+}
+
+export interface FormationOutput {
+  id: string;
+  name: string;
+  phases: FormationCellOutput[][];
+}
+
 export interface HTTPValidationError {
   detail?: ValidationError[];
 }
@@ -356,6 +386,21 @@ export interface PoolEntryOutput {
   tactic: { [key: string]: unknown };
   roster: { [key: string]: unknown } | null;
   created_at: string;
+}
+
+export interface PoolEntryUpdate {
+  name?: string | null;
+  weight?: number | null;
+}
+
+export interface PoolImportInput {
+  content_base64: string;
+  name?: string | null;
+}
+
+export interface PoolImportOutput {
+  items: PoolEntryOutput[];
+  total: number;
 }
 
 export interface PoolListOutput {

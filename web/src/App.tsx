@@ -19,6 +19,7 @@ import { JobsPage } from "./pages/JobsPage";
 import { LibraryPage } from "./pages/LibraryPage";
 import { PlayersPage } from "./pages/PlayersPage";
 import { ResultsPage } from "./pages/ResultsPage";
+import { SetpiecesPage } from "./pages/SetpiecesPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { TacticsPage } from "./pages/TacticsPage";
 
@@ -29,6 +30,7 @@ const titles: Record<string, string> = {
   "/experiments": "实验",
   "/results": "实验结果",
   "/jobs": "任务管理",
+  "/setpieces": "定位球",
   "/settings": "设置",
   "/help": "帮助",
 };
@@ -147,6 +149,7 @@ export function App() {
               <Routes>
                 <Route path="/" element={<Navigate to="/tactics" replace />} />
                 <Route path="/tactics" element={<TacticsPage />} />
+                <Route path="/setpieces" element={<SetpiecesPage />} />
                 <Route path="/players" element={<PlayersPage />} />
                 <Route path="/library" element={<LibraryPage />} />
                 <Route path="/experiments" element={<ExperimentsPage />} />

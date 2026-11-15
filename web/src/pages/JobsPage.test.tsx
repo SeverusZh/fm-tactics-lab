@@ -858,6 +858,106 @@ describe("JobsPage 批量删除", () => {
   });
 });
 
+describe("JobsPage 任务重命名", () => {
+  beforeEach(() => {
+    fetchMock.mockReset();
+    vi.stubGlobal("fetch", fetchMock);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("重命名任务提交 PATCH 并更新名称", async () => {
+    let name = "任务一";
+    stubFetch((_url, init) => {
+      if (init.method === "PATCH") {
+        const body = JSON.parse(String(init.body)) as { name: string };
+        name = body.name;
+        return jsonResponse(deletableJob({ name }));
+      }
+      return listPage([deletableJob({ name })]);
+    });
+    renderJobsPage();
+
+    await screen.findByText("任务一");
+    fireEvent.click(screen.getByRole("button", { name: "重命名" }));
+    const input = await screen.findByRole("textbox", { name: "重命名任务 任务一" });
+    fireEvent.change(input, { target: { value: "新名称" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存名称" }));
+
+    await waitFor(() => expect(callsTo("/api/jobs/job-1")).toHaveLength(1));
+    const patch = callsTo("/api/jobs/job-1")[0];
+    expect(patch.init.method).toBe("PATCH");
+    expect(JSON.parse(String(patch.init.body))).toEqual({ name: "新名称" });
+    expect(await screen.findByText("新名称")).toBeInTheDocument();
+    expect(screen.getByText("已重命名任务「新名称」")).toBeInTheDocument();
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+  });
+
+  it("重命名失败时回滚名称并展示后端错误", async () => {
+    stubFetch((_url, init) => {
+      if (init.method === "PATCH") {
+        return jsonResponse(
+          { error: { message: "名称已被占用", code: "conflict", retriable: false } },
+          409,
+        );
+      }
+      return listPage([deletableJob()]);
+    });
+    renderJobsPage();
+
+    await screen.findByText("任务一");
+    fireEvent.click(screen.getByRole("button", { name: "重命名" }));
+    const input = await screen.findByRole("textbox", { name: "重命名任务 任务一" });
+    fireEvent.change(input, { target: { value: "被占用名称" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存名称" }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("名称已被占用");
+    await waitFor(() => expect(screen.queryByText("被占用名称")).not.toBeInTheDocument());
+    expect(screen.getByText("任务一")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "放弃重命名" }));
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+    expect(screen.getByText("任务一")).toBeInTheDocument();
+  });
+
+  it("重命名校验空名称与超长名称且不发送请求", async () => {
+    stubFetch(() => listPage([deletableJob()]));
+    renderJobsPage();
+
+    await screen.findByText("任务一");
+    fireEvent.click(screen.getByRole("button", { name: "重命名" }));
+    const input = await screen.findByRole("textbox", { name: "重命名任务 任务一" });
+
+    fireEvent.change(input, { target: { value: "   " } });
+    fireEvent.click(screen.getByRole("button", { name: "保存名称" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("任务名称不能为空");
+
+    fireEvent.change(input, { target: { value: "名".repeat(101) } });
+    fireEvent.click(screen.getByRole("button", { name: "保存名称" }));
+    expect(screen.getByRole("alert")).toHaveTextContent("任务名称不能超过 100 个字符");
+
+    expect(callsTo("/api/jobs/job-1")).toHaveLength(0);
+  });
+
+  it("重命名按 Escape 取消编辑", async () => {
+    stubFetch(() => listPage([deletableJob()]));
+    renderJobsPage();
+
+    await screen.findByText("任务一");
+    fireEvent.click(screen.getByRole("button", { name: "重命名" }));
+    const input = await screen.findByRole("textbox", { name: "重命名任务 任务一" });
+    fireEvent.change(input, { target: { value: "临时名称" } });
+    fireEvent.keyDown(input, { key: "Escape" });
+
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+    expect(screen.getByText("任务一")).toBeInTheDocument();
+    expect(callsTo("/api/jobs/job-1")).toHaveLength(0);
+  });
+});
+
 describe("JobsPage 实时事件", () => {
   beforeEach(() => {
     fetchMock.mockReset();
@@ -918,5 +1018,152 @@ describe("JobsPage 实时事件", () => {
     view.unmount();
 
     expect(signal?.aborted).toBe(true);
+  });
+});
+
+describe("JobsPage 搜索与进度", () => {
+  beforeEach(() => {
+    fetchMock.mockReset();
+    vi.stubGlobal("fetch", fetchMock);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  function listResponse(items: Job[], total = items.length): Response {
+    return jsonResponse({ items, total, next_offset: null });
+  }
+
+  function searchbox(): HTMLElement {
+    return screen.getByRole("searchbox", { name: "搜索任务名称或 ID" });
+  }
+
+  function searchStub(): void {
+    stubFetch((url) => {
+      const query = new URL(url).searchParams.get("q");
+      if (query === "种子") {
+        return listResponse([
+          makeJob({ id: "job-seed", name: "种子扫描", status: "completed", completed: 100 }),
+        ]);
+      }
+      return listResponse([makeJob(), makeJob({ id: "job-2", name: "任务二" })]);
+    });
+  }
+
+  it("输入关键字后防抖发起带 q 的查询", async () => {
+    searchStub();
+    renderJobsPage();
+    await screen.findByText("任务一");
+
+    fireEvent.change(searchbox(), { target: { value: "种" } });
+    fireEvent.change(searchbox(), { target: { value: "种子" } });
+
+    expect(callsTo("q=")).toHaveLength(0);
+    expect(await screen.findByText("种子扫描")).toBeInTheDocument();
+    const searchCalls = callsTo("q=");
+    expect(searchCalls).toHaveLength(1);
+    expect(decodeURIComponent(searchCalls[0].url)).toBe(
+      "http://127.0.0.1:43210/api/jobs?q=种子&limit=20&offset=0",
+    );
+    expect(screen.queryByText("任务一")).not.toBeInTheDocument();
+  });
+
+  it("清空搜索后恢复完整列表", async () => {
+    searchStub();
+    renderJobsPage();
+    await screen.findByText("任务一");
+
+    fireEvent.change(searchbox(), { target: { value: "种子" } });
+    await screen.findByText("种子扫描");
+
+    fireEvent.click(screen.getByRole("button", { name: "清空搜索" }));
+
+    expect(await screen.findByText("任务一")).toBeInTheDocument();
+    expect(searchbox()).toHaveValue("");
+    expect(callsTo("q=")).toHaveLength(1);
+  });
+
+  it("搜索无结果时区分空态文案", async () => {
+    stubFetch((url) => {
+      const query = new URL(url).searchParams.get("q");
+      if (query !== null) return listResponse([]);
+      return listResponse([makeJob()]);
+    });
+    renderJobsPage();
+    await screen.findByText("任务一");
+
+    fireEvent.change(searchbox(), { target: { value: "缺货" } });
+
+    expect(await screen.findByText("没有符合条件的任务")).toBeInTheDocument();
+    expect(
+      screen.getByText("没有匹配该关键字的任务，调整关键字或清空搜索后重试。"),
+    ).toBeInTheDocument();
+  });
+
+  it("搜索与状态筛选组合生效", async () => {
+    stubFetch(() => listResponse([makeJob({ status: "completed", completed: 100 })]));
+    renderJobsPage();
+    await screen.findByText("任务一");
+
+    fireEvent.change(screen.getByLabelText("状态筛选"), { target: { value: "completed" } });
+    fireEvent.change(searchbox(), { target: { value: "种子" } });
+
+    await waitFor(() => expect(callsTo("q=")).toHaveLength(1));
+    const url = new URL(callsTo("q=")[0].url);
+    expect(url.searchParams.get("status")).toBe("completed");
+    expect(url.searchParams.get("q")).toBe("种子");
+    expect(url.searchParams.get("offset")).toBe("0");
+  });
+
+  it("运行中任务展示百分比进度与预计剩余时间", async () => {
+    const startedAt = new Date(Date.now() - 60_000).toISOString();
+    stubFetch(() =>
+      listResponse([
+        makeJob({ status: "running", total: 4, completed: 2, started_at: startedAt }),
+      ]),
+    );
+    renderJobsPage();
+    await screen.findByText("任务一");
+
+    const bar = screen.getByRole("progressbar", { name: "任务 任务一 进度" });
+    expect(bar).toHaveAttribute("aria-valuenow", "2");
+    expect(bar).toHaveAttribute("aria-valuemax", "4");
+    expect(bar).toHaveAttribute("aria-valuetext", "已完成 2 / 4");
+
+    const row = rowFor("任务一");
+    expect(within(row).getByText("50%")).toBeInTheDocument();
+    expect(within(row).getByText("预计剩余 1 分")).toBeInTheDocument();
+  });
+
+  it("排队中任务展示等待开始且不估算剩余时间", async () => {
+    stubFetch(() => listResponse([makeJob()]));
+    renderJobsPage();
+    await screen.findByText("任务一");
+
+    const row = rowFor("任务一");
+    expect(screen.getByRole("progressbar", { name: "任务 任务一 进度" })).toBeInTheDocument();
+    expect(within(row).getByText("0%")).toBeInTheDocument();
+    expect(within(row).getByText("等待开始")).toBeInTheDocument();
+    expect(within(row).queryByText(/预计剩余/)).not.toBeInTheDocument();
+  });
+
+  it("完成态任务不展示估算进度", async () => {
+    stubFetch(() =>
+      listResponse([
+        makeJob({
+          status: "completed",
+          total: 10,
+          completed: 10,
+          started_at: "2026-11-13T10:00:00+00:00",
+          finished_at: "2026-11-13T10:05:00+00:00",
+        }),
+      ]),
+    );
+    renderJobsPage();
+    await screen.findByText("任务一");
+
+    expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
+    expect(within(rowFor("任务一")).getByText("10 / 10")).toBeInTheDocument();
   });
 });

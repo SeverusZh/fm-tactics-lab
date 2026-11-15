@@ -41,3 +41,27 @@
   margin-left: var(--space-2);
   white-space: nowrap;
 }
+
+@media (max-width: 640px) {
+  .saves-tactics-head {
+    flex-wrap: wrap;
+    align-items: flex-start;
+  }
+
+  .saves-tactics-head .button {
+    margin-left: 0;
+  }
+
+  .saves-tactics-target {
+    overflow-wrap: anywhere;
+  }
+
+  .saves-tactics-table {
+    min-width: 480px;
+  }
+
+  .saves-settings-link {
+    margin-left: 0;
+    white-space: normal;
+  }
+}
