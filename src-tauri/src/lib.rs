@@ -1,5 +1,6 @@
 use std::{
     env,
+    ffi::OsStr,
     fs::File,
     io::{BufRead, BufReader, Read, Write},
     net::{SocketAddr, TcpStream},
@@ -14,17 +15,165 @@ use std::{
 };
 
 use fm27lab_core::{
-    backoff::Backoff,
     connection::{connection_info, ConnectionInfo},
     ready::parse_ready_line,
+    supervisor::{self, Phase, ShutdownStep},
     token::generate_token,
 };
-use tauri::{AppHandle, Emitter, Manager, RunEvent, State};
+use tauri::{
+    menu::{Menu, MenuItem},
+    tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
+    AppHandle, Emitter, Manager, RunEvent, State,
+};
 
-const MAX_RESTARTS: usize = 3;
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(30);
 const SHUTDOWN_WAIT: Duration = Duration::from_secs(10);
 const HEALTH_INTERVAL: Duration = Duration::from_secs(5);
+
+const TRAY_SHOW: &str = "tray-show";
+const TRAY_HIDE: &str = "tray-hide";
+const TRAY_RESTART: &str = "tray-restart";
+const TRAY_QUIT: &str = "tray-quit";
+
+fn normalize_external_url(raw: &str) -> Result<String, String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Err("链接不能为空".to_string());
+    }
+    let illegal = |character: char| {
+        character.is_whitespace()
+            || character.is_control()
+            || matches!(character, '"' | '<' | '>' | '\\' | '^' | '|' | '`' | '{' | '}')
+    };
+    if trimmed.chars().any(illegal) {
+        return Err("只允许 http 或 https 链接".to_string());
+    }
+    let Some((scheme, rest)) = trimmed.split_once("://") else {
+        return Err("只允许 http 或 https 链接".to_string());
+    };
+    if !(scheme.eq_ignore_ascii_case("http") || scheme.eq_ignore_ascii_case("https")) {
+        return Err("只允许 http 或 https 链接".to_string());
+    }
+    let authority = rest
+        .split(|character: char| character == '/' || character == '?' || character == '#')
+        .next()
+        .unwrap_or("");
+    if authority.is_empty() || authority.contains('@') {
+        return Err("只允许 http 或 https 链接".to_string());
+    }
+    Ok(trimmed.to_string())
+}
+
+fn system_open(target: &OsStr) -> Result<(), String> {
+    // Windows 走 FileProtocolHandler，避免 cmd.exe 重新解析 & | ^ % 等字符
+    let mut command = if cfg!(windows) {
+        let mut command = Command::new("rundll32.exe");
+        command.arg("url.dll,FileProtocolHandler");
+        command
+    } else if cfg!(target_os = "macos") {
+        Command::new("open")
+    } else {
+        Command::new("xdg-open")
+    };
+    command
+        .arg(target)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map(|_| ())
+        .map_err(|error| format!("cannot open {target:?}: {error}"))
+}
+
+fn open_directory(path: &OsStr) -> Result<(), String> {
+    // 目录交给系统文件管理器，Windows 用 explorer 而非 URL 协议处理器
+    let mut command = if cfg!(windows) {
+        Command::new("explorer.exe")
+    } else if cfg!(target_os = "macos") {
+        Command::new("open")
+    } else {
+        Command::new("xdg-open")
+    };
+    command
+        .arg(path)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map(|_| ())
+        .map_err(|error| format!("cannot open directory {path:?}: {error}"))
+}
+
+fn show_main_window(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.unminimize();
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+}
+
+fn hide_main_window(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.hide();
+    }
+}
+
+fn restart_sidecar_in_background(app: &AppHandle) {
+    let handle = app.clone();
+    thread::spawn(move || {
+        if let Err(error) = restart_sidecar_inner(&handle) {
+            let _ = handle.emit("sidecar-error", error);
+        }
+    });
+}
+
+fn setup_tray(app: &AppHandle) -> Result<(), String> {
+    let show = MenuItem::with_id(app, TRAY_SHOW, "显示主窗口", true, None::<&str>)
+        .map_err(|error| format!("tray menu item failed: {error}"))?;
+    let hide = MenuItem::with_id(app, TRAY_HIDE, "隐藏主窗口", true, None::<&str>)
+        .map_err(|error| format!("tray menu item failed: {error}"))?;
+    let restart = MenuItem::with_id(app, TRAY_RESTART, "重启 sidecar", true, None::<&str>)
+        .map_err(|error| format!("tray menu item failed: {error}"))?;
+    let quit = MenuItem::with_id(app, TRAY_QUIT, "退出", true, None::<&str>)
+        .map_err(|error| format!("tray menu item failed: {error}"))?;
+    let menu = Menu::with_items(app, &[&show, &hide, &restart, &quit])
+        .map_err(|error| format!("tray menu failed: {error}"))?;
+    let icon = app
+        .default_window_icon()
+        .cloned()
+        .ok_or_else(|| "tray icon is unavailable".to_string())?;
+    let tray = TrayIconBuilder::new()
+        .icon(icon)
+        .tooltip("FM Tactics Lab")
+        .menu(&menu)
+        .show_menu_on_left_click(false)
+        .on_menu_event(|app, event| {
+            let id = event.id.as_ref();
+            if id == TRAY_SHOW {
+                show_main_window(app);
+            } else if id == TRAY_HIDE {
+                hide_main_window(app);
+            } else if id == TRAY_RESTART {
+                restart_sidecar_in_background(app);
+            } else if id == TRAY_QUIT {
+                app.exit(0);
+            }
+        })
+        .on_tray_icon_event(|tray, event| {
+            if let TrayIconEvent::Click {
+                button: MouseButton::Left,
+                button_state: MouseButtonState::Up,
+                ..
+            } = event
+            {
+                show_main_window(tray.app_handle());
+            }
+        })
+        .build(app)
+        .map_err(|error| format!("tray icon failed: {error}"))?;
+    std::mem::forget(tray);
+    Ok(())
+}
 
 #[derive(Default)]
 struct SidecarState {
@@ -81,30 +230,15 @@ fn launch_spec(app: &AppHandle) -> Result<(PathBuf, Vec<String>, PathBuf), Strin
     Ok((executable, Vec::new(), resource))
 }
 
-fn parse_port(url: &str) -> Option<u16> {
-    url.rsplit_once(':')?.1.parse().ok()
-}
-
-fn is_status(line: &str, code: &str) -> bool {
-    line.contains(&format!(" {code} ")) || line.ends_with(&format!(" {code}"))
-}
-
-fn is_success_status(line: &str) -> bool {
-    is_status(line, "200")
-}
-
 fn http_probe(connection: &ConnectionInfo, request_path: &str) -> Option<String> {
-    let port = parse_port(&connection.url)?;
+    let port = supervisor::parse_port(&connection.url)?;
     let address: SocketAddr = format!("127.0.0.1:{port}").parse().ok()?;
     let mut stream = TcpStream::connect_timeout(&address, Duration::from_secs(2)).ok()?;
     stream.set_read_timeout(Some(Duration::from_secs(2))).ok()?;
     stream
         .set_write_timeout(Some(Duration::from_secs(2)))
         .ok()?;
-    let request = format!(
-        "GET {request_path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nAuthorization: Bearer {}\r\nConnection: close\r\n\r\n",
-        connection.token
-    );
+    let request = supervisor::probe_request(port, &connection.token, request_path);
     stream.write_all(request.as_bytes()).ok()?;
     let mut reader = BufReader::new(stream);
     let mut line = String::new();
@@ -113,11 +247,12 @@ fn http_probe(connection: &ConnectionInfo, request_path: &str) -> Option<String>
 }
 
 fn health_ok(connection: &ConnectionInfo) -> bool {
-    http_probe(connection, "/api/health").is_some_and(|line| is_success_status(&line))
+    let status = http_probe(connection, "/api/health");
+    supervisor::classify_health(status.as_deref()).is_healthy()
 }
 
 fn post_shutdown(connection: &ConnectionInfo) -> bool {
-    let Some(port) = parse_port(&connection.url) else {
+    let Some(port) = supervisor::parse_port(&connection.url) else {
         return false;
     };
     let Ok(address) = format!("127.0.0.1:{port}").parse() else {
@@ -128,10 +263,7 @@ fn post_shutdown(connection: &ConnectionInfo) -> bool {
     };
     let _ = stream.set_write_timeout(Some(Duration::from_secs(2)));
     let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
-    let request = format!(
-        "POST /api/shutdown HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nAuthorization: Bearer {}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
-        connection.token
-    );
+    let request = supervisor::shutdown_request(port, &connection.token);
     if stream.write_all(request.as_bytes()).is_err() {
         return false;
     }
@@ -139,13 +271,13 @@ fn post_shutdown(connection: &ConnectionInfo) -> bool {
     if BufReader::new(stream).read_line(&mut status).is_err() {
         return false;
     }
-    is_status(&status, "202")
+    supervisor::is_shutdown_accepted(&status)
 }
 
 fn remove_endpoint(data_dir: &std::path::Path) {
-    let endpoint = data_dir.join("agent").join("endpoint.json");
-    let _ = std::fs::remove_file(&endpoint);
-    let _ = std::fs::remove_file(endpoint.with_extension("json.tmp"));
+    for endpoint in supervisor::endpoint_paths(data_dir) {
+        let _ = std::fs::remove_file(endpoint);
+    }
 }
 
 fn clear_connection(state: &SidecarState) {
@@ -163,6 +295,21 @@ fn kill_child(state: &SidecarState) {
     }
 }
 
+fn await_child_exit(child: &mut Child) {
+    let deadline = Instant::now() + SHUTDOWN_WAIT;
+    while Instant::now() < deadline {
+        match child.try_wait() {
+            Ok(Some(_)) => break,
+            Ok(None) => thread::sleep(Duration::from_millis(100)),
+            Err(_) => break,
+        }
+    }
+    if matches!(child.try_wait(), Ok(None)) {
+        let _ = child.kill();
+    }
+    let _ = child.wait();
+}
+
 fn child_running(state: &SidecarState) -> bool {
     let mut guard = match state.child.lock() {
         Ok(guard) => guard,
@@ -174,16 +321,29 @@ fn child_running(state: &SidecarState) -> bool {
     }
 }
 
-fn start_allowed(state: &SidecarState, allow_restart: bool) -> bool {
+fn phase(state: &SidecarState) -> Phase {
     if state.stopping.load(Ordering::SeqCst) {
-        return false;
+        return Phase::Stopping;
     }
-    if allow_restart {
-        return true;
+    if state.restart_in_progress.load(Ordering::SeqCst) {
+        return Phase::Starting;
     }
-    !state.paused.load(Ordering::SeqCst)
-        && !state.restart_in_progress.load(Ordering::SeqCst)
-        && !child_running(state)
+    if state.paused.load(Ordering::SeqCst) {
+        return Phase::Failed;
+    }
+    if child_running(state) {
+        return Phase::Running;
+    }
+    Phase::Stopped
+}
+
+fn start_allowed(state: &SidecarState, allow_restart: bool) -> bool {
+    supervisor::start_allowed(phase(state), allow_restart)
+}
+
+fn next_restart_delay(state: &SidecarState) -> Option<u64> {
+    let attempt = state.restarts.fetch_add(1, Ordering::SeqCst) + 1;
+    supervisor::restart_delay_ms(attempt)
 }
 
 fn should_start(state: &SidecarState) -> bool {
@@ -348,17 +508,11 @@ fn monitor(app: AppHandle) {
             let _ = child.wait();
             clear_connection(&state);
             let _ = app.emit("sidecar-down", "sidecar exited");
-            let attempt = state.restarts.fetch_add(1, Ordering::SeqCst) + 1;
-            if attempt > MAX_RESTARTS {
+            let Some(delay) = next_restart_delay(&state) else {
                 state.paused.store(true, Ordering::SeqCst);
                 let _ = app.emit("sidecar-failed", "restart limit reached");
                 continue;
-            }
-            let delay = Backoff::new(500, MAX_RESTARTS)
-                .delays()
-                .get(attempt - 1)
-                .copied()
-                .unwrap_or(4_000);
+            };
             thread::sleep(Duration::from_millis(delay));
             if !should_start(&state) {
                 continue;
@@ -378,17 +532,11 @@ fn monitor(app: AppHandle) {
             if state.restart_in_progress.load(Ordering::SeqCst) {
                 continue;
             }
-            let attempt = state.restarts.fetch_add(1, Ordering::SeqCst) + 1;
-            if attempt > MAX_RESTARTS {
+            let Some(delay) = next_restart_delay(&state) else {
                 state.paused.store(true, Ordering::SeqCst);
                 let _ = app.emit("sidecar-failed", "restart limit reached");
                 continue;
-            }
-            let delay = Backoff::new(500, MAX_RESTARTS)
-                .delays()
-                .get(attempt - 1)
-                .copied()
-                .unwrap_or(4_000);
+            };
             thread::sleep(Duration::from_millis(delay));
             if !should_start(&state) {
                 continue;
@@ -404,9 +552,10 @@ fn monitor(app: AppHandle) {
             }
             continue;
         }
-        if stable_since.elapsed() > Duration::from_secs(30)
-            && state.restarts.load(Ordering::SeqCst) > 0
-        {
+        if supervisor::restarts_settled(
+            stable_since.elapsed(),
+            state.restarts.load(Ordering::SeqCst),
+        ) {
             state.restarts.store(0, Ordering::SeqCst);
         }
         if last_health.elapsed() >= HEALTH_INTERVAL {
@@ -418,7 +567,7 @@ fn monitor(app: AppHandle) {
                         health_failures = 0;
                     } else {
                         health_failures += 1;
-                        if health_failures >= 3 {
+                        if supervisor::health_escalated(health_failures) {
                             let _ = app.emit("sidecar-down", "sidecar health check failed");
                             kill_child(&state);
                             health_failures = 0;
@@ -436,28 +585,27 @@ fn stop_sidecar(state: &SidecarState) {
         Ok(guard) => guard,
         Err(_) => return,
     };
-    if let Ok(guard) = state.connection.lock() {
-        if let Some(connection) = guard.as_ref() {
-            post_shutdown(connection);
-        }
-    }
-    let mut child = state.child.lock().ok().and_then(|mut guard| guard.take());
-    if let Some(child) = child.as_mut() {
-        let deadline = Instant::now() + SHUTDOWN_WAIT;
-        while Instant::now() < deadline {
-            match child.try_wait() {
-                Ok(Some(_)) => break,
-                Ok(None) => thread::sleep(Duration::from_millis(100)),
-                Err(_) => break,
+    for step in supervisor::SHUTDOWN_STEPS {
+        match step {
+            ShutdownStep::RequestShutdown => {
+                if let Ok(guard) = state.connection.lock() {
+                    if let Some(connection) = guard.as_ref() {
+                        post_shutdown(connection);
+                    }
+                }
+            }
+            ShutdownStep::TerminateChild => {
+                let mut child = state.child.lock().ok().and_then(|mut guard| guard.take());
+                if let Some(child) = child.as_mut() {
+                    await_child_exit(child);
+                }
+            }
+            ShutdownStep::RemoveEndpoint => {
+                if let Some(data_dir) = state.data_dir.lock().ok().and_then(|guard| guard.clone()) {
+                    remove_endpoint(&data_dir);
+                }
             }
         }
-        if matches!(child.try_wait(), Ok(None)) {
-            let _ = child.kill();
-        }
-        let _ = child.wait();
-    }
-    if let Some(data_dir) = state.data_dir.lock().ok().and_then(|guard| guard.clone()) {
-        remove_endpoint(&data_dir);
     }
     clear_connection(state);
 }
@@ -488,8 +636,8 @@ fn sidecar_status(state: State<SidecarState>) -> Result<serde_json::Value, Strin
     }))
 }
 
-#[tauri::command]
-fn restart_sidecar(app: AppHandle, state: State<SidecarState>) -> Result<ConnectionInfo, String> {
+fn restart_sidecar_inner(app: &AppHandle) -> Result<ConnectionInfo, String> {
+    let state = app.state::<SidecarState>();
     if state.stopping.load(Ordering::SeqCst) {
         return Err("sidecar is stopping".to_string());
     }
@@ -499,12 +647,36 @@ fn restart_sidecar(app: AppHandle, state: State<SidecarState>) -> Result<Connect
     state.restarts.store(0, Ordering::SeqCst);
     kill_child(&state);
     clear_connection(&state);
-    let result = start_sidecar_inner(&app, true);
+    let result = start_sidecar_inner(app, true);
     state.restart_in_progress.store(false, Ordering::SeqCst);
     if let Ok(connection) = &result {
         let _ = app.emit("sidecar-ready", connection);
     }
     result
+}
+
+#[tauri::command]
+fn restart_sidecar(app: AppHandle) -> Result<ConnectionInfo, String> {
+    restart_sidecar_inner(&app)
+}
+
+#[tauri::command]
+fn open_data_dir(app: AppHandle) -> Result<String, String> {
+    let data_dir = app
+        .path()
+        .app_local_data_dir()
+        .map_err(|error| format!("data directory is unavailable: {error}"))?;
+    std::fs::create_dir_all(&data_dir)
+        .map_err(|error| format!("cannot create data directory: {error}"))?;
+    open_directory(data_dir.as_os_str())?;
+    Ok(data_dir.to_string_lossy().into_owned())
+}
+
+#[tauri::command]
+fn open_external_url(url: String) -> Result<String, String> {
+    let target = normalize_external_url(&url)?;
+    system_open(OsStr::new(&target))?;
+    Ok(target)
 }
 
 #[tauri::command]
@@ -523,6 +695,9 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .manage(SidecarState::default())
         .setup(|app| {
+            if let Err(error) = setup_tray(app.handle()) {
+                eprintln!("tray setup failed: {error}");
+            }
             let handle = app.handle().clone();
             thread::spawn(move || {
                 match start_sidecar(&handle) {
@@ -541,7 +716,9 @@ pub fn run() {
             get_connection,
             sidecar_status,
             restart_sidecar,
-            shutdown_sidecar
+            shutdown_sidecar,
+            open_data_dir,
+            open_external_url
         ])
         .build(tauri::generate_context!())
         .expect("error while building FM Tactics Lab");
@@ -560,20 +737,25 @@ mod tests {
 
     #[test]
     fn parses_success_status_lines() {
-        assert!(is_success_status("HTTP/1.1 200 OK"));
-        assert!(is_success_status("HTTP/1.0 200"));
-        assert!(!is_success_status("HTTP/1.1 503 Service Unavailable"));
+        assert!(supervisor::is_success_status("HTTP/1.1 200 OK"));
+        assert!(supervisor::is_success_status("HTTP/1.0 200"));
+        assert!(!supervisor::is_success_status("HTTP/1.1 503 Service Unavailable"));
     }
 
     #[test]
     fn parses_connection_ports() {
-        assert_eq!(parse_port("http://127.0.0.1:43210"), Some(43210));
-        assert_eq!(parse_port("not-a-url"), None);
+        assert_eq!(supervisor::parse_port("http://127.0.0.1:43210"), Some(43210));
+        assert_eq!(supervisor::parse_port("not-a-url"), None);
     }
 
     #[test]
     fn restart_backoff_is_bounded() {
-        assert_eq!(Backoff::new(500, 3).delays(), vec![500, 1000, 2000]);
+        let delays = (1..=supervisor::MAX_RESTARTS)
+            .filter_map(supervisor::restart_delay_ms)
+            .collect::<Vec<_>>();
+        assert_eq!(delays, vec![500, 1000, 2000]);
+        assert_eq!(supervisor::restart_delay_ms(0), None);
+        assert_eq!(supervisor::restart_delay_ms(supervisor::MAX_RESTARTS + 1), None);
     }
 
     #[test]
@@ -594,17 +776,21 @@ mod tests {
     #[test]
     fn start_gate_blocks_stopping_paused_and_restarting() {
         let state = SidecarState::default();
+        assert_eq!(phase(&state), Phase::Stopped);
         assert!(should_start(&state));
         assert!(start_allowed(&state, true));
         state.stopping.store(true, Ordering::SeqCst);
+        assert_eq!(phase(&state), Phase::Stopping);
         assert!(!should_start(&state));
         assert!(!start_allowed(&state, true));
         state.stopping.store(false, Ordering::SeqCst);
         state.paused.store(true, Ordering::SeqCst);
+        assert_eq!(phase(&state), Phase::Failed);
         assert!(!should_start(&state));
         assert!(start_allowed(&state, true));
         state.paused.store(false, Ordering::SeqCst);
         state.restart_in_progress.store(true, Ordering::SeqCst);
+        assert_eq!(phase(&state), Phase::Starting);
         assert!(!should_start(&state));
         assert!(start_allowed(&state, true));
     }
@@ -616,9 +802,12 @@ mod tests {
         let agent = data_dir.join("agent");
         std::fs::create_dir_all(&agent).unwrap();
         let endpoint = agent.join("endpoint.json");
+        let temporary = agent.join("endpoint.json.tmp");
         std::fs::write(&endpoint, "secret").unwrap();
+        std::fs::write(&temporary, "secret").unwrap();
         remove_endpoint(&data_dir);
         assert!(!endpoint.exists());
+        assert!(!temporary.exists());
         let _ = std::fs::remove_dir_all(data_dir);
     }
 
@@ -645,6 +834,39 @@ mod tests {
         assert!(!endpoint.exists());
         assert!(state.child.lock().unwrap().is_none());
         let _ = std::fs::remove_dir_all(data_dir);
+    }
+
+    #[test]
+    fn tray_menu_ids_are_distinct() {
+        let ids = [TRAY_SHOW, TRAY_HIDE, TRAY_RESTART, TRAY_QUIT];
+        for (index, id) in ids.iter().enumerate() {
+            assert!(!id.is_empty());
+            assert!(!ids[index + 1..].contains(id));
+        }
+    }
+
+    #[test]
+    fn external_urls_require_http_or_https() {
+        assert_eq!(
+            normalize_external_url(" https://github.com/SeverusZh/fm-tactics-lab ").unwrap(),
+            "https://github.com/SeverusZh/fm-tactics-lab"
+        );
+        assert_eq!(
+            normalize_external_url("HTTP://127.0.0.1:1420/health").unwrap(),
+            "HTTP://127.0.0.1:1420/health"
+        );
+        assert!(normalize_external_url("").is_err());
+        assert!(normalize_external_url("https:// example.com").is_err());
+        assert!(normalize_external_url("https://").is_err());
+        assert!(normalize_external_url("javascript:alert(1)").is_err());
+        assert!(normalize_external_url("file:///etc/passwd").is_err());
+        assert!(normalize_external_url("ftp://example.com/file").is_err());
+        assert!(normalize_external_url("https://user:secret@example.com/").is_err());
+        assert!(normalize_external_url("https://example.com/<calc").is_err());
+        assert!(normalize_external_url("https://example.com/|calc").is_err());
+        assert!(normalize_external_url("https://example.com/\"calc").is_err());
+        assert!(normalize_external_url("https://example.com/`calc").is_err());
+        assert!(normalize_external_url("https://example.com/?a=1&b=2").is_ok());
     }
 
     #[test]

@@ -3,4 +3,5 @@
 pub mod backoff;
 pub mod connection;
 pub mod ready;
+pub mod supervisor;
 pub mod token;
