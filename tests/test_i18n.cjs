@@ -55,6 +55,9 @@ async function environment(system,browser){
  const zh=await environment('zh-CN','en-US');
  assert.equal(zh.title.data,'战术板');assert.equal(zh.control.attrs.placeholder,'选择存档');
  const dictionary=en.context.window.FM27English;
+ const keys=[...fs.readFileSync(path.join(ui,'i18n-en.js'),'utf8').matchAll(/^\s*"((?:[^"\\]|\\.)*)"\s*:/gm)].map(match=>match[1]);
+ const duplicates=[...new Set(keys.filter((key,index)=>keys.indexOf(key)!==index))];
+ assert.deepEqual(duplicates,[],`Duplicate i18n keys: ${duplicates.join(', ')}`);
  for(const filename of fs.readdirSync(ui).filter(f=>/\.(js|html)$/.test(f)&&!f.startsWith('i18n'))){
   for(const word of fs.readFileSync(path.join(ui,filename),'utf8').match(/[\u3400-\u9fff]+/g)||[]){
    assert.ok(dictionary[word],`Missing translation in ${filename}: ${word}`);

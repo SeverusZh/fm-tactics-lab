@@ -1,6 +1,6 @@
-// Opt-in experiment. Each configured match runs in its own worker session.
-// Current image 2493426: d85a0 computes the 33-byte tactical-effectiveness
-// record at MATCH_PLAYER+cba. 41a50 consumes it during action sampling.
+// Opt-in execution inputs: process trampolines persist, match bindings do not.
+// Current image 2494687: 71370 computes the 33-byte tactical-effectiveness
+// record at MATCH_PLAYER+cba. 465b0 consumes it during action sampling.
 static unsigned char* execution_teams[2]={};
 static int execution_policy[2]={-1,-1};
 enum ExecutionComponent {Understanding, BuyIn, Opposition, Ability, ComponentCount};
@@ -13,7 +13,23 @@ using ExecutionBuild=void(*)(void*,void*,void*,void*,void*,void*,void*,void*,voi
 using ExecutionSample=void(*)(void*,uintptr_t,uintptr_t,void*,uintptr_t);
 static ExecutionBuild execution_original_build=nullptr;
 static ExecutionSample execution_original_sample=nullptr;
+static bool execution_active=false;
+static void execution_reset_match(){
+ execution_active=false;memset(execution_teams,0,sizeof(execution_teams));
+ for(unsigned side=0;side<2;side++){
+  execution_policy[side]=-1;for(auto& value:execution_components[side])value=-1;
+ }
+ memset(execution_builds,0,sizeof(execution_builds));memset(execution_samples,0,sizeof(execution_samples));
+ memset(execution_input_ca,0,sizeof(execution_input_ca));memset(execution_input_seen,0,sizeof(execution_input_seen));
+ memset(execution_calculated_overall,0,sizeof(execution_calculated_overall));
+}
+static void execution_end_match(){
+ execution_active=false;memset(execution_teams,0,sizeof(execution_teams));
+ fputs("{\"event\":\"native_execution_context_cleared\",\"team_bindings_cleared\":true}\n",log_file);fflush(log_file);
+}
+
 static int execution_side(unsigned char* player){
+ if(!execution_active)return -1;
  auto team=*(unsigned char**)(player+0x288);
  return !team?-1:team==execution_teams[0]?0:team==execution_teams[1]?1:-1;
 }
@@ -90,6 +106,7 @@ static void* execution_redirect(unsigned rva,void* replacement,unsigned stack_lo
  FlushInstructionCache(GetCurrentProcess(),entry,19);return trampoline;
 }
 static void execution_install(unsigned char* match){
+ execution_reset_match();
  bool enabled=false;
  for(const auto& edit:scenario_edits){
   if(edit.kind!=61)continue;
@@ -106,17 +123,22 @@ static void execution_install(unsigned char* match){
    for(int value:execution_components[side])if(value>=0)desktop_finish_and_exit(244);
   }else if(c[Understanding]<0||c[BuyIn]<0||c[Opposition]<0)desktop_finish_and_exit(244);
  }
- if(execution_original_sample||strcmp(native_image_sha256,
+ if(strcmp(native_image_sha256,
     "f79b0a3413dd0e3f461b0afbc3ff397003f4a26d7525a30717428de6a8b91196"))desktop_finish_and_exit(244);
+ execution_active=true;
  for(unsigned side=0;side<2;side++)execution_teams[side]=*(unsigned char**)(match+0x15380+8*side);
  constexpr unsigned version=0x1b000000u;
  fprintf(log_file,"{\"event\":\"experimental_engine_version\",\"before\":%u,\"after\":%u,\"production_supported\":false}\n",*(unsigned*)(match+0xa3a),version);
  *(unsigned*)(match+0xa3a)=version;
- execution_original_build=(ExecutionBuild)execution_redirect(0x71370,(void*)execution_build,0x38,1);
- execution_original_sample=(ExecutionSample)execution_redirect(0x465b0,(void*)execution_sample,0x88,0);
+ bool reused=execution_original_sample!=nullptr;
+ if(!reused){
+  execution_original_build=(ExecutionBuild)execution_redirect(0x71370,(void*)execution_build,0x38,1);
+  execution_original_sample=(ExecutionSample)execution_redirect(0x465b0,(void*)execution_sample,0x88,0);
+ }
+ fprintf(log_file,"{\"event\":\"native_execution_context_bound\",\"hooks_reused\":%s,\"match_inputs_reset\":true}\n",reused?"true":"false");fflush(log_file);
 }
 static void execution_snapshot(unsigned char* match,const char* stage){
- if(!execution_original_sample)return;
+ if(!execution_active)return;
  for(unsigned side=0;side<2;side++){
   auto team=*(unsigned char**)(match+0x15380+8*side);
   fprintf(log_file,"{\"event\":\"native_execution_probe\",\"stage\":\"%s\",\"side\":%u,\"policy\":",stage,side);

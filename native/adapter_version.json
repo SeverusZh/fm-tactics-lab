@@ -5,5 +5,9 @@
   "unmapped_references": [
     "0xfb2580",
     "0x4a7c550"
-  ]
+  ],
+  "native_worker_protocol": 2,
+  "session_scope": "remaining_batch_lane",
+  "execution_context_reset": true,
+  "max_worker_jobs": 1000000
 }

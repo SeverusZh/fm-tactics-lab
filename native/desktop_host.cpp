@@ -856,6 +856,7 @@ static int native_match(void* interface_object){
             FlushFileBuffers((HANDLE)_get_osfhandle(_fileno(log_file)));
             if(!worker_manifest.empty()){
                 if(!desktop_events_stop())desktop_finish_and_exit(181);
+                execution_end_match();
                 fputs("{\"event\":\"original_match_release_started\"}\n",log_file);fflush(log_file);
                 ((void(*)(void*))(*(void***)interface_object)[1])(interface_object);
                 ((void(*)(void*))at(0x4ba6800))(match);
@@ -926,10 +927,17 @@ static LONG WINAPI observe(EXCEPTION_POINTERS* p){
 static int worker_loop(void* object){
     if(GetEnvironmentVariableW(L"FM27_DESKTOP_STATS_AUDIT",nullptr,0)||GetEnvironmentVariableW(L"FM27_EPISODE_TYPE",nullptr,0)||GetEnvironmentVariableW(L"FM27_IMPORT_FMF",nullptr,0)||GetEnvironmentVariableW(L"FM27_EXPORT_TAC",nullptr,0))return 184;
     std::ifstream manifest(worker_manifest);std::string line;
-    if(!std::getline(manifest,line)||line!="FM27DW1")return 184;
+    if(!std::getline(manifest,line))return 184;
+    bool counted=line=="FM27DW2";unsigned expected=64;
+    if(counted){
+        if(!std::getline(manifest,line))return 184;
+        char* end=nullptr;auto count=strtoull(line.c_str(),&end,10);
+        if(line.empty()||*end||count<1||count>1000000)return 184;
+        expected=(unsigned)count;
+    }else if(line!="FM27DW1")return 184;
     FILE* session_log=log_file;unsigned index=0;
     while(std::getline(manifest,line)){
-        if(line.empty())continue;desktop_check_cancel();if(++index>64)return 184;
+        if(line.empty())continue;desktop_check_cancel();if(++index>expected)return 184;
         std::string fields[5];fields[0]=line;
         for(unsigned i=1;i<5;i++)if(!std::getline(manifest,fields[i]))return 184;
         fixture=fs::u8path(fields[0]);scenario_file=fs::u8path(fields[1]);output=fs::u8path(fields[2]);
@@ -940,7 +948,7 @@ static int worker_loop(void* object){
         {std::lock_guard<std::recursive_mutex> lock(worker_log_lock);log_file=next;}
         timing_start=GetTickCount64();timing_loaded=timing_active=timing_start;
         scenario_edits.clear();memset(game_constraints,0,sizeof(game_constraints));memset(original_roster,0,sizeof(original_roster));
-        input_cursor=input_reads=0;
+        input_cursor=input_reads=0;execution_reset_match();
         fprintf(log_file,"{\"event\":\"native_worker_job_started\",\"index\":%u,\"pid\":%lu,\"bootstrap_reused\":%s}\n",index,GetCurrentProcessId(),worker_bootstrapped?"true":"false");fflush(log_file);
         int result=native_match(object);if(result)return result;
         {std::lock_guard<std::recursive_mutex> lock(worker_log_lock);log_file=session_log;}
@@ -948,6 +956,7 @@ static int worker_loop(void* object){
         auto marker=output;marker+=L".worker_done";FILE* ack=nullptr;if(_wfopen_s(&ack,marker.c_str(),L"wb"))return 185;
         fprintf(ack,"{\"index\":%u,\"pid\":%lu,\"released\":true,\"exit_code\":0}\n",index,GetCurrentProcessId());fclose(ack);
     }
+    if(counted&&index!=expected)return 184;
     fprintf(log_file,"{\"event\":\"native_worker_completed\",\"jobs\":%u}\n",index);fflush(log_file);return index?0:184;
 }
 
@@ -1010,6 +1019,7 @@ int wmain(int argc,wchar_t** argv){
         std::wstring arg=argv[i];
         if(arg==L"--check-image"&&i+1<argc)check_image=fs::absolute(argv[++i]);
         else if(arg==L"--inspect-fixture")inspect_fixture_only=true;
+        else if(arg==L"--worker-capabilities"){puts("{\"protocol\":2,\"max_jobs\":1000000,\"execution_context_reset\":true,\"per_match_resource_release\":true}");return 0;}
         else if(arg==L"--worker-manifest"&&i+1<argc)worker_manifest=fs::absolute(argv[++i]);
         else if(arg==L"--cancel-event"&&i+1<argc)desktop_cancel_name=argv[++i];
         else if(arg==L"--child")is_child=true;
@@ -1060,7 +1070,13 @@ int wmain(int argc,wchar_t** argv){
         auto error=GetLastError();TerminateProcess(process.hProcess,102);CloseHandle(process.hThread);CloseHandle(process.hProcess);CloseHandle(job);CloseDesktop(desktop);printf("process_isolation_error=%lu\n",error);return 102;
     }
     ResumeThread(process.hThread);
-    if(WaitForSingleObject(process.hProcess,worker_manifest.empty()?180000u:64u*180000u)==WAIT_TIMEOUT){if(desktop_cancel_event)SetEvent(desktop_cancel_event);if(!desktop_cancel_event||WaitForSingleObject(process.hProcess,15000)==WAIT_TIMEOUT){printf("steam_cleanup_timeout_forced_termination=1\n");TerminateProcess(process.hProcess,85);WaitForSingleObject(process.hProcess,3000);}}
+    DWORD worker_wait=180000u;
+    if(!worker_manifest.empty()){
+        std::ifstream manifest(worker_manifest);std::string magic;std::getline(manifest,magic);
+        // Python enforces each match's progress and cancellation deadlines.
+        worker_wait=magic=="FM27DW2"?INFINITE:64u*180000u;
+    }
+    if(WaitForSingleObject(process.hProcess,worker_wait)==WAIT_TIMEOUT){if(desktop_cancel_event)SetEvent(desktop_cancel_event);if(!desktop_cancel_event||WaitForSingleObject(process.hProcess,15000)==WAIT_TIMEOUT){printf("steam_cleanup_timeout_forced_termination=1\n");TerminateProcess(process.hProcess,85);WaitForSingleObject(process.hProcess,3000);}}
     DWORD code=0;GetExitCodeProcess(process.hProcess,&code);
     printf("native_match_exit=%lu\n",code);
     CloseHandle(process.hThread);CloseHandle(process.hProcess);CloseHandle(job);CloseDesktop(desktop);

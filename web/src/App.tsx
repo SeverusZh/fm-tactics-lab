@@ -1,0 +1,165 @@
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { invoke } from "@tauri-apps/api/core";
+import type { UnlistenFn } from "@tauri-apps/api/event";
+import { listen } from "@tauri-apps/api/event";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Navigate, Route, Routes, useLocation } from "react-router-dom";
+
+import { AppContext } from "./app-context";
+import { ErrorBoundary } from "./components/ErrorBoundary";
+import { Rail } from "./components/Rail";
+import { TopBar } from "./components/TopBar";
+import { apiJson, type Health } from "./lib/api";
+import type { Connection } from "./lib/connection";
+import { loadConnection } from "./lib/connection";
+import { isDesktopShell } from "./lib/file-dialog";
+import { ExperimentsPage } from "./pages/ExperimentsPage";
+import { HelpPage } from "./pages/HelpPage";
+import { JobsPage } from "./pages/JobsPage";
+import { LibraryPage } from "./pages/LibraryPage";
+import { PlayersPage } from "./pages/PlayersPage";
+import { ResultsPage } from "./pages/ResultsPage";
+import { SettingsPage } from "./pages/SettingsPage";
+import { TacticsPage } from "./pages/TacticsPage";
+
+const titles: Record<string, string> = {
+  "/tactics": "战术板",
+  "/players": "球员属性",
+  "/library": "存档战术库",
+  "/experiments": "实验",
+  "/results": "实验结果",
+  "/jobs": "任务管理",
+  "/settings": "设置",
+  "/help": "帮助",
+};
+
+function titleFor(pathname: string): string {
+  return titles[pathname] ?? "战术板";
+}
+
+export function App() {
+  const location = useLocation();
+  const queryClient = useQueryClient();
+  const [lifecycleError, setLifecycleError] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const refreshingRef = useRef(false);
+  const connection = useQuery({
+    queryKey: ["connection"],
+    queryFn: loadConnection,
+    staleTime: Infinity,
+    retry: 1,
+  });
+  const health = useQuery({
+    queryKey: ["health", connection.data?.url],
+    queryFn: () => apiJson<Health>(connection.data!, "/api/health"),
+    enabled: connection.data != null,
+    retry: 1,
+  });
+
+  useEffect(() => {
+    if (!isDesktopShell()) return;
+    let disposed = false;
+    const unlisteners: UnlistenFn[] = [];
+    const subscribe = async () => {
+      const ready = await listen<Connection>("sidecar-ready", (event) => {
+        setLifecycleError(null);
+        queryClient.setQueryData(["connection"], event.payload);
+        void queryClient.invalidateQueries({ queryKey: ["health"] });
+      });
+      if (disposed) ready();
+      else unlisteners.push(ready);
+      const degraded = await listen<string>("sidecar-down", (event) => {
+        setLifecycleError(String(event.payload));
+        queryClient.setQueryData(["connection"], null);
+        queryClient.removeQueries({ queryKey: ["health"] });
+      });
+      if (disposed) degraded();
+      else unlisteners.push(degraded);
+      const failed = await listen<string>("sidecar-error", (event) => {
+        setLifecycleError(String(event.payload));
+        queryClient.setQueryData(["connection"], null);
+        queryClient.removeQueries({ queryKey: ["health"] });
+      });
+      if (disposed) failed();
+      else unlisteners.push(failed);
+      const stopped = await listen<string>("sidecar-failed", (event) => {
+        setLifecycleError(String(event.payload));
+        queryClient.setQueryData(["connection"], null);
+        queryClient.removeQueries({ queryKey: ["health"] });
+      });
+      if (disposed) stopped();
+      else unlisteners.push(stopped);
+    };
+    void subscribe();
+    return () => {
+      disposed = true;
+      for (const unlisten of unlisteners) unlisten();
+    };
+  }, [queryClient]);
+
+  const connectionError =
+    lifecycleError ??
+    (connection.error instanceof Error
+      ? connection.error.message
+      : health.error instanceof Error
+        ? health.error.message
+        : null);
+  const refresh = useCallback(async () => {
+    if (refreshingRef.current) return;
+    refreshingRef.current = true;
+    setRefreshing(true);
+    try {
+      const current = queryClient.getQueryData<Connection | null>(["connection"]);
+      if ((current ?? null) === null && isDesktopShell()) {
+        await invoke("restart_sidecar");
+      }
+      await queryClient.invalidateQueries({ queryKey: ["connection"] });
+      await queryClient.invalidateQueries({ queryKey: ["health"] });
+    } catch (error) {
+      setLifecycleError(String(error));
+    } finally {
+      refreshingRef.current = false;
+      setRefreshing(false);
+    }
+  }, [queryClient]);
+
+  return (
+    <AppContext.Provider
+      value={{
+        connection: connection.data ?? null,
+        health: health.data ?? null,
+        connectionError,
+        refreshing,
+        refresh,
+      }}
+    >
+      <div className="app-shell">
+        <Rail />
+        <div className="app-main">
+          <TopBar title={titleFor(location.pathname)} />
+          {connectionError ? (
+            <div role="alert" className="connection-error">
+              {connectionError}
+            </div>
+          ) : null}
+          <main className="workspace">
+            <ErrorBoundary key={location.pathname}>
+              <Routes>
+                <Route path="/" element={<Navigate to="/tactics" replace />} />
+                <Route path="/tactics" element={<TacticsPage />} />
+                <Route path="/players" element={<PlayersPage />} />
+                <Route path="/library" element={<LibraryPage />} />
+                <Route path="/experiments" element={<ExperimentsPage />} />
+                <Route path="/results" element={<ResultsPage />} />
+                <Route path="/jobs" element={<JobsPage />} />
+                <Route path="/settings" element={<SettingsPage />} />
+                <Route path="/help" element={<HelpPage />} />
+                <Route path="*" element={<Navigate to="/tactics" replace />} />
+              </Routes>
+            </ErrorBoundary>
+          </main>
+        </div>
+      </div>
+    </AppContext.Provider>
+  );
+}

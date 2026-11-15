@@ -1,0 +1,111 @@
+name: CI
+
+on:
+  push:
+    branches: ["refactor/v2-modular"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install -e ".[dev]"
+      - run: python -m pytest -q
+      - run: python -m unittest discover -s tests
+      - run: python scripts/check_manifest.py
+      - run: python -c "import json; json.load(open('src-tauri/tauri.conf.json', encoding='utf-8')); json.load(open('src-tauri/capabilities/default.json', encoding='utf-8'))"
+      - run: ruff check fm27lab
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: pnpm --dir web install --frozen-lockfile
+      - run: pnpm --dir web run typecheck
+      - run: pnpm --dir web test
+      - run: pnpm --dir web run build
+      - run: node tests/test_i18n.cjs
+      - run: node tests/test_workspace_scripts.cjs
+
+  rust-core:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo test --locked --manifest-path rust/Cargo.toml -p fm27lab-core
+
+  windows-tauri:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install -e ".[dev]"
+      - run: pnpm --dir web install --frozen-lockfile
+      - run: pnpm --dir web run build
+      - run: python scripts/build_sidecar.py
+      - run: python -m pytest fm27lab/tests -q
+      - run: cargo build --locked --manifest-path src-tauri/Cargo.toml
+      - run: cargo test --locked --manifest-path src-tauri/Cargo.toml
+      - run: npm install --global @tauri-apps/cli@^2
+      - run: tauri build --bundles nsis
+      - name: Verify sidecar payload and installer
+        shell: pwsh
+        run: |
+          $staged = "src-tauri/target/release/sidecar"
+          if (-not (Test-Path (Join-Path $staged "fm27lab-sidecar.exe"))) { throw "staged sidecar executable missing" }
+          $stagedInternal = Join-Path $staged "_internal"
+          if (-not (Test-Path $stagedInternal)) { throw "staged sidecar payload is missing _internal" }
+          if (-not (Get-ChildItem -Path $stagedInternal -Filter "python*.dll" -ErrorAction SilentlyContinue)) { throw "staged sidecar payload is missing the Python runtime" }
+          if (-not (Test-Path (Join-Path $stagedInternal "fm27lab/adapters/storage_sqlite/migrations/001_init.sql"))) { throw "staged sidecar payload is missing migrations" }
+          $installers = Get-ChildItem -Path src-tauri/target/release/bundle/nsis -Filter *.exe -ErrorAction SilentlyContinue
+          if (-not $installers) { throw "NSIS installer missing" }
+          $sevenZip = Join-Path ${env:ProgramFiles} "7-Zip/7z.exe"
+          if (-not (Test-Path $sevenZip)) { throw "7-Zip is required to inspect the installer payload" }
+          $payload = Join-Path $env:RUNNER_TEMP "installer-payload"
+          Remove-Item -Recurse -Force $payload -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force -Path $payload | Out-Null
+          foreach ($installer in $installers) {
+            & $sevenZip x $installer.FullName "-o$payload" -y | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw "failed to extract $($installer.FullName)" }
+            $installedExe = Join-Path $payload "sidecar/fm27lab-sidecar.exe"
+            $installedInternal = Join-Path $payload "sidecar/_internal"
+            if (-not (Test-Path $installedExe)) { throw "installer is missing sidecar/fm27lab-sidecar.exe" }
+            if (-not (Test-Path $installedInternal)) { throw "installer flattened the sidecar payload and lost _internal" }
+            if (-not (Get-ChildItem -Path $installedInternal -Filter "python*.dll" -ErrorAction SilentlyContinue)) { throw "installer is missing the Python runtime" }
+            if (-not (Test-Path (Join-Path $installedInternal "fm27lab/adapters/storage_sqlite/migrations/001_init.sql"))) { throw "installer is missing sidecar migrations" }
+          }
+          Write-Host "sidecar payload preserved in installer"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-nsis
+          path: src-tauri/target/release/bundle/nsis/*.exe
+          if-no-files-found: error

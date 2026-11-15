@@ -1,0 +1,204 @@
+# 独立审核记录
+
+每个任务必须由独立审核子代理只读审查，并给出明确 PASS 或 FAIL。FAIL 的必须修复后复审。
+
+| 日期 | 任务 | 审查范围 | 结论 | 主要发现 |
+| --- | --- | --- | --- | --- |
+| 2026-11-12 | 合并上游 v1112 | 提交 `0c24c66` | FAIL | 首轮：Agent 并行上限仍为 4、APP_VERSION 仍为 1111.2、i18n 重复键、文档漂移、SOURCE_MANIFEST 过期。 |
+| 2026-11-12 | 设计文档与 ADR | DESIGN、TODO、README、CHANGELOG、ADR、设计系统 | FAIL | 首轮：CHANGELOG 把计划写成完成；三入口契约矛盾；删除存档对战未前置；导出脚本不覆盖 v2；端口、23 人、并发、Issue 验收、设计 token、字体与前端契约不足。 |
+| 2026-11-12 | 设计文档第二轮 | 同上 | FAIL | 第二轮：Phase 0.5 遗漏 Agent career 路由与 AGENT_VERIFICATION；导出二进制校验会读文本；无桌面 CLI/MCP 与系统路由未定义；1–256 与 409 冲突；23 人门将/占位/位置边界；pyproject 缺 fmsave；Launcher 文档；若干 Minor。 |
+| 2026-11-12 | 合并第二轮 | 工作树 vs `0c24c66` | FAIL | 第二轮：Agent 文档 adapter 版本仍为 27.0.0+2493426；mock manifest max_workers 仍为 4；README 版本语义需说明。 |
+| 2026-11-12 | 设计文档第三轮 | 同上 | FAIL | 第三轮：资源预检措辞、开发 CORS、SSE Bearer 鉴权、pyproject 入口、README 英文预检、系统路由例外、审核记录；已修复。 |
+| 2026-11-12 | 设计文档第四轮 | 同上 | FAIL | 第四轮：`rust/` 工作区未纳入 DESIGN/TODO/导出 allowlist；Rust 模块当时缺失；未忽略 target；第四轮未记录。已修复。 |
+| 2026-11-12 | 合并第三轮 | 工作树 vs `0c24c66` | PASS | adapter 版本、mock 清单、README 版本语义与 SOURCE_MANIFEST 已闭环；仅剩计数与 i18n 断言健壮性等 Minor。 |
+| 2026-11-12 | 设计文档第五轮 | 同上 | FAIL | 第五轮：`/api/version` 与 `/api/docs` 未纳入系统路由规则；401 错误封套缺 `details`/`retry_after_seconds`；SSE 占位未说明。已修复。 |
+| 2026-11-12 | 设计文档第六轮 | 同上 | FAIL | 第六轮：`/api/version`/`/api/docs` 与错误封套已闭环；但 `test_serve.py` 未进入 manifest、React 窄屏导航无可访问名称、pnpm 缓存未忽略、设计 token 缺口。已修复。 |
+| 2026-11-12 | sidecar 基础切片 | fm27lab/ 与 pyproject.toml | FAIL | 首轮：迁移非原子、health 误报空库、404/405/500 错误封套缺失、SQLite 连接未确定性关闭、缺少服务端 Origin 校验、测试覆盖不足、Settings repr 泄露 token。已修复。 |
+| 2026-11-12 | 设计文档第七轮 | 同上 | FAIL | 第七轮：`::1` 合法但 sidecar 只绑定 IPv4；Windows endpoint ACL 未收紧；radius-tag/text-wrap/数字输入等 Minor。已修复。 |
+| 2026-11-12 | 设计文档第八轮 | 同上 | FAIL | 第八轮：Tauri 安装包无 sidecar 资源/构建；supervisor 无健康检查/自动重启/退出清理；window minWidth 与 1024 断点冲突；CSP null；无 Cargo.lock 与 src-tauri 测试；ACL 失败残留。已修复，待第九轮复审。 |
+| 2026-11-12 | 设计文档第九轮 | 同上 | FAIL | 第九轮：manifest 仍缺 5 个新文件；React 未监听 Tauri 事件；重复 ready/计数；src-tauri 进程测试不足；Windows CI 未运行。已修复/待复审。 |
+| 2026-11-12 | 设计文档第十轮 | 同上 | FAIL | 第十轮：tauri.conf.json 重复 frontendDist 导致无效 JSON；文档声称文件对话框已实现但代码无插件/权限；minWidth 1000 与 1024 不一致；测试计数滞后；Windows CI 未运行。已修复。 |
+| 2026-11-12 | 设计文档第十一轮 | 同上 | PASS | JSON/CI/manifest/React 事件/supervisor/CSP/资源/构建命令/ACL 均闭环；无 Critical/Important。Windows CI 与 Tauri 编译/NSIS/真机仍为发布门槛。 |
+| 2026-11-12 | sidecar 基础切片复审 | 同上 | FAIL | 复审：CLI 丢弃 FM27LAB_DEV、空 FM27LAB_DATA 落到 CWD、迁移拆分不支持一行多语句、wheel 无 fm27lab 入口；另有 upsert/错误封套测试不足。已修复。 |
+| 2026-11-12 | sidecar 基础切片第三轮 | 同上 | PASS | 27 项测试通过；I1-I4 全闭环；剩余路径别名/CLI host-port/迁移排序/测试超时等 Minor，已继续修复；当前 28 项。 |
+| 2026-11-12 | React/Tauri 壳层 | web/、src-tauri/、CI | FAIL | 首轮：CSP 阻断 IPC、Child 移出共享状态、退出不等待、前端未监听事件、before 命令工作目录、resources 映射、启动超时、运行期健康、stderr、CI 与前端测试不足。 |
+| 2026-11-12 | React/Tauri 壳层第二轮 | 同上 | FAIL | 第二轮：CSP IPC 与前端事件已修；但 stop_sidecar 有确定的 Rust 编译错误、stopping/restart 竞态、健康检查误杀新 child、启动失败 endpoint 残留、TopBar 无条件重启、双重启动、minWidth 与测试缺口。已修复。 |
+| 2026-11-12 | React/Tauri 壳层第三轮 | 同上 | FAIL | 第三轮：stop 编译错误已修、stopping/健康误杀/TopBar/minWidth/CSP/endpoint 主路径已闭环；但 dead-child 上限仍 return、restart 与 monitor backoff 仍可能双启、supervisor 竞态测试与 Windows 编译证据缺失。已修复并发问题，待复审。 |
+| 2026-11-12 | React/Tauri 壳层第四轮 | 同上 | FAIL | 第四轮：dead-child paused 与 stop 编译已修；但 should_start 与 start_sidecar 仍有 TOCTOU、restart/backoff 双启、supervisor 竞态测试与 Windows 证据缺失。已修复 start_allowed 锁内门禁。 |
+| 2026-11-12 | React/Tauri 壳层第五轮 | 同上 | PASS | start_allowed 锁内门禁、dead-child paused、stop/health 竞态、endpoint 清理、TopBar/RunBar、CSP/minWidth/resources 均闭环；Windows CI run 43252465016 全绿，NSIS artifact 已生成。剩余仅显式 restart 覆盖 monitor 的罕见顺序与安装后真机 QA，作为 Minor/发布门槛。 |
+| 2026-11-12 | Windows 构建门槛 | GitHub Actions run 43252465016 | PASS | 全 job success：sidecar PyInstaller、Python、cargo build、cargo test、tauri build --bundles nsis、sidecar 资源断言、NSIS artifact 上传；安装包约 19.6 MB。 |
+| 2026-11-12 | 23 人名单领域 | fm27lab/domain/roster.py、tests | FAIL | 首轮：索引用作 uid、位置分组偏离 ADR、首发可含 2 GK、GK 未按熟练度、generated 全判 GK/隐藏值错误、ability 含隐藏属性、uid 排序/唯一性、默认主罚缺位置资格、测试恒真断言。已重写。 |
+| 2026-11-12 | 23 人名单领域第二轮 | 同上 | FAIL | 第二轮：GK fill 仍可加入 2 名门将且未用熟练度；可见属性 41 漏算；测试仍有恒真断言与缺口。已修复并扩至 25 项测试。 |
+| 2026-11-12 | 23 人名单领域第三轮 | 同上 | FAIL | 第三轮：短名单 fallback 仍可把第二 GK 加回首發；测试未覆盖短名单。已修并补测试。 |
+| 2026-11-12 | 23 人名单领域第四轮 | 同上 | FAIL | 第四轮：bench fill 也限制 1 GK，23→23 时真实 GK 被 generated 替代；显式多 GK lineup 未归一化。已修。 |
+| 2026-11-12 | 23 人名单领域第五轮 | 同上 | PASS | bench 不限 GK、显式多 GK 归一化、短名单/23+3GK 保留、starter padding 均闭环；31 项领域测试（复审时 29）+ full 59；仅剩 Minor 断言/策略说明。 |
+| 2026-11-12 | 存档对战退役 | UI/HTTP/CLI/MCP/schema/docs | FAIL | 首轮：Launcher 自检仍请求 save-mode；workspace-controls 与 desktop-workspace 顶层 const 重名；squad 严格模式未声明赋值；根 tests 仍有 save 用例失败；文档残留。 |
+| 2026-11-12 | 存档对战退役第二轮 | 同上 | FAIL | 第二轮：核心修复通过，但工作树 manifest 未同步且 CI 会失败。已重新生成 manifest。 |
+| 2026-11-12 | 存档对战退役最终 | 同上 | PASS | Launcher/workspace 资源、跨脚本重声明、squad 严格模式、根 tests 281、v2 59、unittest 281、manifest 232、文档与死代码清理均闭环。 |
+| 2026-11-12 | 客队战术池领域 | fm27lab/domain/pool.py、tests | FAIL | 首轮：轮战重复 seed 静默折叠、完成计数 seed 类型缺失、summary 契约不全、加权/A-B 测试恒真。 |
+| 2026-11-12 | 客队战术池领域第二轮 | 同上 | FAIL | 第二轮：draws 绕过 128/10000 限制；加权测试仍无法区分 3:1 与 1:1。 |
+| 2026-11-12 | 客队战术池领域第三轮 | 同上 | PASS | 128/10000 限制、重复 seed、加权 4000 seed 比例、summary profile/enabled/rounds/uniform、完成计数 seed 校验均闭环；15 项测试。 |
+| 2026-11-12 | 真实名单应用 | fm27lab/domain/roster.py、tests | FAIL | 首轮：输出继承 host ability/generated/额外字段；truthy generated、UID 控制字符、unhashable lineup 未受控。 |
+| 2026-11-12 | 真实名单应用第二轮 | 同上 | PASS | saved 球员为基座、仅附加 host native_id；23 人、generated/UID/lineup/ability/native_profile/引用组边界闭环；16 项测试。 |
+| 2026-11-12 | 结果指标领域 | fm27lab/domain/results.py、tests | FAIL | 首轮：side=1 只换进球、未换胜平负/积分/Wilson；配对差无 side；测试方向恒真。 |
+| 2026-11-12 | 结果指标领域第二轮 | 同上 | FAIL | 第二轮：传球字段部分缺失被伪造成 0.0；边界测试不足。 |
+| 2026-11-12 | 结果指标领域第三轮 | 同上 | PASS | side 取向、Wilson、xG/xGA、配对方向、传球缺失/NaN/零值语义闭环；8 项测试。 |
+| 2026-11-12 | Scenario 归一化 | fm27lab/domain/scenario.py、tests | FAIL | 首轮：非法球员条目崩溃、输出共享嵌套对象、引用测试恒等、roster_trim 缺失。 |
+| 2026-11-12 | Scenario 归一化第二轮 | 同上 | PASS | 深拷贝、非恒等引用、非法输入、roster_trim、substitutes 重写闭环；9 项测试。 |
+| 2026-11-12 | Catalog 与双阶段战术 | fm27lab/domain/tactics.py、tests | FAIL | 首轮：使用平面 role_eligibility，放行上下文不可用角色；畸形 catalog TypeError、完整性缺口。 |
+| 2026-11-12 | Catalog 与双阶段战术第二轮 | 同上 | PASS | role_eligibility_context 四桶分桶、上下文覆盖、严格 catalog、2×11/职责/指令/盯防与归一化测试闭环；13 项测试。 |
+| 2026-11-12 | SQLite 客队池仓储 | repositories.py、tests | FAIL | 首轮：NaN 可落库、事务接口不对称、128 上限未执行；第二轮：并发可突破上限。 |
+| 2026-11-12 | SQLite 客队池仓储终轮 | 同上 | PASS | JSON allow_nan/UTF-8、事务读己之写、BEGIN IMMEDIATE 单条原子上限、rowid 排序与并发测试闭环；11 项测试。 |
+| 2026-11-12 | Sidecar 池 HTTP | app.py、tests | FAIL | 首轮：路径 id 可创建不可寻址、OpenAPI 无 Bearer/响应模型、Pydantic 宽松转换；次轮：422/405/分页 schema/清单。 |
+| 2026-11-12 | Sidecar 池 HTTP 终轮 | 同上 | PASS | URL-safe id、HTTPBearer、strict body、PoolService 注入、分页 items/total/next_offset、错误封套/422/405/OpenAPI defaults 闭环；12 项测试。 |
+| 2026-11-12 | Drafts 仓储与服务 | repositories.py、application/drafts.py、tests | FAIL | 首轮：update 非原子、名称 surrogate、测试只验返回值、列表排序违约。 |
+| 2026-11-12 | Drafts 仓储与服务终轮 | 同上 | PASS | BEGIN IMMEDIATE/rowcount、UTF-8 名称、updated_at 倒序、持久化/回滚/分页测试闭环；7 项测试。 |
+| 2026-11-12 | Drafts HTTP | app.py、tests | FAIL | 首轮：CORS 缺 PATCH，预检 400；PATCH scenario/注入/OpenAPI 测试不足。 |
+| 2026-11-12 | Drafts HTTP 终轮 | 同上 | PASS | CORS PATCH、严格 body、23 人 PATCH、分页、注入、OpenAPI security/错误封套闭环；6 项测试。 |
+| 2026-11-12 | Jobs 仓储 | repositories.py、tests | FAIL | 首轮：created_at 假值、status 不可哈希、单边比分、回滚/重复键测试缺口。 |
+| 2026-11-12 | Jobs 仓储终轮 | 同上 | PASS | 时间/状态/比分不变量、BEGIN IMMEDIATE 更新、runs 顺序/级联/回滚与测试闭环；7 项测试。 |
+| 2026-11-13 | Saves 仓储 | saves.py、tests | PASS | 20+5 项测试；事务、级联、确定性重复映射与 UTC 时间规范化闭环；C1 与回滚覆盖 MINOR 已在修复轮补齐。 |
+| 2026-11-13 | 产物与幂等仓储 | artifacts.py、idempotency.py、tests | FAIL | prune 以 ISO 字符串字典序比较，跨时区与等值输入会误删漏删；另有外键判定、C1 控制字符与排序 MINOR。 |
+| 2026-11-13 | 产物与幂等仓储修复 | 同上 | PASS | prune 规范化 UTC 后比较并拒绝 naive；四类时区与等值场景独立复现通过；C1、sqlite_errorname、created_at 规范化与并发异 hash 补齐；仅 3 项 MINOR。 |
+| 2026-11-13 | Jobs 仓储计数与服务 | repositories.py、application/jobs.py、tests | PASS | 状态机、时间戳、append_run 原子回滚与并发唯一序号闭环；36 项相关测试；3 项 MINOR 为既有契约与理论竞态。 |
+| 2026-11-13 | Saves 应用服务 | application/saves.py、tests、count | PASS | 状态机、import_payload 四路回滚、分页信封与事务原子闭环；72 项相关测试；4 项 MINOR。 |
+| 2026-11-13 | Jobs HTTP | app.py、test_http_jobs.py | PASS | 7 条路由鉴权、404/409/分页、OpenAPI 与 CORS 不回归；409 判定先于写入；4 项 MINOR。 |
+| 2026-11-13 | 结果与产物应用服务 | application/results.py、artifacts.py、tests | FAIL | artifacts 的 kind 目录符号链接可逃逸 root；register_text 孤立代理项英文异常；另有两项测试缺口。 |
+| 2026-11-13 | 结果与产物修复 | 同上 | PASS | kind 目录 resolve containment、root 内符号链接只删链接本身、UTF-8 错误转中文、CSV 非 JSON 字段转义与 all_runs 整页边界补齐；仅理论 TOCTOU 与目录 fsync 为可接受风险。 |
+| 2026-11-13 | HTTP 路由模块化与存档接口 | app.py、common.py、routes/、test_http_saves.py | PASS | 旧新 OpenAPI 与响应快照对比行为不变；saves CRUD 与 import 分页、409/404/400 分界与回滚正确；2 项 MINOR 为超大 club_uid 500 与消息文案耦合。 |
+| 2026-11-13 | 引擎能力协商与运行时计划 | ports/engine.py、engine_native/capabilities.py、tests | PASS | 能力缺省回退、四运行时矩阵、provenance 五键与 Protocol 结构均闭环；62 项测试。 |
+| 2026-11-13 | 前端任务管理页 | web/src jobs 客户端与 JobsPage | PASS | 22 项 Vitest、类型检查与构建通过；列表/筛选/分页/取消/删除/创建与错误态齐全；MINOR 为手写类型与末页空页。 |
+| 2026-11-13 | CLI HTTP 客户端与命令面 | client.py、cli.py、tests | FAIL | urllib 重定向把 Bearer 转发到任意主机；URL 错误回显 secret、userinfo 未拒、路径未编码。 |
+| 2026-11-13 | CLI 修复轮 | 同上 | PASS | 拒绝全部重定向且不产生第二跳、URL 脱敏、userinfo 拒绝、路径 quote 与本地异常转 SidecarError、serve data-dir 优先级、jobs summary 切结果路由；100 项测试。 |
+| 2026-11-13 | MCP stdio 协议层 | interfaces/mcp/protocol.py、tests | PASS | initialize/tools/list/tools/call、错误码、stdout 纯净与 handler 异常隔离闭合；修复轮补 RecursionError、严格 UTF-8 与 allow_nan。 |
+| 2026-11-13 | MCP 工具面 | interfaces/mcp/tools.py、tests | PASS | 22 工具 schema 与路由契约一致、本地校验、路径编码、错误透传；77 项测试。 |
+| 2026-11-13 | 结果与产物 HTTP | routes/results.py、artifacts.py、tests | FAIL | 下载端点无容器校验，DB 篡改或符号链接可读根外任意文件。 |
+| 2026-11-13 | 结果与产物 HTTP 修复 | 同上 | PASS | 下载前容器 resolve、符号链接与相对路径拒绝；ETag 带引号、CSV 字节断言；负向测试四类。 |
+| 2026-11-13 | 实验调度与并发预检 | domain/concurrency.py、application/experiments.py、tests | PASS | 1–256 校验、推荐值与资源预检、串行队列、逐场回写、取消/续跑与缺失场次过滤；124 项测试。 |
+| 2026-11-13 | 前端结果页与存档库 | ResultsPage、LibraryPage、api.ts、tests | PASS | 指标/逐场/CSV 与存档 CRUD/导入/删除、状态齐全；56 项 Vitest、typecheck 与 build 通过。 |
+| 2026-11-13 | SSE 事件流 | application/events.py、routes/system.py、tests | PASS | 发布器 id/历史/重放、SSE ready 与实时去重、keepalive、断连清理与鉴权闭合；断连测试恒真与重叠去重已修；9 项 MINOR 记录。 |
+| 2026-11-13 | 设置与并发预检 HTTP | application/settings.py、routes/settings.py、tests | FAIL | 新增 PUT 路由未被 CORS allow_methods 覆盖，浏览器预检 400；另有 8 项 MINOR。 |
+| 2026-11-13 | 设置修复轮 | 同上 | PASS | allow_methods 加 PUT 并补预检测试；字节上限度量口径统一；surrogate 与旧值保留补测；PUT 三 Origin 预检矩阵通过。 |
+| 2026-11-13 | 幂等键中间件 | application/idempotency.py、interfaces/http/idempotency.py、tests | FAIL | 截断流式响应被缓存污染键；并发同键双执行副作用。 |
+| 2026-11-13 | 幂等修复轮 | 同上 | PASS | Content-Length/204 完整判定、在途 asyncio 锁、鉴权前置、重复头保真与线程池执行；38 项测试；8 项 MINOR 记录。 |
+| 2026-11-13 | MCP stdio 命令接线 | cli.py mcp、test_cli_mcp.py | PASS | 22 工具、stdout 纯净、启动失败退出码 1、health 就绪探测与 data-dir 优先级；11 项 MINOR。 |
+| 2026-11-13 | 前端设置页 | SettingsPage、api.ts、tests | PASS | 设置 CRUD、JSON 校验、删除确认、并发预检面板；77 项 Vitest、typecheck 与 build 通过；11 项 MINOR。 |
+| 2026-11-13 | 任务批量操作 HTTP | routes/jobs.py、test_http_jobs.py | PASS | 批量 cancel/delete、失败明细与顺序、边界与 OpenAPI；17 项 jobs HTTP 测试。 |
+| 2026-11-13 | Issue 5 属性分组领域 | domain/attributes.py、tests | PASS | 六类分组互斥完整、half-up 对齐 Math.round、默认只改可见属性、快照精确恢复与参考复制、脚配对参数化；51 项测试；多轮 MINOR 收口。 |
+| 2026-11-13 | Issue 6 批量删除与多选 | application/jobs.py、routes/jobs.py、JobsPage、tests | FAIL | 批删 get→delete 非原子可删运行中任务；确认框缺焦点与键盘语义。 |
+| 2026-11-13 | Issue 6 修复轮 | 同上 | PASS | 服务层事务内 get→delete、DI 恢复、真实并发回归、焦点/Esc/结果聚焦与勾选收敛；后端 58 与前端 90 测试。 |
+| 2026-11-13 | PR 10 客队战术池摘要 | application/results.py、routes/results.py、tests | PASS | enabled 语义、draws 零填充与 A/B 去重、优先级与 400/404 契约；69 项相关测试。 |
+| 2026-11-13 | MCP 资源与提示词 | mcp/protocol.py、resources.py、prompts.py、cli.py、tests | PASS | capabilities 声明、resources/prompts 四方法、-32602 中文错误、通知静默与 stdout 纯净；提示词字段已按 v2 数据模型修正。 |
+| 2026-11-13 | 实验调度 HTTP | routes/experiments.py、app.py、tests | PASS | submit/start/cancel/resume 状态码矩阵、引擎未配置 503、注入路径与 OpenAPI；17 项测试。 |
+| 2026-11-13 | 球员属性页 | web PlayersPage、api.ts 草稿函数、tests | PASS | 六组索引与标签逐项对齐、显示换算、两段请求与缓存、隐藏开关与空/错态；116 项 Vitest。 |
+| 2026-11-13 | 原生引擎适配器 | engine_native/host.py、capabilities.py、fake_simulator、tests | FAIL | 回调异常重复交付；原生 counted 能力分支零测试覆盖。 |
+| 2026-11-13 | 原生引擎修复轮 | 同上 | FAIL | 兼容诊断中途失败绕过取消/终止，可无限阻塞并残留宿主进程。 |
+| 2026-11-13 | 原生引擎终轮 | 同上 | PASS | 回调消费先记账、native 能力矩阵与 65 场 DW2 测试、兼容校验前置、_force_stop 清理与停滞宿主回归；131 项引擎测试。 |
+| 2026-11-13 | 引擎并发分道 | host.py、test_engine_host.py | PASS | workers 1–256 分道、回调互斥、取消全道、跨道失败隔离、1/4/8 路结果身份一致；74 项引擎测试。 |
+| 2026-11-13 | 三入口契约注册表 | registry.py、test_registry_contract.py | PASS | 41 能力与 OpenAPI/Typer/MCP 双向对齐、detect_drift 四类漂移、穷举删除/改名验证；7 项契约测试。 |
+| 2026-11-13 | 运行时目录接口 | catalog_native、application/catalog.py、routes/catalog.py、tests | PASS | 三处查找顺序、损坏语义、字段裁剪、available=false 与 Bearer；42 项相关测试。 |
+| 2026-11-13 | 战术板只读页 | TacticsPage、api.ts、tests | FAIL | 槽位重叠遮挡；指令与角色显示原生代码不可读。 |
+| 2026-11-13 | 战术板修复轮 | 同上 | FAIL | 新引入 possession_phase 契约错配，有球阶段丢失 3 条指令。 |
+| 2026-11-13 | 战术板终轮 | 同上 + catalog 接口 | PASS | 560px 球场与紧凑槽位消除重叠、catalog 中文标签与降级提示、possession_phase 过滤与 phase 回退回归测试；136 项 Vitest。 |
+| 2026-11-14 | 存档读取适配器 | ports/save_reader.py、adapters/save_fmsave、tests | PASS | fmsave 惰性加载、69 属性布局与左右脚、personality 7 键、selection uid 映射、stat 变化拒绝；51 项测试；12 个变异被杀。 |
+| 2026-11-14 | FMF 导入导出 | ports/fmf.py、adapters/fmf、routes/fmf.py、tests | FAIL | decode 对 KeyError/RecursionError 未收口，损坏文件返回 500。 |
+| 2026-11-14 | FMF 修复轮 | 同上 | PASS | 异常收口统一 FMF 文件无效、非有限数拒绝、encode 保留 domain 语义、真实场景回归测试经变异验证；51 项相关测试。 |
+| 2026-11-14 | 草稿属性批量编辑 | application/draft_attributes.py、routes、tests | PASS | scope/side 语义、bulk/position/copy/pair_feet/undo 复用领域、单槽快照与持久化；33 项相关测试；22 变异 18 被杀。 |
+| 2026-11-14 | 存档导入与阵容同步 | save_import.py、routes、domain/roster.py、tests | FAIL | starters/bench 在含 generated 占位球员的草案下必然 400；写阶段回滚无测试；不可读路径 500；replace 清空联赛。 |
+| 2026-11-14 | 存档导入修复轮 | 同上 | PASS | 新增 apply_roster_selection 按槽位保占位与重映射、触发器回滚测试、错误收口 400、leagues 保留、uid-only 身份索引；81 项相关测试，变异验证有效。 |
+| 2026-11-14 | 属性批量编辑前端 | PlayersPage、api.ts、tests | PASS | bulk/position/copy/undo 参数与后端一致、失效刷新、错误展示、aria-live；142 项 Vitest；12 变异 11 被杀。 |
+| 2026-11-14 | OpenAPI TypeScript 类型 | scripts/generate_web_types.py、api-schema.ts、tests | FAIL | 字节一致性测试在 CRLF checkout 下会失败。 |
+| 2026-11-14 | 类型生成修复轮 | 同上 + .gitattributes | PASS | .ts/.tsx/.json/.yml 固定 LF、补排序与缺文件测试、重生成 56 schema；1425 项全量。 |
+| 2026-11-14 | CLI 全量命令 | cli.py、client.py、registry.py、tests | PASS | 26 命令与 49 能力逐一对应、路径/方法/query/body 与路由一致、三个下载命令按 --output 写文件、退出码 0/1/2 与 token 脱敏；196 项定向测试、1631 项全量、11 个变异全被杀；3 项 MINOR 为下载原子性与测试结构建议。 |
+| 2026-11-14 | MCP 工具面补齐 | interfaces/mcp/tools.py、tests | PASS | 48 工具与 OpenAPI 逐项对齐、下载工具 base64 封套往返、本地校验中文错误、路径编码与 SidecarError 透传；175 项定向、1631 项全量、13 个变异被杀；4 项 MINOR 为可空 body 与上界覆盖缺口。 |
+| 2026-11-14 | 存档库导入与阵容面板 | LibraryPage、api.ts、tests | PASS | 文件导入/覆盖导入/俱乐部与名单展示/阵容同步与撤销全链路，409 与错误态、aria 状态；157 项 Vitest、typecheck 与 build 通过；3 项测试覆盖 MINOR 已补。 |
+| 2026-11-14 | 结果对比后端 | domain/compare.py、application/results.py、routes/results.py、cli.py、mcp/tools.py、registry.py、tests | FAIL | 首轮 CompareInput 缺严格模型导致字符串数字与未知字段被静默接受；ID 边界 128 与仓储 64 不一致并返回错域文案；alpha 行为、entries 权重与名单差异、HTTP 不可比响应缺测试。 |
+| 2026-11-14 | 结果对比后端修复轮 | 同上 | PASS | strict+extra=forbid 与 additionalProperties=false 断言、ID 统一 1–64 且 MCP baseline 对齐、alpha 区间性质、entries weight/roster 判别、HTTP 不可比 paired=null 与非默认参数透传；1746 项全量、5 变异全部被杀。 |
+| 2026-11-14 | 结果对比前端 | ResultsPage.tsx、api.ts、extra.css、tests | FAIL | 参数变化清空与陈旧响应防护缺少判别性测试，删除请求守卫或 clearCompare 后 35 项仍全过；另有禁用态、区间格式与长文本 MINOR。 |
+| 2026-11-14 | 结果对比前端修复轮 | 同上 | PASS | 补迟到旧响应不覆盖新一轮状态、切变体清空且切回不复活两个用例，守卫与 clearCompare 变异均被杀；禁用候选视觉、区间括号格式与换行修复；169 项 Vitest、typecheck 与 build 通过。 |
+| 2026-11-14 | 原生场景编码器与定位球领域 | domain/setpieces.py、engine_native/scenario_assets.py、scenario_codec.py、tests | FAIL | relative 编码只断言等于基线，缺少任何差量；对方战术 (20)/(21) 两模式未测发射，差量作用域变异存活。 |
+| 2026-11-14 | 编码器测试修复 | tests/test_scenario_codec.py | PASS | 补 12 项 relative 精确差量与对方战术双模式测试，18 项旧测试逐字保留；12 个等效变异全部被杀，实现未改。 |
+| 2026-11-14 | 客队池 schema 与整批展开 | domain/pool.py、tests | FAIL | 只支持单 seed 展开，轮战恒抛错；24–26 人名单在校验层接受但应用层拒绝，与 ADR-0005 归一化冲突。 |
+| 2026-11-14 | 客队池修复轮 | domain/pool.py、tests | PASS | 整批 expand_away_scenarios 一次抽签逐场展开并委托单 seed；24–26 走 normalize_roster 裁剪附 roster_trim、generated 占位保留、缺门将中文提示；6 变异全杀。 |
+| 2026-11-14 | 结果页批量管理与池折叠 | ResultsPage.tsx、ResultsPage.test.tsx、extra.css | FAIL | 删除后切换与重置缺少判别性测试，测试从未先选中任务；aria-busy 与池折叠损坏容错有缺口。 |
+| 2026-11-14 | 结果页修复轮 | 同上 | PASS | 补显式查看任务后删除并断言切换首个、分页归零、对比候选与对比表清空；aria-busy、sessionStorage 损坏容错；185 项 Vitest，7 变异 6 杀且 clearCompare 判等价。 |
+| 2026-11-14 | 实验链路接线 | application/experiment_material.py、application/experiments.py、application/jobs.py、routes/experiments.py、app.py、cli.py、mcp/tools.py、tests | FAIL | submit 物化窗口内并发 start/cancel/delete 会让任务在无 materialized config 时以默认场景静默运行并产出错误结果；set_config 不在清理路径内导致 job 与物化目录残留；配置 materializer 时缺配置仍回退空场景；任务删除不清理物化目录；MCP seeds 缺 maxItems/uniqueItems。 |
+| 2026-11-14 | 实验接线修复轮 | application/experiments.py、jobs.py、experiment_material.py、app.py、mcp/tools.py、tests | PASS | submit 持锁覆盖 create→物化→set_config→summary；异常路径删 job 与物化目录后原样重抛；缺 materialized 配置显式报错不回退空场景；JobService cleanup 回调只对成功删除生效；root containment 与 MCP seeds 约束到位；6 变异全杀、1977 项全量；2 Important 与 3 Minor 为测试判别力缺口。 |
+| 2026-11-14 | 实验接线测试缺口修复 | tests/test_experiment_material.py、test_experiments_service.py | PASS | 补同前缀兄弟目录、discard 符号链接逃逸、BaseException 清理、清理异常不掩盖原异常、summary 返回 None 共 8 用例；5 条存活变异全部被杀，实现未改；1990 项全量。 |
+| 2026-11-14 | 实验接线测试缺口复核 | 同上 | PASS | 5 条存活变异全部被新用例杀死（前缀兄弟目录、discard 符号链接、BaseException 清理、清理异常不掩盖、summary 返回 None），逐字节恢复；旧用例未被削弱，实现零改动；1990 项全量。 |
+| 2026-11-14 | 宿主资源探测 | adapters/host_resources.py、routes/system.py、registry.py、cli.py、tests | PASS | CPU/内存/磁盘三策略与中文错误、503 封套 resource_probe_failed、51 能力注册与 CLI system resources、CLI 自动预填三资源；7 核心变异被杀、1977 项全量；4 项 Minor 为测试判别力缺口。 |
+| 2026-11-14 | 宿主资源测试缺口修复 | tests/test_host_resources.py、test_cli_commands.py | PASS | 补 meminfo 负值不回退、负值转 sysconf、非对象探测响应、cpu_count=0、缺字段共 5 用例；M8–M11 四条存活变异全部被杀、实现未改；1982 项全量。 |
+| 2026-11-14 | 实验提交页面 | ExperimentsPage.tsx、ExperimentsPage.test.tsx、App.tsx、Rail.tsx、api.ts、extra.css | FAIL | 启动结果展示的是最早排队任务却挂在刚提交任务卡片内且不显示任务身份，会误导；手改并行数不被回填、预检随 workers/资源变化触发均无判别性测试；另有名称上限、aria 关联、复选框样式与 warnings 展示等 MINOR。 |
+| 2026-11-14 | 实验提交页面修复轮 | ExperimentsPage.tsx、ExperimentsPage.test.tsx、extra.css | PASS | 启动结果改为独立同级区域并展示任务名、ID、总场数与更早任务提示；名称上限纳入提交禁用、草案选择框 aria 关联、复选框移出 field、预检 warnings 常显；12 变异全杀、36 项用例、221 项 Vitest。 |
+| 2026-11-14 | 实验提交页面结构断言补强 | ExperimentsPage.test.tsx | PASS | 新增启动结果与实验任务区同级不嵌套的结构断言、仅磁盘变化重新预检、提示全文锁定、重提交清空启动结果、草案 select 空错误路径共 5 用例；5 变异全杀、实现零改动、226 项 Vitest。 |
+| 2026-11-14 | 实验提交页面补强复核 | 同上 | PASS | 独立重做 5 条必杀变异与 4 条自设结构变异全部被杀，旧 36 条套件对同类缺陷仍全绿；反向删除还原原始 sha256、纯增量；226 项 Vitest、typecheck 与 build 通过；3 项 MINOR 为同类单字段缺口与断言过严。 |
+| 2026-11-14 | Launcher 退役 | Launcher.cs、scripts/build_exe.py、export_source.py、test_workspace_scripts.cjs、docs/DEVELOPMENT.md、docs/AGENT_INTEGRATION.md、docs/AGENT_VERIFICATION.md、THIRD_PARTY_NOTICES.md | PASS | 删除 C# Launcher 与 csc 构建入口，导出白名单、构建文档、代理集成与第三方声明同步为 Tauri 壳与 sidecar；unittest 281 项与两个 node 测试通过、导出 368 文件不含被删入口、变异证明残留断言仍具判别力；越界 v1 残留列入后续文档切片。 |
+| 2026-11-14 | 实验提交页面预检单字段补测 | ExperimentsPage.test.tsx | PASS | 补 CPU 与可用内存各一条单字段用例，三条 queryKey 字段变异分别被对应用例杀死、基线 41 条在同变异下全绿；反向删除还原原始 sha256、纯增量；228 项 Vitest、typecheck 与 build 通过；MINOR 为子串断言可被超串满足与连接字段既有盲区。 |
+| 2026-11-14 | 文档对齐 v2 事实 | docs/AGENT_QUICKSTART.md、docs/AGENT_INTEGRATION.md、docs/AGENT_VERIFICATION.md、src/desktop_locale.py、src/fm27_agent_contract.py、src/tactics_ui/i18n-en.js | FAIL | 三份接入文档整体重写并与代码逐条核对，25 条抽样断言与 12 条 v1 退场结论成立；唯一 IMPORTANT 为幂等风险表把 SQLite 持久化记录误写为进程内、重启失效，另有 7 项 MINOR 为引擎目录错误混同、MCP 启动文案标点、工具分组计数、token 格式、系统接口归类与证据行号。 |
+| 2026-11-14 | 文档对齐修复轮 | 同上 | PASS | I-1 改为持久化幂等（主键唯一、payload 指纹校验、跨重启有效、同库多进程共享、单进程 asyncio.Lock），并补真实剩余风险“无定时 prune”；7 项 MINOR 全部逐条修正并经复审实测确认；标题无括号、无未发生审核声称、node 测试与 281 项 unittest 通过；遗留 MINOR 为种子错误文案与证据区间。 |
+| 2026-11-14 | 前端 API 类型统一到生成 schema | web/src/lib/api.ts、web/src/lib/api-schema.ts、web/src/lib/api-types.test.ts、fm27lab/interfaces/http/routes/jobs.py、routes/saves.py、fm27lab/tests/test_http_output_status_enums.py | PASS | 67 个类型中 40 项改为生成接口别名、2 项派生、25 项保留手写并记录理由；JobOutput 与 SaveOutput 收紧为 Literal 且与 TRANSITIONS/SAVE_STATUSES 联动，输入模型保持 str 以防 400 文案变化；页面零改动、37 个函数签名与路径字节不变、api-schema diff 恰 2 行；10 变异 8 杀，2 条存活为刻意构造且无实际语义危害；234 项 Vitest。 |
+| 2026-11-14 | 前端类型测试补强 | web/src/lib/api-types.test.ts | PASS | 新增剥 `//` 注释后断言别名、`from "./api-schema"` 子句与 import 组各恰 1 且 specifier 集合严格相等；注释伪造别名与额外导入两条变异由存活转为被杀；残留 MINOR 为块注释伪造仍可存活。 |
+| 2026-11-14 | 原生引擎生产接线与按任务并行数配置 | fm27lab/adapters/engine_native/lazy.py、host.py、fm27lab/application/experiments.py、fm27lab/interfaces/http/app.py、fm27lab/tests/test_lazy_engine.py、test_engine_host.py、test_experiments_service.py、test_http_experiments.py | PASS | 引擎解析顺序为注入 engine > engine_root 惰性宿主 > 未配置占位；LazyNativeEngine 双检锁构造且 factory 失败不缓存；运行时计划兼容零参可调用并在创建任务前解析；start_next 置 running 后、run_batch 前调用 configure_workers；HTTP 端到端以 fake_simulator 完成草案提交到 4 场结果且 config 为绝对路径 FM27CFG1 文件；16 变异 14 杀，2 条判定等价；2037 项 pytest。 |
+| 2026-11-14 | 接线测试补强 | fm27lab/tests/test_experiments_service.py、test_lazy_engine.py | PASS | 新增 configure_workers 回调内读取任务状态断言 running 且序列早于 run_batch、factory 前两次失败不留半初始化缓存且第三次成功两条判别用例；对应两处变异被杀；2039 项 pytest、ruff 与类型生成检查通过。 |
+| 2026-11-14 | 双阶段战术校验接线 | adapters/catalog_native/catalog.py、application/tactics_validation.py、application/drafts.py、interfaces/http/app.py、tests | FAIL | load_document 保留原始节与候选顺序、目录缺失或不可解析时跳过、双队与 create/update 覆盖均正确，真实 create_app 47 项探针通过且 OpenAPI 与 /api/catalog 逐字节不变；3 项 Important 全为测试判别力缺口：校验修改入参、PATCH 被拒后草案未变、POST 被拒未落库三个变异存活，22 变异 19 杀。 |
+| 2026-11-14 | 双阶段战术校验测试修复轮 | tests/test_tactics_validation.py、test_http_drafts.py | PASS | 客队计划改为可区分并断言顺序不变、PATCH 被拒后场景深相等、POST 被拒后 total 为 0、坏目录跳过校验参数化用例；四变异全杀，实现零改动，2074 项 pytest。 |
+| 2026-11-14 | 战术板编辑与键盘操作 | web/src/pages/TacticsPage.tsx、TacticsPage.test.tsx、styles/extra.css | PASS | 编辑模式与本地深拷贝、拖拽与键盘交换首发、roving tabindex 与坐标导航、按阶段角色编辑、保存/放弃/脏态保护与 aria-live 播报；22 变异 19 个有效变异全杀，252 项 Vitest 连跑两次、typecheck 与 build 通过；Minor 为触屏拖拽、真实浏览器布局与 catalog 角色 phase 类型滞后。 |
+| 2026-11-14 | 球员页名单兼容与占位提示 | web/src/pages/PlayersPage.tsx、PlayersPage.test.tsx、styles/extra.css | FAIL | 实现语义经独立探针 8/8 正确，但“原始名单超 23 人且裁剪后仍有占位”的追加子句无用例，删除该分支 260 项仍全绿；非整数 source_size 降级与 generated 严格为 true 两处契约亦无判别用例；另有占位标识未断言主客切换跟随与 css 行数口径等 Minor。 |
+| 2026-11-14 | 名单提示测试补强 | web/src/pages/PlayersPage.test.tsx | PASS | 补 4 条 UI 级用例：追加子句逐字断言、source_size 23.5 降级、generated 仅严格 true 显示占位标识、主客切换占位标识跟随；实现与样式 sha256 不变；M1/M7/M10 三条存活变异全部被杀且各自只被目标用例杀死；264 项 Vitest。 |
+| 2026-11-14 | 安全与隐私检查 | docs/SECURITY.md、fm27lab/tests/test_security_boundaries.py、fm27lab/config.py | PASS | 鉴权矩阵 55 操作 53 需 Bearer、401 不回显令牌、endpoint.json 0600、CORS 白名单、路径包含、输入上限、幂等、SSE 与仓库隐私逐条取证；发现并最小修复数据目录 0755 可被同机用户读取的缺陷；2094 项 pytest；10 变异 9 杀，allow_credentials 无断言；8 项 Minor 为文档精度与测试缺口。 |
+| 2026-11-14 | 安全审计 Minor 收口 | docs/SECURITY.md、fm27lab/sidecar.py、tests/test_security_boundaries.py、tests/test_http_health.py、.gitignore | PASS | endpoint.json 写入与替换失败改 try/finally 清理并补两条失败路径用例、隐私测试扩到 9 条忽略规则与跟踪清单负向断言、CORS 补 allow_credentials 断言、.gitignore 补 *.db 与 endpoint.json、文档引用与 umask 措辞修正；M9/M10/M11 全部被杀；2096 项 pytest。 |
+| 2026-11-14 | README 中英文重写 | README.md、README.en.md | PASS | 删除 v1 语义（EXE 打包与自带 Python 启动、--headless 与启动器命令、存档战术库批量导出与覆盖名单、自由推演模式、托盘菜单、旧截图引用），改写为 v2 架构、CLI/MCP/HTTP 三入口、实验与结果流程、构建与测试、版本状态；26 项数字与常量逐条核对一致（51 能力、54 CLI 叶子命令、49 MCP 工具、55 OpenAPI 操作、1–256 并行、10000 场与种子、23 人 69 属性 15 位置、14 指标、1–32 对比候选与 20000 重抽样）；两文件各 167 行、17 标题对称、无图片引用、v1 残留词 0 命中；3 项 Minor 为鉴权例外、引擎能力措辞与版本字符串。 |
+| 2026-11-14 | README 措辞修正复核 | README.md、README.en.md | PASS | 补公开文档路由的鉴权例外、把引擎能力为空改为运行时目录 available=false、源码版本改为 2.0.0.dev0 并注明前端包版本；三条与代码事实一致、中英对称、恰六行变化无其他行被误改、167 行与 7 个二级标题不变；残余 Minor 为 catalog.json 也可能来自数据目录，已改为“没有可用的 catalog.json”；node 两测试与 281 项 unittest 通过。 |
+| 2026-11-14 | 页面错误边界 | web/src/components/ErrorBoundary.tsx、ErrorBoundary.test.tsx、App.tsx、App.test.tsx | PASS | 按路由 key 复位、渲染失败显示回退与重试、单页错误不影响导航；6 条组件用例与 3 条集成用例，10 变异 9 杀且空 componentDidCatch 判等价；273 项 Vitest、typecheck 与 build 通过。 |
+| 2026-11-14 | 性能基准脚本与文档 | scripts/benchmark.py、fm27lab/tests/test_benchmark.py、docs/PERFORMANCE.md | PASS | HTTP 只读路径、场景归一化与客队池展开、bootstrap 重抽样三类指标与 quick/json 输出；quick 子进程实测 0.63–0.67 秒、full 2.78 秒，无鉴权请求 401；13 变异 11 杀，quick 档位与 p95 取整两条为测试保真缺口；2099 项 pytest。 |
+| 2026-11-14 | 性能基准测试补强复核 | fm27lab/tests/test_benchmark.py | PASS | 新增 quick 迭代常量精确断言与线性插值百分位单测，quick 档位与 p95 取整两条变异由存活转为被杀且各只被目标用例杀死；实现与文档零改动；2101 项 pytest。 |
+| 2026-11-14 | 前端 SSE 事件订阅 | web/src/lib/events.ts、events.test.ts、useAppEvents.ts、JobsPage.tsx、ExperimentsPage.tsx、ResultsPage.tsx 及测试 | PASS | fetch 流解析与畸形帧容错、Last-Event-ID 仅重连带、指数退避与断线提示、三页面事件到查询失效映射、手动刷新降级；36 条新增用例，29 变异 23 杀；309 项 Vitest、typecheck 与 build 通过。 |
+| 2026-11-14 | SSE 事件刷新合并 | web/src/lib/useEventRefresh.ts、useEventRefresh.test.ts、三页面与测试 | PASS | 300ms 尾沿窗口按键合并失效、卸载清理、事件语义与订阅切片等价；318 项 Vitest 连跑两次、12 变异 10 杀；2 条存活为等待窗口短于合并窗口与 keysRef 刷新缺测试。 |
+| 2026-11-14 | SSE 刷新合并测试补强复核 | web/src/pages/ResultsPage.test.tsx、web/src/lib/useEventRefresh.test.ts | PASS | 等待改为合并窗口加余量、新增重渲染后按最新查询键失效用例，两条存活变异被杀且附加四条变异全部被杀；仅测试变化、319 项 Vitest 两次与 typecheck 通过。 |
+| 2026-11-14 | 跨平台测试与场景快照修复 | fm27lab/application/experiment_material.py、fm27lab/adapters/host_resources.py、tests/test_experiments_service.py、test_host_resources.py、test_cli_commands.py | PASS | 场景与 provenance 按 UTF-8 字节写出、实验夹具改用临时目录、sysconf 探测可注入且 Windows 分支保留、CLI 帮助断言不依赖富文本；2101 项 pytest 与 ruff 通过，Linux 与 Windows CI 对应用例转绿；残留 Minor 为 manifest 待重建与跨平台计时阈值。 |
+| 2026-11-14 | 最终独立审核 | 全仓 | PASS | 质量门实测 2101 项 pytest、281 项 legacy unittest、319 项 Vitest（13 文件）、ruff、类型生成与 manifest 386 文件全绿；30 余条文档断言与三入口计数逐一取证一致，CHANGELOG 68 条审核声明全部可追溯到 REVIEWS PASS，TODO [x] 抽查无虚假完成、开放项如实；无秘密泄露与 v1 活入口；6 项 Minor 为文档计数与措辞漂移，已随本轮修正；Windows CI run 43552112064 全 job success。 |
+| 2026-11-14 | 旧场景 schema 兼容归一化 | fm27lab/domain/scenario.py、fm27lab/application/experiment_material.py、fm27lab/tests/test_scenario.py、test_experiment_material.py、test_http_drafts.py、test_http_experiments.py | FAIL | 转换语义与 legacy unpack、web 兼容解析一致，旧形状草案可物化出 FM27CFG1 且快照为 schema 3，原生形状零回归且 2101 项全过，13 变异 11 杀；Important 为 plans 校验与混合字段检测的优先级无判别用例，M12 变异存活。 |
+| 2026-11-14 | 旧场景兼容测试补强 | fm27lab/tests/test_scenario.py、test_experiment_material.py、test_http_drafts.py、test_http_experiments.py | PASS | 新增 4 个参数交叉用例锁定 plans 校验先于混合字段检测、schema 3 含 phase_plans 仍升级、TEAM_ERROR 可达，并清理测试文件尾空行；生产代码 sha 未变，M12 与 M13 由存活转为被杀；targeted 129 至 135、全量 2145 至 2151。 |
+| 2026-11-14 | 并发通道对比基准 | scripts/concurrency_benchmark.py、fm27lab/tests/test_concurrency_benchmark.py、docs/PERFORMANCE.md | PASS | fake simulator 固定每场 2 秒下实测 1、2、4 条通道墙钟与加速比（1.99 倍与 3.96 倍）、JSON 结构与中文表格、失败路径中文退出；quick 6.2 秒、full 14.3 秒，14 用例与 9 变异 7 杀；Important 为空，Minors 为 full 档无执行覆盖、零完成路径打印 traceback、文档快照措辞与文件尾空行。 |
+| 2026-11-14 | 并发基准 Windows 输出编码修复 | scripts/concurrency_benchmark.py、fm27lab/tests/test_concurrency_benchmark.py、SOURCE_MANIFEST.json | PASS | Windows cp1252 下子进程中文错误原因被转义为 \uXXXX、中文表格抛出 UnicodeEncodeError，修复为主程序把 stdout 与 stderr 重配为 UTF-8、测试按 UTF-8 解码并新增两条 cp1252 判别用例；删除流配置调用后两条新用例失败并逐字节还原，21 用例、全量 2158 项 pytest、ruff、类型生成与 manifest 388 通过，Windows CI 的 pytest 步骤转绿。 |
+| 2026-11-14 | 并发基准 Minor 收口复核 | scripts/concurrency_benchmark.py、fm27lab/tests/test_concurrency_benchmark.py、docs/PERFORMANCE.md | PASS | PROFILES 精确断言杀死 full lanes 变异、零完成与坏模拟器改为中文受控退出无 traceback、表格按显示宽度对齐、文档补单次运行措辞并归一文件尾；19 用例、2156 项 pytest 与 ruff 通过；残余 Minor 为 full 档执行路径仍无端到端覆盖与 match_seconds 仅对 fake 模拟器成立。 |
+| 2026-11-14 | 安装包 sidecar 资源映射修复 | src-tauri/tauri.conf.json、.github/workflows/ci.yml、fm27lab/tests/test_packaging_config.py、DESIGN.md、docs/DEVELOPMENT.md、docs/AGENT_INTEGRATION.md、CHANGELOG.md、SOURCE_MANIFEST.json | PASS | 目录形式资源映射保留 PyInstaller onedir 的 `_internal/` 与迁移目录，CI 断言暂存载荷并用 7-Zip 解包安装包校验；4 项回归测试与 ruff、类型生成、manifest 389 通过，Windows CI run 43574355852 全 job success，下载 artifact 复核 sidecar/fm27lab-sidecar.exe、_internal 下 Python 运行时与 migrations 完整；静态 CI 用例断言 Test-Path $installedInternal 语句存在，删除该语句时用例失败；残余 Minor 为 CI 只解包不执行安装启动。 |
+| 2026-11-14 | 存档路径清洗与 FMF 路径导入 | fm27lab/application/source_paths.py、fm27lab/application/save_import.py、fm27lab/interfaces/http/routes/fmf.py、fm27lab/registry.py、fm27lab/cli.py、fm27lab/tests/、web/src/lib/api-schema.ts | FAIL | 契约与 41 项新增测试整体成立：空白与成对 ASCII 引号清洗、FMF 路径导入与名称派生、CLI 与注册表能力、OpenAPI 40 路径 56 操作 64 组件、M1–M9 变异全杀；唯一 Important 为 fm27lab/tests/test_source_paths.py:54 断言含 Workstation 路径，触发 legacy 导出校验 ValueError，281 项 unittest 出现 1 项 error。 |
+| 2026-11-14 | 存档路径清洗与 FMF 路径导入复核 | 同上 | PASS | 断言改为 C:\Games\season.fm 后 legacy 281 项 OK、2203 项 pytest、ruff 与类型生成通过；11 个受审文件 sha256 前后一致，复核者独立探针覆盖空串、引号、未配对引号、目录、不存在、4 MiB 边界与超限、空文件与损坏文件；M10 因缺 min_length 断言存活列为测试缺口；残余 Minor 为超长单段路径返回 500、stat 后 read 的 TOCTOU 与符号链接按路径记录。 |
+| 2026-11-14 | Tauri 文件选择对话框接线 | src-tauri/Cargo.toml、src-tauri/Cargo.lock、src-tauri/src/lib.rs、src-tauri/capabilities/default.json | PASS | tauri-plugin-dialog 2.8.4 注册、dialog:allow-open 权限与锁文件仅新增插件依赖；Important 为插件注册与权限无守护测试，已补 4 项静态回归用例、把权限收窄为 dialog:allow-open 并在 CI 三处加 --locked；5 变异全杀、2207 项 pytest 与 cargo metadata --locked 通过，编译行为由 Windows CI 证明。 |
+| 2026-11-14 | 前端文件选择与免存档 FMF 导入 | web/src/lib/file-dialog.ts 及测试、web/src/lib/api.ts、api-types.test.ts、web/src/pages/LibraryPage.tsx 及测试、TacticsPage.tsx 及测试、web/src/styles/extra.css | FAIL | 契约 1–4 全部成立，345 项 Vitest、typecheck 与 build 通过；四个 Important 为参数切换不重置编辑态可把旧场景写入新草稿、dirty 期间参数被永久吞掉、六项契约行为无判别测试致六变异存活、空路径零请求断言存在竞态使变异伪存活。 |
+| 2026-11-14 | 前端审核修复 | web/src/pages/TacticsPage.tsx 及测试、web/src/pages/LibraryPage.tsx 及测试 | PASS | applyDraftParam 重置编辑态与本地副本、dirty 期间不更新已应用参数并由 URL 参数承担待应用记录、六项判别测试与竞态等待、浏览按钮请求中禁用；10 项新增测试、9 变异 8 杀（唯一生存为不可观测的 resetInteraction 重置），356 项 Vitest、typecheck、build 与独立复核探针通过。 |
+| 2026-11-14 | 草稿参数恢复修复复核 | web/src/pages/TacticsPage.tsx 及测试 | PASS | 参数移除后重置已应用参数，使同一 ?draft= 值再次加入仍生效；新增用例为其唯一确定性判别器，删除重置行 3/3 失败，旧 effect 顺序回归由 I-1/I-2 用例捕获；357 项 Vitest 连跑两次、typecheck、build、legacy 281 与独立探针通过；残余 Minor 为手动下拉不同步 URL。 |
+
+| 2026-11-14 | 存档读取升级支持新版引擎 | pyproject.toml、fm27lab/adapters/save_fmsave/reader.py、fm27lab/ports/save_reader.py、fm27lab/tests/test_save_reader.py、README.md、README.en.md、THIRD_PARTY_NOTICES.md、docs/AGENT_INTEGRATION.md | PASS | fmsave 0.9.0 对用户 FM27 27.0.1+2503222 存档抛 UnsupportedGameError 并被误报为“不是有效的 FM 存档”，升级 0.12.4 后真实存档可读：info、managed club 741、31922 俱乐部、34 人名单与 11+9 选人；错误映射区分版本不支持与存档变化，新增 5 项测试、2212 项 pytest、11 变异全杀，PyInstaller 归档含 fmsave 与 backports zstd。 |
+| 2026-11-14 | source_uid 冲突消歧 | fm27lab/adapters/save_fmsave/reader.py、fm27lab/ports/save_reader.py、fm27lab/tests/test_save_reader.py | FAIL | 未验证构建下 unique_id 与其它球员 uid 冲突时回退 uid 或更高新号，名单与首发/替补共用同一全局映射且 34 人标识全唯一；真实应用 apply-roster 仍 400“真实名单第 22 名球员名称无效”，因该构建有缺失名称球员被领域校验拒绝；M9 跨俱乐部全局映射变异存活，已补用例。 |
+| 2026-11-14 | 缺失名称占位与 uid 回退复核 | fm27lab/adapters/save_fmsave/reader.py、fm27lab/ports/save_reader.py、fm27lab/tests/test_save_reader.py | PASS | None 或纯空白名称以“未知球员 <source_uid>”占位、占位使用消歧后的标识、uid 缺失时回退 unique_id；真实存档 import 201、squad 34 人恰 1 占位、apply-roster scope both 200（首发 11 替补 12）与 starters 200；新增 2 项判别测试使 M4 与 uid 回退变异全杀、2222 项 pytest、ruff、类型生成与 281 项 legacy 通过；残余 Minor 为病态输入下占位标识可能重复与未验证构建告警仅写 stderr。 |
+
+| 2026-11-14 | Windows 安装包实机验证存档与战术文件导入 | dist/verify 下本地 E2E 脚本（未纳入版本库） | PASS | CI run 43593986849 四 job 全 success，安装包静默安装后 sidecar 载荷含 fmsave 0.12.4；原生选择器导入 240,956,721 字节 FM27 存档 29.9 秒后 ready；名单 34 人标识唯一、恰 1 个“未知球员 2000425656”，apply-roster 范围 both 200（首发 11 替补 12）且草案 23 人标识唯一并含该占位名；免存档 FMF 导入经原生选择器建草案成功；测试数据经 API 清理。 |
+
+| 2026-11-15 | 战术板生命周期审核 | web/src/pages/TacticsPage.tsx 及测试 | FAIL | 默认场景被真实后端 400（球员缺 source_uid、属性全 10 使全队判为门将），测试替身不校验场景；导出文件名清洗、焦点管理与多个交互分支缺测试。已由服务端战术模板与修复切片闭环。 |
+| 2026-11-15 | UX 清理审核 | HelpPage、RunBar、Jobs/Library 页面与样式 | FAIL | RunBar 删除与死表单清理成立，但帮助页把纯 Python 能力错列为需要引擎、宣称不存在的联赛战术库与 AI 计划；已重写帮助页与测试并清理死样式。 |
+| 2026-11-15 | 真实 FMF 导入后端 | fm27lab/adapters/engine_native/tactic_file.py、fm27lab/application/tactic_import.py、routes/fmf.py 与测试 | PASS | 真实 .fmf 16 份经宿主解析与场景映射全通，错误映射与 AFE 分流成立；Important 为宿主环境变量泄漏、consumed 判据偏严与缺少串行化，已由修复切片闭环。 |
+| 2026-11-15 | 引擎资源导入后端 | fm27lab/application/engine_import.py、routes/engine.py 与测试 | PASS | 候选发现、sha256 匹配、原子复制与预检成立；Important 为符号链接越界、同进程选择后匹配陈旧、复制非原子与两条变异存活，已由修复切片闭环。 |
+| 2026-11-15 | 球员单项属性编辑 | web/src/pages/PlayersPage.tsx 及测试、players.css | PASS | 69 格逐格编辑、脏标记、只提交改动格与切换确认成立；Important 为应用按钮越界时静默禁用无原因，已由修复切片闭环并补五项测试缺口。 |
+| 2026-11-15 | 实验页三段式重写 | web/src/pages/ExperimentsPage.tsx 及测试、experiments.css | PASS | 三段式顺序、场数与种子校验、A/B 翻倍、预检与失败分流成立；Important 为成功启动后未锁定与 retriable 未处理，已由修复切片闭环。 |
+| 2026-11-15 | 真实 FMF 导出 | fm27lab/adapters/fmf/archive.py、fm27lab/application/tactic_export.py、routes/fmf.py 与测试 | PASS | 真实归档逐字节一致、回读四键校验与 200/503 语义成立；Important 为必需引擎资源清单与场景资源需求不一致导致 400 泄露路径，已由后端修复切片闭环。 |
+| 2026-11-15 | 存档战术库后端 | fm27lab/adapters/save_fmsave/tactics.py、application/save_tactics.py、routes/save_tactics.py 与测试 | PASS | 真实存档 5 条用户战术与 19 条预设、两段式回读与 fail-closed 成立；Important 为 HTTP 未暴露 name 参数、Linux 无真实宿主，name 已补，真实宿主由 Windows 实测覆盖。 |
+| 2026-11-15 | 战术板与球员页前端审核 | TacticsPage.tsx、PlayersPage.tsx 及测试、api.ts | PASS | 模板提交体、导出 503、未保存确认、原生与旧版编辑、69 格编辑成立；Important 为关闭页面丢修改与请求挂起无退出路径，已由前端修复切片闭环。 |
+| 2026-11-15 | 设置页与实验页前端审核 | SettingsPage.tsx、ExperimentsPage.tsx 及测试 | FAIL | 重启等待在连接为空时不可达且无手动出口、确认框缺对话框语义与焦点管理、实验 409 无恢复入口；已由修复切片闭环。 |
+| 2026-11-15 | 后端修复复核 | engine_config.py、engine_import.py、routes/save_tactics.py、application/save_tactics.py 与测试 | PASS | 缺 editor 资源时 503 与 400 分流、name 全分支、OSError/RuntimeError/ValueError 映射成立；17 变异 16 杀，剩余为 catalog 断言子串歧义与空白名称被归一化覆盖，已收紧断言并补空白名称用例。 |
+| 2026-11-15 | 前端修复复核 | SettingsPage、ExperimentsPage、api.ts、PlayersPage、TacticsPage 及测试 | PASS | 重启超时出口、对话框焦点、409 与阻塞恢复、超时三态、beforeunload 与挂起提示成立；14 变异全杀、20 项探针全过，Important 为超时只覆盖响应头，列为后续改进。 |
+| 2026-11-15 | 场景编码名单顺序修复 | fm27lab/adapters/engine_native/scenario_codec.py 与测试 | PASS | 实验提交在真实资源上返回 400「球员顺序或标识不匹配」的根因修复：按 native_id 把场景名单映射到引擎样本前缀，首发、队长、主罚与定位球优先级随索引重排，真实 16 份 FMF 与 31 个 v1 变体字节基线全通；Important 为短名单下队长、主罚、定位球优先级与盯防目标仍以样本人数为界，越界引用可编码，已由第二次提交加固。 |
+| 2026-11-15 | 短名单边界加固复核 | scenario_codec.py 与测试（第二次提交） | PASS | 队长、主罚与定位球优先级改用名单人数，盯防目标与针对性指令按对手名单校验，native_id 要求整数，空名单拒绝；真实资源往返 16/16、边界探针 51/51、v1 字节基线 31/31，10 个变异 8 个杀死（剩余为等价与不可达分支），2559 项 pytest 全绿。 |
+| 2026-11-15 | 安装器升级进程清理 | src-tauri/windows/hooks.nsh、src-tauri/tauri.conf.json、test_packaging_config.py 与收尾文档 | PASS | 配置键与路径符合 NsisConfig 且相对 tauri.conf.json 解析；钩子位于 CheckIfAppIsRunning 与文件复制之前、卸载首个删除之前，静默与图形安装均执行，不误杀安装器自身；6 项 Minor 为杀进程顺序、图形安装静默终止无提示、内容断言偏浅、退出码未检查、无 Windows 真机、文案顺序，已采纳顺序与断言两项；2561 项 pytest 全绿。 |
+
+## 审核规则
+
+- 审核者不得修改文件、不得执行 Git 写操作。
+- 审核范围必须明确到提交、工作树或文件集合。
+- 先列 findings，再列已验证项，最后给结论。
+- Critical 或 Important 未闭环时不得标记 PASS。
+- 审核通过不等于整体发布就绪；发布仍需最终验收与 Windows 真机验证。
+- 旧 `tests/` 当前 281 项通过，覆盖 legacy UI/HTTP/CLI/MCP、存档战术库、池与名单；新 `fm27lab/tests` 当前 2561 项通过，覆盖包版本、CLI 环境继承、配置/路径边界、SQLite 迁移/事务与池/草案/任务/存档/产物/幂等仓储、HTTP 健康/池/草案/任务 CRUD、鉴权、错误封套、Origin、ACL 失败清理、sidecar serve、23 人名单、真实名单应用、scenario 归一化与旧场景 schema 升级、原生场景编码与定位球记录、场景物化与实验接线、原生宿主按需构造与按任务并行配置、宿主资源探测、catalog/双阶段战术与草案写入校验、客队战术池选择与整批展开、结果指标与跨任务对比、任务状态机与输出状态枚举、存档状态机与应用服务、安全边界与数据目录权限、事件流前端订阅与刷新合并、页面错误边界、性能基准与并发通道基准、跨平台测试、存档导入路径清洗与 FMF 路径导入、桌面文件选择接线、战术页参数恢复、README 中英文一致；Vitest 当前 487 项（15 个文件）。
+- Tauri sidecar supervisor 的静态实现已存在，但 Linux 无 WebKitGTK，Windows CI 的 `cargo build`/`cargo test`/安装包构建是唯一编译证据。PyInstaller onedir sidecar 已在 Linux 构建并通过 ready/health/shutdown 冒烟测试。
+- Rust 核心 crate 当前 4 项 cargo test 通过；前端当前 487 项 Vitest（15 个文件）通过、类型检查与生产构建通过。Windows CI run 43558281006 全 job success，含 cargo build/test、NSIS 安装包与 sidecar 资源断言；Linux 本机仍无 WebKitGTK。合并、设计、sidecar、壳层、名单五个审核门均已 PASS。

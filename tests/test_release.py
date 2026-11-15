@@ -9,7 +9,7 @@ import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'scripts'))
-from export_source import export, source_files, validate
+from export_source import export, source_files, validate, validate_binary_asset
 from generate_profile import read_rva, restore_profile
 
 
@@ -63,6 +63,21 @@ class ReleaseTests(unittest.TestCase):
                     self.assertEqual(hashlib.sha256(archive.read('fm-tactics-lab/' + name)).hexdigest(), expected)
                     self.assertFalse({'private', 'build', 'data', 'vendor', '__pycache__'} & set(Path(name).parts))
                 self.assertNotIn('fm-tactics-lab/src/tactics_ui/catalog.json', archive.namelist())
+
+    def test_binary_assets_require_matching_signature(self):
+        with tempfile.TemporaryDirectory(dir=self.temp_root) as folder:
+            root = Path(folder)
+            png = root / 'icon.png'
+            png.write_bytes(b'\x89PNG\r\n\x1a\nrest')
+            self.assertTrue(validate_binary_asset(png))
+            ico = root / 'icon.ico'
+            ico.write_bytes(b'\x00\x00\x01\x00rest')
+            self.assertTrue(validate_binary_asset(ico))
+            bad = root / 'bad.png'
+            bad.write_bytes(b'not a png')
+            with self.assertRaisesRegex(ValueError, 'binary asset signature'):
+                validate_binary_asset(bad)
+            self.assertFalse(validate_binary_asset(root / 'note.txt'))
 
     def test_local_private_files_cannot_enter_allowlist(self):
         with tempfile.TemporaryDirectory(dir=self.temp_root) as folder:
