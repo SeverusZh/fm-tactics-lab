@@ -199,6 +199,7 @@
 | 2026-11-15 | formations 复审 | 同上 | PASS | 指令组归一与 14 组交叉校验、盯防球员选择、按阶段过滤指令组、非法参数回写与阵型选人测试全部成立；7 处变异被捕获，六套阵型在真实资产上 12 次预览均通过领域校验。 |
 | 2026-11-15 | CI 工作流、验收脚本与文档独立审查 | ci.yml、release.yml、verify_installer_windows.ps1、verify_engine_windows.ps1、verify_concurrency_matrix.py、ADR 与文档、桌面打开器 | FAIL | Critical 为并发脚本在 Windows 无内存探测且 256 路资源预检必阻塞；Important 为脚本 $Matches 遮蔽自动变量、cmd 打开器存在注入面与源码清单未同步；已由修复切片闭环。 |
 | 2026-11-15 | CI 工作流与验收脚本复审 | ci.yml、release.yml、两个 PowerShell 脚本、并发矩阵脚本、ADR 与文档、桌面打开器 | PASS | Windows 内存探测与容量覆盖、脚本变量改名、打开器安全与文档计数全部闭环；端到端脚本 81/81 通过，两处变异被捕获；Minor 为静态契约缺口与真机未验证，已补 CI 契约测试并把目录打开改为系统文件管理器。 |
+| 2026-11-16 | 宿主取消退出语义审查 | fm27lab/adapters/engine_native/host.py、fm27lab/tests/test_engine_host.py、DESIGN.md、docs/adr/0011-cancel-intent-delivery.md | PASS | 取消优先于会话故障在六条分支成立，未完成场次不再写失败记录；确定性注入复现 CI 的退出码 86 路径，修复前产生失败结果、修复后仅保留已受理场次；2 处变异被新增用例捕获，定向 124 项通过。Important 为两处复检无测试钉住，已在代码注明取消优先级并补 ADR 说明；取消终态不可续跑的措辞已修正。 |
 
 ## 审核规则
 
@@ -207,6 +208,6 @@
 - 先列 findings，再列已验证项，最后给结论。
 - Critical 或 Important 未闭环时不得标记 PASS。
 - 审核通过不等于整体发布就绪；发布仍需最终验收与 Windows 真机验证。
-- 旧 `tests/` 当前 281 项通过，覆盖 legacy UI/HTTP/CLI/MCP、存档战术库、池与名单；新 `fm27lab/tests` 当前 2852 项通过，覆盖包版本、CLI 环境继承、配置/路径边界、SQLite 迁移/事务与池/草案/任务/存档/产物/幂等仓储、HTTP 健康/池/草案/任务 CRUD、鉴权、错误封套、Origin、ACL 失败清理、sidecar serve、23 人名单、真实名单应用、scenario 归一化与旧场景 schema 升级、原生场景编码与定位球记录、场景物化与实验接线、原生宿主按需构造与按任务并行配置、宿主资源探测、catalog/双阶段战术与草案写入校验、客队战术池选择与整批展开、结果指标与跨任务对比、任务状态机与输出状态枚举、存档状态机与应用服务、安全边界与数据目录权限、事件流前端订阅与刷新合并、页面错误边界、性能基准与并发通道基准、跨平台测试、存档导入路径清洗与 FMF 路径导入、桌面文件选择接线、战术页参数恢复、README 中英文一致、定位球与客队池编辑、存档战术导出与入池、阵型模板与指令归一、性质测试、OpenAPI 快照、并发验收矩阵与 CI 脚本契约；Vitest 当前 593 项（21 个文件）。
+- 旧 `tests/` 当前 281 项通过，覆盖 legacy UI/HTTP/CLI/MCP、存档战术库、池与名单；新 `fm27lab/tests` 当前 2854 项通过，覆盖包版本、CLI 环境继承、配置/路径边界、SQLite 迁移/事务与池/草案/任务/存档/产物/幂等仓储、HTTP 健康/池/草案/任务 CRUD、鉴权、错误封套、Origin、ACL 失败清理、sidecar serve、23 人名单、真实名单应用、scenario 归一化与旧场景 schema 升级、原生场景编码与定位球记录、场景物化与实验接线、原生宿主按需构造与按任务并行配置、宿主资源探测、catalog/双阶段战术与草案写入校验、客队战术池选择与整批展开、结果指标与跨任务对比、任务状态机与输出状态枚举、存档状态机与应用服务、安全边界与数据目录权限、事件流前端订阅与刷新合并、页面错误边界、性能基准与并发通道基准、跨平台测试、存档导入路径清洗与 FMF 路径导入、桌面文件选择接线、战术页参数恢复、README 中英文一致、定位球与客队池编辑、存档战术导出与入池、阵型模板与指令归一、性质测试、OpenAPI 快照、并发验收矩阵与 CI 脚本契约；Vitest 当前 593 项（21 个文件）。
 - Tauri sidecar supervisor 的静态实现已存在，但 Linux 无 WebKitGTK，Windows CI 的 `cargo build`/`cargo test`/安装包构建是唯一编译证据。PyInstaller onedir sidecar 已在 Linux 构建并通过 ready/health/shutdown 冒烟测试。
 - Rust 核心 crate 当前 16 项 cargo test 通过，桌面壳另有 10 项；前端当前 593 项 Vitest（21 个文件）通过、类型检查与生产构建通过。Windows CI run 43558281006 全 job success，含 cargo build/test、NSIS 安装包与 sidecar 资源断言；Linux 本机仍无 WebKitGTK。合并、设计、sidecar、壳层、名单五个审核门均已 PASS。

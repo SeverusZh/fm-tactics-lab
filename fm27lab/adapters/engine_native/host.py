@@ -426,7 +426,7 @@ class NativeEngineHost:
             if self._cancelled.is_set():
                 return
             outcome = self._run_session(remaining, attempt, on_result, progress, lane)
-            if outcome.ok or outcome.cancelled:
+            if outcome.ok or outcome.cancelled or self._cancelled.is_set():
                 return
             if not outcome.unresolved:
                 raise RuntimeError(outcome.error or "原生会话执行失败")
@@ -604,6 +604,9 @@ class NativeEngineHost:
                     break
             time.sleep(POLL_SECONDS)
 
+        # 取消可能在循环条件判断之后到达，取消优先于退出码与启动检查
+        if self._cancelled.is_set():
+            cancelled = True
         if fatal is not None or cancelled or failure is not None:
             _signal(cancellation)
             deadline = time.monotonic() + self._cleanup_seconds
@@ -648,28 +651,46 @@ class NativeEngineHost:
         if error is not None:
             raise error
         rows = self._startup_rows(startup)
-        self._check_startup(startup, rows)
         unresolved = unresolved_positions()
         stderr = collector.text()
+        # 会话正常退出后仍可能收到取消，避免把取消当成启动检查或退出码失败
+        if self._cancelled.is_set():
+            return self._final_outcome(tasks, outputs, unresolved, failure=None)
+        self._check_startup(startup, rows)
         if process.returncode not in (0, 180):
             message = f"原生宿主退出 {process.returncode}"
             if stderr:
                 message = f"{message}：{stderr}"
             if not unresolved:
                 raise RuntimeError(message)
-            return _SessionOutcome(False, False, message, tasks, outputs, unresolved)
+            return self._final_outcome(tasks, outputs, unresolved, failure=message)
         if process.returncode == 180 and unresolved:
             message = f"原生宿主退出 180 且未完成全部比赛：完成 {total - len(unresolved)}/{total}"
             if stderr:
                 message = f"{message}；{stderr}"
-            return _SessionOutcome(False, False, message, tasks, outputs, unresolved)
+            return self._final_outcome(tasks, outputs, unresolved, failure=message)
         self._record_steam_cleanup(startup.parent, rows, process.returncode)
         if unresolved:
             message = f"原生宿主未完成全部比赛：完成 {total - len(unresolved)}/{total}"
             if stderr:
                 message = f"{message}；{stderr}"
-            return _SessionOutcome(False, False, message, tasks, outputs, unresolved)
-        return _SessionOutcome(True, False, None, tasks, outputs, [])
+            return self._final_outcome(tasks, outputs, unresolved, failure=message)
+        return self._final_outcome(tasks, outputs, [], failure=None)
+
+    def _final_outcome(
+        self,
+        tasks: list[_Task],
+        outputs: list[Path],
+        unresolved: list[int],
+        *,
+        failure: str | None,
+    ) -> _SessionOutcome:
+        """取消优先于会话故障，未完成场次不计入结果，不记成失败记录。"""
+        if self._cancelled.is_set():
+            return _SessionOutcome(False, True, None, tasks, outputs, unresolved)
+        if failure is None:
+            return _SessionOutcome(True, False, None, tasks, outputs, [])
+        return _SessionOutcome(False, False, failure, tasks, outputs, unresolved)
 
     def _consume_worker_done(
         self,

@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 
 from fm27lab.adapters.engine_native import NativeEngineHost as ExportedNativeEngineHost
-from fm27lab.adapters.engine_native.host import NativeEngineHost
+from fm27lab.adapters.engine_native.host import NativeEngineHost, _SessionOutcome, _Task
 from fm27lab.ports.engine import EngineCapabilities, EnginePort, RuntimePlan
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
@@ -905,6 +905,51 @@ def test_cancel_parallel_batch_discards_unfinished_matches(tmp_path):
     assert results == []
     assert progress[-1] == []
     assert fake_simulator_processes() == []
+
+
+def test_cancel_during_session_exit_records_no_failed_runs(tmp_path, monkeypatch):
+    host = make_host(tmp_path, workers=4, timeout_seconds=60.0)
+    tasks = [make_task(tmp_path, variant="A", seed=seed) for seed in range(1, 5)]
+    calls: list[int] = []
+
+    def fake_run_session(self, session_tasks, attempt, on_result, progress, lane):
+        calls.append(lane)
+        self._cancelled.set()
+        unresolved = list(range(len(session_tasks)))
+        outputs = [tmp_path / f"fake-{lane}-{position}.jsonl" for position in unresolved]
+        return _SessionOutcome(False, False, "原生宿主退出 86", list(session_tasks), outputs, unresolved)
+
+    monkeypatch.setattr(NativeEngineHost, "_run_session", fake_run_session)
+    results: list[dict[str, object]] = []
+    host.run_batch(tasks, results.append, lambda active: None)
+    assert calls
+    assert results == []
+
+
+def test_final_outcome_prefers_cancellation_over_session_failure(tmp_path):
+    host = make_host(tmp_path)
+    task = _Task(variant="A", seed=1, fixture=Path("match.pkm"), config=None, output=None, dump=None)
+    outputs = [Path("run.jsonl")]
+
+    host._cancelled.set()
+    cancelled = host._final_outcome([task], outputs, [0], failure="原生宿主退出 86")
+    assert cancelled.ok is False
+    assert cancelled.cancelled is True
+    assert cancelled.error is None
+    assert cancelled.unresolved == [0]
+
+    host._cancelled.clear()
+    failed = host._final_outcome([task], outputs, [0], failure="原生宿主退出 86")
+    assert failed.ok is False
+    assert failed.cancelled is False
+    assert failed.error == "原生宿主退出 86"
+    assert failed.unresolved == [0]
+
+    complete = host._final_outcome([task], outputs, [], failure=None)
+    assert complete.ok is True
+    assert complete.cancelled is False
+    assert complete.error is None
+    assert complete.unresolved == []
 
 
 def test_lane_failure_stops_other_lanes_and_raises(tmp_path):
