@@ -49,6 +49,13 @@ def test_installer_qa_runs_in_windows_tauri_job():
     assert "dist/installer-qa" in block
 
 
+def test_gitattributes_pins_text_checkout_line_endings():
+    rules = [line for line in (ROOT / ".gitattributes").read_text(encoding="utf-8").splitlines() if line.strip()]
+    assert rules
+    unpinned = [line for line in rules if "text" in line and "eol=" not in line]
+    assert unpinned == [], f"text rules without eol pin rewrite worktree bytes on Windows: {unpinned}"
+
+
 def test_release_workflow_builds_installer_with_locked_dependencies():
     text = workflow("release.yml")
     assert "tauri build --bundles nsis" in text

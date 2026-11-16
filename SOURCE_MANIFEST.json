@@ -1,5 +1,5 @@
 {
-  ".gitattributes": "307ac6a6bdb3d3b73b69733ba3390f25404f9d4aa13216ac7f765cc08443c712",
+  ".gitattributes": "169c7d1de8a537c501534a7541b197a1c647404a504eac94905f6adc3f35dbf6",
   ".github/workflows/ci.yml": "a0492f3208480287c81197f86f361c2fbb1203eede59758e97c57870c819d385",
   ".github/workflows/release.yml": "bb460156a34c8d9442543e795d0f86ea11f9f251a809f9e50445cd727002ee7b",
   ".gitignore": "b6aea4a827938b12e700730c7adaadabf0faad39ba9e61837b560a46e6f6b462",
@@ -168,7 +168,7 @@
   "fm27lab/tests/test_attributes.py": "f688b77752989b0a3b4d8e56ce3a2a1e1a1bb69cfb1a2bd3a19bf0b020e1f2a2",
   "fm27lab/tests/test_benchmark.py": "066448bbeab881bb07dcf826842b7cc6ffef26e4993b8c6e815b9a2f20ee7a35",
   "fm27lab/tests/test_catalog.py": "70e299af94664d6a83a80ece63165831aa5ada9e98dcd2e915c7afd70a5f91a8",
-  "fm27lab/tests/test_ci_scripts_contract.py": "5021b7d830e7d15da38873ac3faa582158ba6bd6af13d93eee8299d3ed1536cb",
+  "fm27lab/tests/test_ci_scripts_contract.py": "dd67829f6cdb9d5628e6e3f2b9bd253f843bbcc04fa05a2cc04cb453689db0e3",
   "fm27lab/tests/test_cli.py": "e208c1d4f27dc306056afd9c3594c18a68b8d82f6624e621c1e81044ad8d4a6e",
   "fm27lab/tests/test_cli_client.py": "9d92497e7ee5b6ef4c685ceb01a67e29415821a4cd5785701ee52105e0cc620b",
   "fm27lab/tests/test_cli_commands.py": "aeabd8d737857a2ee524e769860043680d59a98776c6300ac5be0537fb04f350",
