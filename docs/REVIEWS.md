@@ -201,7 +201,7 @@
 | 2026-11-15 | CI 工作流与验收脚本复审 | ci.yml、release.yml、两个 PowerShell 脚本、并发矩阵脚本、ADR 与文档、桌面打开器 | PASS | Windows 内存探测与容量覆盖、脚本变量改名、打开器安全与文档计数全部闭环；端到端脚本 81/81 通过，两处变异被捕获；Minor 为静态契约缺口与真机未验证，已补 CI 契约测试并把目录打开改为系统文件管理器。 |
 | 2026-11-16 | 宿主取消退出语义审查 | fm27lab/adapters/engine_native/host.py、fm27lab/tests/test_engine_host.py、DESIGN.md、docs/adr/0011-cancel-intent-delivery.md | PASS | 取消优先于会话故障在六条分支成立，未完成场次不再写失败记录；确定性注入复现 CI 的退出码 86 路径，修复前产生失败结果、修复后仅保留已受理场次；2 处变异被新增用例捕获，定向 124 项通过。Important 为两处复检无测试钉住，已在代码注明取消优先级并补 ADR 说明；取消终态不可续跑的措辞已修正。 |
 
-| 2026-11-16 | 发布候选构建 | release.yml run 43866462594 与 CI run 43866436688（commit `0ea10fd`） | PASS | Windows 全流程 23 步依次成功：前端类型检查、Vitest、构建、i18n 与工作区脚本、sidecar 打包、pytest、legacy unittest、源码清单 505 文件匹配、cargo test、NSIS 安装包、安装与卸载 QA；23 项断言全 PASS，安装目录 `C:/Users/runneradmin/AppData/Local/FM Tactics Lab`、endpoint 与窗口句柄均解析成功，卸载后目录、可执行文件、sidecar 载荷与注册表项清理；工件 release-installer 22.5 MB 与 release-installer-qa；同提交 CI 六作业 success。发布前两轮失败根因已在本轮修复：Windows 8.3 短名导致的路径比较缺陷与 CRLF 检出导致的清单哈希不符，后者由 `.gitattributes` 默认 `eol=lf` 与契约测试钉住。 |
+| 2026-11-16 | 发布候选构建 | release.yml run 43866462594 与 CI run 43866436688（commit `0ea10fd`） | PASS | Windows 全流程各步骤依次成功：前端类型检查、Vitest、构建、i18n 与工作区脚本、sidecar 打包、pytest、legacy unittest、源码清单 505 文件匹配、cargo test、NSIS 安装包、安装与卸载 QA；23 项断言全 PASS，安装目录 `C:/Users/runneradmin/AppData/Local/FM Tactics Lab`、endpoint 与窗口句柄均解析成功，卸载后目录、可执行文件、sidecar 载荷与注册表项清理；工件 release-installer 22.5 MB 与 release-installer-qa；同提交 CI 六作业 success。发布前两轮失败根因已在本轮修复：Windows 8.3 短名导致的路径比较缺陷与 CRLF 检出导致的清单哈希不符，后者由 `.gitattributes` 默认 `eol=lf` 与契约测试钉住。 |
 
 ## 审核规则
 
