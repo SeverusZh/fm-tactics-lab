@@ -13,9 +13,7 @@ def workflow(name: str) -> str:
 
 
 def job_block(text: str, job: str) -> str:
-    pattern = re.compile(
-        rf"^  {job}:\n(?:.*\n)*?(?=^  [a-z][\w-]*:\n|\Z)", re.MULTILINE
-    )
+    pattern = re.compile(rf"^  {job}:\n(?:.*\n)*?(?=^  [a-z][\w-]*:\n|\Z)", re.MULTILINE)
     match = pattern.search(text)
     assert match is not None, f"job {job} not found"
     return match.group(0)
@@ -49,11 +47,54 @@ def test_installer_qa_runs_in_windows_tauri_job():
     assert "dist/installer-qa" in block
 
 
+def read_gitattributes_rules():
+    rules = []
+    for raw in (ROOT / ".gitattributes").read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        pattern, *attributes = line.split()
+        values = {}
+        for attribute in attributes:
+            key, _, value = attribute.partition("=")
+            values[key] = value or True
+        rules.append((pattern, values))
+    return rules
+
+
+def test_gitattributes_default_rule_pins_lf_checkout():
+    rules = read_gitattributes_rules()
+    default = [values for pattern, values in rules if pattern == "*"]
+    assert len(default) == 1, "exactly one default rule decides every unlisted type"
+    assert default[0].get("text") == "auto"
+    assert default[0].get("eol") == "lf", "default checkout must stay LF or manifest hashes break on Windows"
+
+
 def test_gitattributes_pins_text_checkout_line_endings():
-    rules = [line for line in (ROOT / ".gitattributes").read_text(encoding="utf-8").splitlines() if line.strip()]
+    rules = read_gitattributes_rules()
     assert rules
-    unpinned = [line for line in rules if "text" in line and "eol=" not in line]
+    unpinned = [
+        pattern
+        for pattern, values in rules
+        if "text" in values and values["text"] is not False and "eol" not in values
+    ]
     assert unpinned == [], f"text rules without eol pin rewrite worktree bytes on Windows: {unpinned}"
+    invalid = [
+        (pattern, values.get("eol"))
+        for pattern, values in rules
+        if values.get("eol") not in (None, "lf", "crlf")
+    ]
+    assert invalid == [], f"unknown eol values: {invalid}"
+
+
+def test_gitattributes_keeps_c_sources_on_crlf():
+    rules = read_gitattributes_rules()
+    by_pattern = {pattern: values for pattern, values in rules}
+    for pattern in ("*.cs", "*.cpp", "*.h"):
+        assert pattern in by_pattern, f"missing C family rule {pattern}"
+        assert by_pattern[pattern].get("eol") == "crlf", (
+            f"{pattern} must keep CRLF for the native host sources"
+        )
 
 
 def test_release_workflow_builds_installer_with_locked_dependencies():
