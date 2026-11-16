@@ -32,6 +32,28 @@ def read_rows(path,live=False):
     return [json.loads(line)for i,line in enumerate(lines)if line.strip()and not(live and i==len(lines)-1 and not line.endswith('\n'))]
 
 
+def worker_done_ack(path,process=None,settle=5.0):
+    marker=Path(str(path)+'.worker_done');deadline=time.monotonic()+settle
+    while True:
+        try:return json.loads(marker.read_text(encoding='utf8'))
+        except FileNotFoundError as error:raise ValueError('原生逐场释放标记无效')from error
+        except (OSError,ValueError)as error:
+            settled=process is not None and process.poll() is not None
+            if settled or time.monotonic()>=deadline:raise ValueError('原生逐场释放标记无效')from error
+            time.sleep(.02)
+
+
+def released_ack(ack,index):
+    return (isinstance(ack,dict)and ack.get('released')is True and type(ack.get('exit_code'))is int
+            and ack.get('exit_code')==0 and type(ack.get('index'))is int and ack.get('index')==index)
+
+
+def worker_done_gate(path,index,process=None,settle=5.0):
+    ack=worker_done_ack(path,process,settle)
+    if not released_ack(ack,index):raise ValueError('原生逐场释放标记无效')
+    return ack
+
+
 def merged_rows(receipt,rows):
     events={row['event']for row in rows}
     return receipt['session_rows']+[row for row in receipt['original_bootstrap_rows']if row['event']not in events]+rows
@@ -189,8 +211,7 @@ class DesktopWarmRunner(BatchRunner):
                 while True:
                     while completed<len(chunk)and Path(str(chunk[completed]['path'])+'.worker_done').exists():
                         task=chunk[completed];path=Path(task['path']);rows=read_rows(path)
-                        ack=json.loads(Path(str(path)+'.worker_done').read_text(encoding='utf8'))
-                        if not(ack['released']and ack['exit_code']==0 and ack['index']==completed+1):raise ValueError('原生逐场释放标记无效')
+                        ack=worker_done_gate(path,completed+1,process)
                         if receipt is None:
                             header=read_rows(startup,live=True)
                             compatibility=next(r for r in header if r['event']=='native_engine_compatibility')

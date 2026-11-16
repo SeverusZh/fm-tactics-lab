@@ -106,3 +106,14 @@ def test_preflight_passes_with_overridden_capacity(script):
         Path("fake_simulator.py"),
     )
     assert log.passed() is True
+
+
+def test_job_error_reports_recorded_batch_error(script):
+    final = {"status": "error", "summary": {"error": "原生逐场释放标记无效"}}
+    assert script.job_error(final) == "原生逐场释放标记无效"
+
+
+def test_job_error_is_absent_for_completed_batch(script):
+    assert script.job_error({"status": "completed", "summary": {}}) is None
+    assert script.job_error({"status": "completed"}) is None
+    assert script.job_error(None) is None

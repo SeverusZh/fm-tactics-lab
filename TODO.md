@@ -65,15 +65,15 @@
 
 - [x] SQLite 连接、迁移与仓储：settings、pool_entries、drafts、jobs/job_runs、saves/save_leagues/save_clubs、artifacts、idempotency 与 `/api/pools`、`/api/drafts`、`/api/jobs`、`/api/saves`、`/api/results`、`/api/artifacts`、`/api/settings` 均已实现并通过独立审核。
 - [x] 空库启动、只读旧目录探测与存档读取端口：旧目录不写不迁移，存档经 fmsave 适配器只读；真实存档读取由 Windows 真机 run 43593986849 覆盖。
-- [!] 原生宿主适配器与 counted-session 能力协商：能力解析、运行时计划与文件协议适配器已实现并通过审核，真实宿主联调脚本 `scripts/verify_engine_windows.ps1` 已就绪；阻塞原因是本机与 CI 均无 FM27 游戏与引擎资源，需在装有 FM27 27.0.1+2494687 的 Windows 机器执行。
-- [x] 1–256 路调度、取消、续跑、磁盘/内存预检：并发预检、串行调度与引擎分道已实现；1/8/256 矩阵见 Phase 2 并发验收矩阵项，真实引擎吞吐见收官项。
+- [x] 原生宿主适配器与 counted-session 能力协商：能力解析、运行时计划与文件协议适配器已实现并通过审核；Windows 真机已用 `scripts/verify_engine_windows.ps1` 完成真实宿主联调：宿主 `--worker-capabilities` 声明 protocol 2、max_jobs 1000000、execution_context_reset 与 per_match_resource_release，`--check-image` 对游戏镜像给出 compatible true 与 disposition verified，单场真实比赛 2.97 秒完成 23797 tick 且球员统计身份校验通过；批次 provenance 记录 counted_sessions true、session_scope remaining_batch_lane、capability_version 2。真机引擎版本 27.0.1+2503222 与仓库 `native/adapter_version.json` 的 27.0.1+2494687 不同，适配器按运行时镜像指纹协商而不依赖静态版本号，镜像 sha256 与游戏 dll 一致。
+- [x] 1–256 路调度、取消、续跑、磁盘/内存预检：并发预检、串行调度与引擎分道已实现；1/8/256 矩阵见 Phase 2 并发验收矩阵项，真实引擎吞吐见收官项，真机 1/8/32 路取证见第 189 行。
 - [x] 实验提交接线：草案与客队战术池按种子物化为 FM27CFG1 场景、A/B 共用同一次抽签、提交持锁与失败清理、删除任务清理物化目录；已通过独立审核。
 - [x] 原生引擎生产接线：create_app 按注入 engine、engine_root 惰性宿主、未配置占位的顺序解析，运行时计划在启动时按能力协商，派发前按任务并行数配置宿主分道；已通过独立审核。
 - [x] 宿主资源探测：CPU、可用内存、空闲磁盘与推荐并行数，CLI 自动预填；已通过独立审核。
-- [x] 旧宿主回退到 64 场或执行力隔离模式，并记录 provenance：运行时计划按能力协商 counted/legacy 分支并写入任务 summary；已通过独立审核，真实旧宿主联调见 Phase 2 开放项。
+- [x] 旧宿主回退到 64 场或执行力隔离模式，并记录 provenance：运行时计划按能力协商 counted/legacy 分支并写入任务 summary；已通过独立审核；真机 counted-session 声明由第 68 行覆盖，旧宿主回退分支仍只由假引擎用例覆盖。
 - [x] 并发验收矩阵：`scripts/verify_concurrency_matrix.py` 与 `fm27lab/tests/test_concurrency_matrix.py` 覆盖 1/8/256 路提交、取消、派发竞态与续跑，Linux 实测 256 场三档分别为 169.5、863.1、1508.5 场每秒，逐场身份一致；CI 的 windows-concurrency job 复跑并上传证据。
 - [x] 真实引擎 Windows 验证脚本：`scripts/verify_engine_windows.ps1` 经 HTTP 驱动运行中的 sidecar，跑 1/8/256 三档、按 seed 比对 score 与 stats 签名，资源受限时以覆盖容量重试并记录，输出 evidence.json；CI 校验脚本语法，执行需要具备 FM27 资产的 Windows 环境。
-- [x] 独立审核 PASS：并发取消竞态、仓储与实验接线、注册表、性质测试与 Rust supervisor 等切片由 review-backend 独立审核通过，记录见 docs/REVIEWS.md；真实宿主联调见 Phase 2 开放项与收官项。
+- [x] 独立审核 PASS：并发取消竞态、仓储与实验接线、注册表、性质测试与 Rust supervisor 等切片由 review-backend 独立审核通过，记录见 docs/REVIEWS.md；真实宿主联调由第 68 与 189 行记录。
 
 ## Phase 3 接口
 
@@ -186,11 +186,12 @@
 - [x] 性能基准：`scripts/benchmark.py` 与 `docs/PERFORMANCE.md` 覆盖 HTTP 只读路径、场景归一化、客队池展开与配对 bootstrap 成本，输出结构由测试锁定；已通过独立审核。
 - [x] 并发通道对比基准：固定每场 2 秒的模拟器下实测 1、2、4 条通道的墙钟与加速比，JSON 与中文表格输出、失败路径中文受控退出；已通过独立审核。
 - [x] Windows 安装包 sidecar 资源映射修复：`bundle.resources` 改用目录形式以保留 PyInstaller onedir 的 `_internal/` 与迁移目录，CI 解包安装包校验载荷；重建安装包经 7-Zip 复核与独立审核 PASS。
-- [!] 真实引擎并发吞吐验证：`scripts/verify_engine_windows.ps1` 已实现 1、8、256 路吞吐与按种子结果身份比对，阻塞原因是本机与 GitHub runner 均无 FM27 引擎资产；假引擎矩阵由 `scripts/verify_concurrency_matrix.py` 在 Linux 与 Windows CI 覆盖（1、8、256 路 1508.5、863.1、169.5 场每秒，CI run 43735497957）。
+- [x] 真实引擎并发吞吐验证：`scripts/verify_engine_windows.ps1` 在具备 FM27 资产的 Windows 真机上经 HTTP 驱动 sidecar 完成。256 场批次 1、8、32 路墙钟 484.2、76.841、34.653 秒，吞吐 0.529、3.413、8.0 场每秒，三档均 256/256 完成且按 seed 的 score 与 stats 签名与 1 路基线零差异；64 场批次记录并行 1、8、256 三档吞吐 0.525、2.909、3.048 场每秒且身份零差异，其中任务数 64 使实际 lane 数上限为 64。256 场配 256 路时实际 lane 达到 256，宿主在同时加载游戏镜像时返回 Windows 1455 系统资源耗尽并把这些场次记为失败 run，与资源预检给出的 recommended_workers 32 一致，故 256 场验收以 32 路取证；假引擎矩阵仍由 `scripts/verify_concurrency_matrix.py` 在 Linux 与 Windows CI 覆盖（1、8、256 路 1508.5、863.1、169.5 场每秒，CI run 43735497957）。
 - [x] 安全与隐私检查：`docs/SECURITY.md` 与 22 条边界测试覆盖鉴权矩阵、令牌与 endpoint 权限、CORS、路径包含、输入上限、幂等与仓库隐私；修复数据目录 0755 缺陷；已通过独立审核。
 - [x] 最终独立审核 PASS：本轮七条审查线（后端、前端、formations、CI 脚本、宿主取消、前端修复复核与后端修复复核）均 PASS；质量门 2855 项 pytest、281 项 legacy unittest、593 项 Vitest（21 文件）、ruff、类型生成、OpenAPI 快照与 manifest 505 文件通过；Windows CI run 43735497957 六个作业全部 success。
 - [x] Windows 真机验证：CI run 43593986849 的安装包静默安装后，原生选择器导入 240,956,721 字节 FM27 存档 29.9 秒后 ready，名单 34 人标识唯一且恰 1 个占位名，apply-roster 范围 both 返回 200（首发 11 替补 12）且草案 23 人标识唯一，免存档 FMF 导入经原生选择器建草案成功。
 - [x] 发布候选构建：`release.yml` 经 workflow_dispatch 在 Windows 全流程通过（run 43866462594，commit `0ea10fd`），构建、前端检查、pytest、legacy unittest、源码清单、cargo test、NSIS 安装包与安装/卸载 QA 依次成功；23 项安装断言全 PASS，工件为 release-installer `FM Tactics Lab_2.0.0_x64-setup.exe` 22.5 MB 与 release-installer-qa 证据；同提交 CI run 43866436688 六个作业 success。
+- [x] 逐场释放标记竞态修复：消费端对不可解析标记做有界等待（宿主存活 5 秒上限、宿主已退出即判无效），并同步修复 legacy 源码版入口；假引擎以 partial_ack、garbage_alive、bad_exit_ack、bad_index_ack 夹具确定性覆盖，变异证明用例具判别力；4 核绑定探针修复前 22 次中 3 次失败，修复后 40 次全部完成 256 场，全量矩阵校验 229/229 通过；ADR-0012 记录写端原子发布为后续改进。
 
 ### 设计评审与体验重构
 
@@ -214,7 +215,7 @@
 - 旧目录不被修改；新库为空启动。
 - README 不再包含 `career_*` 或存档对战使用说明。
 
-本轮已覆盖：并发的假引擎身份一致与 Windows CI 矩阵、安装包启动与卸载清理、CLI 与 MCP 无桌面流程、旧目录只读与新库空启动；真实引擎相关门槛按第 68 与 189 行的阻塞说明执行。
+本轮已覆盖：并发的假引擎身份一致与 Windows CI 矩阵、真实引擎 64 场与 256 场 1/8/32 路吞吐与身份一致、安装包启动与卸载清理、CLI 与 MCP 无桌面流程、旧目录只读与新库空启动。
 
 ## 审核记录
 

@@ -9,8 +9,11 @@ requested).
 
 Each session starts the host with --worker-manifest, --output session.jsonl,
 --tick-step 1 and --cancel-event. Match completion is detected through the
-per-match <log>.worker_done sidecar; the JSONL match log then provides the final
-score, native statistics and optional event details for the append_run record.
+per-match <log>.worker_done sidecar. The sidecar path becomes visible before its
+JSON payload is flushed, so a present but unparsable marker is retried for a
+bounded settle window instead of being rejected immediately. The JSONL match log
+then provides the final score, native statistics and optional event details for
+the append_run record.
 The startup session file must carry the native_engine_compatibility declaration
 and is also inspected for steam_session_cleanup warnings. Session failures are
 retried for unresolved matches only, and exit code 180 is accepted as an
@@ -46,6 +49,8 @@ MANIFEST_NAME = "manifest.txt"
 SESSION_LOG_NAME = "session.jsonl"
 CANCEL_EVENT_NAME = "cancel.event"
 WORKER_DONE_SUFFIX = ".worker_done"
+WORKER_DONE_SETTLE_SECONDS = 5.0
+WORKER_DONE_INVALID = "原生逐场释放标记无效"
 STEAM_CLEANUP_WARNING = "Steam 会话清理未确认"
 COMPATIBILITY_MISSING = "原生启动兼容诊断缺失"
 COMPATIBILITY_FAILED = "原生关键接口检查失败：引擎兼容声明不可用"
@@ -559,7 +564,9 @@ class NativeEngineHost:
                     compatibility_checked = True
                 position = completed
                 try:
-                    self._consume_worker_done(tasks[position], outputs[position], position + 1, on_result)
+                    self._consume_worker_done(
+                        tasks[position], outputs[position], position + 1, on_result, process
+                    )
                 except BaseException as error:
                     completed = position + 1
                     return error
@@ -698,12 +705,9 @@ class NativeEngineHost:
         output: Path,
         expected_index: int,
         on_result: Callable[[Mapping[str, Any]], None],
+        process: subprocess.Popen | None = None,
     ) -> None:
-        done = Path(str(output) + WORKER_DONE_SUFFIX)
-        try:
-            ack = json.loads(done.read_text(encoding="utf-8"))
-        except (OSError, ValueError) as error:
-            raise RuntimeError("原生逐场释放标记无效") from error
+        ack = self._read_worker_done(output, process)
         if (
             not isinstance(ack, Mapping)
             or ack.get("released") is not True
@@ -712,7 +716,7 @@ class NativeEngineHost:
             or type(ack.get("index")) is not int
             or ack.get("index") != expected_index
         ):
-            raise RuntimeError("原生逐场释放标记无效")
+            raise RuntimeError(WORKER_DONE_INVALID)
         try:
             rows = _read_event_rows(output)
         except OSError:
@@ -738,6 +742,30 @@ class NativeEngineHost:
             on_result(self._failed_result(task, str(error), output=output, failure_phase="native_validation"))
         else:
             on_result(result)
+
+    @staticmethod
+    def _read_worker_done(output: Path, process: subprocess.Popen | None) -> Any:
+        """Read the release sidecar, tolerating a path that appears before its payload.
+
+        The host creates the sidecar and then writes the JSON acknowledgement, so
+        the file is observable while still empty or truncated. An unparsable
+        payload is retried while the host is alive and only until the settle
+        window expires; once the host has exited the marker is final and a
+        malformed payload is rejected. A complete payload that fails field
+        validation is rejected immediately by the caller either way.
+        """
+        done = Path(str(output) + WORKER_DONE_SUFFIX)
+        deadline = time.monotonic() + WORKER_DONE_SETTLE_SECONDS
+        while True:
+            try:
+                return json.loads(done.read_text(encoding="utf-8"))
+            except FileNotFoundError as error:
+                raise RuntimeError(WORKER_DONE_INVALID) from error
+            except (OSError, ValueError) as error:
+                settled = process is not None and process.poll() is not None
+                if settled or time.monotonic() >= deadline:
+                    raise RuntimeError(WORKER_DONE_INVALID) from error
+                time.sleep(POLL_SECONDS)
 
     def _map_match_result(
         self,

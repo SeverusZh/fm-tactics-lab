@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 
 from fm27lab.adapters.engine_native import NativeEngineHost as ExportedNativeEngineHost
+from fm27lab.adapters.engine_native import host as host_module
 from fm27lab.adapters.engine_native.host import NativeEngineHost, _SessionOutcome, _Task
 from fm27lab.ports.engine import EngineCapabilities, EnginePort, RuntimePlan
 
@@ -1046,3 +1047,40 @@ def test_configure_workers_does_not_reprobe_capabilities(tmp_path, monkeypatch):
     assert len(probes) == 1
     host.configure_workers(2)
     assert probe_log.read_text(encoding="utf-8").splitlines() == probes
+
+
+def test_partial_worker_done_marker_is_awaited(tmp_path):
+    """A sidecar path that exists before its payload settles is not a failure."""
+    host = make_host(tmp_path, timeout_seconds=30.0)
+    results, _ = run_batch(host, [make_task(tmp_path, seed=4, fixture="partial_ack.pkm")])
+    assert len(results) == 1
+    assert results[0]["verified"] is True
+    assert results[0]["seed"] == 4
+
+
+def test_garbage_marker_from_exited_host_is_rejected_immediately(tmp_path):
+    """A host that exits with a malformed marker is final and is not delayed by the settle window."""
+    host = make_host(tmp_path)
+    began = time.monotonic()
+    with pytest.raises(RuntimeError, match="原生逐场释放标记无效"):
+        run_batch(host, [make_task(tmp_path, seed=5, fixture="garbage_ack.pkm")])
+    assert time.monotonic() - began < 1.5
+
+
+def test_live_host_marker_is_rejected_after_settle_window(tmp_path, monkeypatch):
+    """A malformed marker from a live host fails at the bounded settle deadline."""
+    monkeypatch.setattr(host_module, "WORKER_DONE_SETTLE_SECONDS", 0.2)
+    host = make_host(tmp_path)
+    began = time.monotonic()
+    with pytest.raises(RuntimeError, match="原生逐场释放标记无效"):
+        run_batch(host, [make_task(tmp_path, seed=6, fixture="garbage_alive.pkm")])
+    elapsed = time.monotonic() - began
+    assert 0.15 <= elapsed < 1.5
+
+
+@pytest.mark.parametrize("fixture", ["bad_exit_ack.pkm", "bad_index_ack.pkm"])
+def test_invalid_worker_done_fields_are_rejected(tmp_path, fixture):
+    """A complete acknowledgement with wrong release fields still fails immediately."""
+    host = make_host(tmp_path)
+    with pytest.raises(RuntimeError, match="原生逐场释放标记无效"):
+        run_batch(host, [make_task(tmp_path, seed=7, fixture=fixture)])

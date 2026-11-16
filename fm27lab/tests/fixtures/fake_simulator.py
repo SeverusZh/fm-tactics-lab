@@ -26,6 +26,8 @@ LEGACY_CAPABILITIES = {"counted_sessions": False, "jobs_per_session": 64}
 CANCEL_EXIT_CODE = 86
 RETRY_STATE_SUFFIX = ".retry-state"
 SLOW_SECONDS = 2.0
+PARTIAL_ACK_SECONDS = 0.2
+GARBAGE_ALIVE_SECONDS = 2.0
 WORKER_DONE_SUFFIX = ".worker_done"
 
 
@@ -100,9 +102,9 @@ def _write_rows(path, rows):
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
-def _write_worker_done(path, index, released=True):
+def _write_worker_done(path, index, released=True, exit_code=0):
     done = Path(str(path) + WORKER_DONE_SUFFIX)
-    _write_json(done, {"index": index, "pid": os.getpid(), "released": released, "exit_code": 0})
+    _write_json(done, {"index": index, "pid": os.getpid(), "released": released, "exit_code": exit_code})
 
 
 def _success_rows(seed):
@@ -227,6 +229,37 @@ def _worker(argv):
         if "bad_ack" in name:
             _write_rows(output, _success_rows(task["seed"]))
             _write_worker_done(output, position, released=False)
+            return 0
+        if "bad_exit_ack" in name:
+            _write_rows(output, _success_rows(task["seed"]))
+            _write_worker_done(output, position, exit_code=1)
+            return 0
+        if "bad_index_ack" in name:
+            _write_rows(output, _success_rows(task["seed"]))
+            _write_worker_done(output, position + 5)
+            return 0
+        if "partial_ack" in name:
+            _write_rows(output, _success_rows(task["seed"]))
+            done = Path(str(output) + WORKER_DONE_SUFFIX)
+            done.parent.mkdir(parents=True, exist_ok=True)
+            done.write_text("", encoding="utf-8")
+            time.sleep(PARTIAL_ACK_SECONDS)
+            _write_worker_done(output, position)
+            continue
+        if "garbage_alive" in name:
+            _write_rows(output, _success_rows(task["seed"]))
+            done = Path(str(output) + WORKER_DONE_SUFFIX)
+            done.parent.mkdir(parents=True, exist_ok=True)
+            done.write_text("not an ack", encoding="utf-8")
+            deadline = time.monotonic() + GARBAGE_ALIVE_SECONDS
+            while time.monotonic() < deadline and not _cancelled(argv):
+                time.sleep(0.02)
+            return 0
+        if "garbage_ack" in name:
+            _write_rows(output, _success_rows(task["seed"]))
+            done = Path(str(output) + WORKER_DONE_SUFFIX)
+            done.parent.mkdir(parents=True, exist_ok=True)
+            done.write_text("not an ack", encoding="utf-8")
             return 0
         if "bad_output" in name:
             output.parent.mkdir(parents=True, exist_ok=True)

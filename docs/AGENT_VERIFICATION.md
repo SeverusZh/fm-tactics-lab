@@ -32,7 +32,7 @@
 .venv/bin/python -m unittest discover -s tests
 ```
 
-期望输出包含 Ran 281 tests 与 OK；本机实测耗时约 19 秒。
+期望输出包含 Ran 288 tests 与 OK；本机实测耗时约 20 秒。
 
 覆盖范围：tests 目录为 v1 时期的回归测试，用例风格为 unittest。包括 test_agent_cli、test_agent_client、test_agent_contract、test_agent_drafts、test_agent_mcp、test_agent_server、test_career_retirement、test_execution、test_game_db_names、test_league_catalog、test_locale、test_opponent_scope、test_pool_pairing、test_release、test_save_export、test_tactic_pool、test_tactics_server_queue、test_worker_sessions，以及辅助模块 agent_mock。
 
@@ -44,7 +44,7 @@
 .venv/bin/python -m pytest
 ```
 
-配置来自 pyproject.toml，testpaths 为 fm27lab/tests，收集 2855 项，全部通过时退出码为 0。
+配置来自 pyproject.toml，testpaths 为 fm27lab/tests，收集 2865 项，全部通过时退出码为 0。
 
 覆盖范围：fm27lab/tests 下的 pytest 风格用例，包含 HTTP 路由、应用服务、领域规则、SQLite 适配器、MCP 协议与引擎宿主适配。
 
@@ -74,8 +74,8 @@ workspace scripts compile and squad selection is declared
 
 | 测试集 | 命令 | 当前计数 |
 | --- | --- | --- |
-| legacy unittest | .venv/bin/python -m unittest discover -s tests | 281 |
-| v2 pytest | .venv/bin/python -m pytest | 2855 |
+| legacy unittest | .venv/bin/python -m unittest discover -s tests | 288 |
+| v2 pytest | .venv/bin/python -m pytest | 2865 |
 | web Vitest | cd web && npx vitest run | 593，共 21 个文件 |
 | Node 脚本 | node tests/test_i18n.cjs 与 node tests/test_workspace_scripts.cjs | 2 个脚本 |
 

@@ -4,12 +4,14 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 import unittest
 from unittest.mock import patch
 ROOT=Path(__file__).resolve().parents[1]
 os.environ.setdefault('FM27_ENGINE_ROOT',str(ROOT/'build/test-temp'))
 sys.path.insert(0,str(ROOT/'src'))
-from desktop_warm_batch import DesktopWarmRunner
+from desktop_warm_batch import DesktopWarmRunner, worker_done_ack, worker_done_gate
 
 class WorkerSessionTests(unittest.TestCase):
  def setUp(self):
@@ -63,3 +65,40 @@ class WorkerResourceTests(unittest.TestCase):
   result=resource_limits(2,1024**3)
   self.assertEqual(result['maximum'],256)
   self.assertEqual(result['recommended'],1)
+
+
+class WorkerDoneMarkerTests(unittest.TestCase):
+ def setUp(self):
+  root=ROOT/'build/test-temp';root.mkdir(parents=True,exist_ok=True)
+  self.temp=tempfile.TemporaryDirectory(dir=root);self.addCleanup(self.temp.cleanup)
+  self.output=Path(self.temp.name)/'match.jsonl';self.output.write_text('',encoding='utf8')
+  self.marker=Path(str(self.output)+'.worker_done')
+ def test_partially_written_marker_is_awaited(self):
+  self.marker.write_text('',encoding='utf8')
+  def publish():
+   time.sleep(.15);self.marker.write_text(json.dumps({'index':1,'released':True,'exit_code':0}),encoding='utf8')
+  writer=threading.Thread(target=publish);writer.start()
+  try:ack=worker_done_ack(self.output)
+  finally:writer.join()
+  self.assertEqual(ack['index'],1)
+ def test_marker_stays_invalid_after_host_exit(self):
+  self.marker.write_text('not an ack',encoding='utf8')
+  process=unittest.mock.Mock();process.poll.return_value=0
+  started=time.monotonic()
+  with self.assertRaisesRegex(ValueError,'原生逐场释放标记无效'):worker_done_ack(self.output,process)
+  self.assertLess(time.monotonic()-started,1.0)
+ def test_missing_marker_is_invalid(self):
+  with self.assertRaisesRegex(ValueError,'原生逐场释放标记无效'):worker_done_ack(self.output)
+ def test_gate_requires_expected_index(self):
+  self.marker.write_text(json.dumps({'index':2,'released':True,'exit_code':0}),encoding='utf8')
+  with self.assertRaisesRegex(ValueError,'原生逐场释放标记无效'):worker_done_gate(self.output,1)
+ def test_gate_rejects_non_mapping_acknowledgement(self):
+  for payload in ('null','[]','"ack"'):
+   self.marker.write_text(payload,encoding='utf8')
+   with self.assertRaisesRegex(ValueError,'原生逐场释放标记无效'):worker_done_gate(self.output,1)
+ def test_gate_returns_matching_acknowledgement(self):
+  self.marker.write_text(json.dumps({'index':1,'released':True,'exit_code':0}),encoding='utf8')
+  self.assertEqual(worker_done_gate(self.output,1)['index'],1)
+ def test_session_loop_settles_marker_through_gate(self):
+  source=(ROOT/'src/desktop_warm_batch.py').read_text(encoding='utf8')
+  self.assertIn('ack=worker_done_gate(path,completed+1,process)',source)

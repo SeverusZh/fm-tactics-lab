@@ -192,6 +192,14 @@ def read_runs(job_service: JobService, job_id: str) -> list[dict[str, Any]]:
         offset = page["next_offset"]
 
 
+def job_error(final: Mapping[str, Any] | None) -> str | None:
+    """Expose the recorded batch error so a failed case is diagnosable from the report."""
+    if final is None:
+        return None
+    error = (final.get("summary") or {}).get("error")
+    return str(error) if error else None
+
+
 def runs_digest(runs: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
     digest = []
     for run in runs:
@@ -816,6 +824,8 @@ def run_matrix_case(
         f"会话 {sessions}，期望 {min(workers, total)}",
     )
     log.record(scope, "吞吐为正", throughput > 0, f"{throughput} 场每秒")
+    error = job_error(final)
+    log.record(scope, "批次无错误记录", error is None, error or "")
     return {
         "phase": "matrix",
         "workers": workers,
@@ -827,6 +837,7 @@ def run_matrix_case(
         "sessions": sessions,
         "peak_child_megabytes": peak_child_megabytes(),
         "results": runs_digest(runs),
+        "error": error,
         "events": collector.events,
     }
 
@@ -1140,6 +1151,8 @@ def run_resume_case(
         f"会话 {sessions}，期望 {min(workers, total - crash_limit)}",
     )
     log.record(scope, "续跑耗时为正值", seconds > 0, f"{seconds}s")
+    error = job_error(final)
+    log.record(scope, "续跑无错误记录", error is None, error or "")
     return {
         "phase": "resume",
         "workers": workers,
@@ -1151,6 +1164,7 @@ def run_resume_case(
         "sessions": sessions,
         "peak_child_megabytes": peak_child_megabytes(),
         "results": runs_digest(runs),
+        "error": error,
         "events": events,
     }
 

@@ -167,11 +167,11 @@ native/                C++17 适配器
 - 并行数 1–256 始终是合法输入；CPU 与可用内存只决定推荐值。高于推荐值只产生警告。可用内存低于 2 GiB 或磁盘不足时提交默认返回 409，可由 `allow_oversubscription=true` 显式覆盖；超过 256 属于范围错误。
 - 单一批次队列串行执行，批次内按 worker 分道；排队位置、取消、续跑与失败明细可见。
 - 高于推荐值显示非阻塞资源警告；高于 8 路的收益不做保证。
-- 每场保留原生校验、超时、取消与磁盘空间检查；失败保留现场，不自动重跑。
+- 每场保留原生校验、超时、取消与磁盘空间检查；失败保留现场，不自动重跑。逐场释放标记的路径早于内容落盘可见，消费端对不可解析标记做有界等待（宿主存活 5 秒上限，宿主已退出即判无效），写端原子发布列为后续改进，见 ADR-0012。
 - 取消意图随任务事件传递：派发前与工作进程配置后各复检一次，已取消则不派发新批次；宿主在会话退出后再次核对取消标记，取消优先于会话故障，未完成场次不计入结果且不记成失败记录；最后一次复检到宿主清理标记之间仍存在指令级窗口，见 ADR-0011。
 - 资源预检：按每路 1 GiB 加 2 GiB 保留估算；高于推荐值时显示非阻塞警告。只有可用内存低于 2 GiB、磁盘不足或并行数超过 256 时返回 409；前两者可由 `allow_oversubscription=true` 覆盖。UI 对 256 路要求二次确认，CLI/MCP 暴露同名参数。
 - 旧宿主缺少 counted-session 能力时回退到每会话 64 场；执行力实验回退到隔离模式。回退路径必须记录在任务 provenance 中。
-- 验收矩阵：1、8、256 路各验证提交、取消、续跑与结果身份一致，由 `scripts/verify_concurrency_matrix.py` 在 Linux 与 Windows CI 的假引擎上执行；CI runner 的磁盘小于 256 路所需的 258 GiB，用 `--available-memory-bytes` 与 `--free-disk-bytes` 提供等效容量，实测资源同时写入证据。真实引擎的吞吐与内存只由 `scripts/verify_engine_windows.ps1` 在 Windows 真机记录，不作为 Linux 单测断言。
+- 验收矩阵：1、8、256 路各验证提交、取消、续跑与结果身份一致，由 `scripts/verify_concurrency_matrix.py` 在 Linux 与 Windows CI 的假引擎上执行；CI runner 的磁盘小于 256 路所需的 258 GiB，用 `--available-memory-bytes` 与 `--free-disk-bytes` 提供等效容量，实测资源同时写入证据。真实引擎的吞吐与内存只由 `scripts/verify_engine_windows.ps1` 在 Windows 真机记录，不作为 Linux 单测断言；真机实测 256 场批次 1、8、32 路吞吐 0.529、3.413、8.0 场每秒且按 seed 的 score 与 stats 签名零差异，超过宿主真实容量时宿主以 Windows 1455 记录失败场次而不整批失败。
 - 性能目标：同一输入与种子下结果一致；并发提升不改变比分、统计与执行力回执。
 
 ## 23 人名单规则
@@ -204,7 +204,7 @@ native/                C++17 适配器
 - Tauri 只负责启动、健康检查、重启与退出；若 sidecar 构建失败，安装包构建失败，不生成缺少后端的发布包。
 - sidecar 通过环境变量接收数据目录、引擎目录、端口与 token；token 只保存在内存与受保护文件。
 - 保留 `fm27lab serve`、`fm27lab mcp` 与 CLI 独立入口，便于无桌面环境测试与 Agent 接入。
-- Windows 真实引擎验证不在 Linux 开发环境内完成；由 `scripts/verify_engine_windows.ps1` 在装有 FM27 27.0.1+2494687 的 Windows 机器上驱动 sidecar API 完成 1/8/256 路验收，作为发布门槛记录在 TODO。
+- Windows 真实引擎验证不在 Linux 开发环境内完成；由 `scripts/verify_engine_windows.ps1` 在装有 FM27 的 Windows 机器上驱动 sidecar API 完成验收，已在真机 27.0.1+2503222 与仓库适配器 27.0.1+2494687 之间通过运行时镜像指纹协商完成 64 场 1、8、256 路与 256 场 1、8、32 路批次；256 场配 256 路超出宿主真实容量，宿主以 Windows 1455 记录失败场次而不整批失败，故 256 场验收以预检推荐的 32 路取证，证据记录在 TODO 第 68 与 189 行。
 
 ## 测试与审核
 
@@ -240,3 +240,4 @@ native/                C++17 适配器
 - [ADR-0009](docs/adr/0009-ai-scenario-generation-scope.md)：AI 场景生成不在本轮范围。
 - [ADR-0010](docs/adr/0010-desktop-auto-update-scope.md)：桌面自动更新不在本轮范围。
 - [ADR-0011](docs/adr/0011-cancel-intent-delivery.md)：取消意图的传递与残余指令级窗口。
+- [ADR-0012](docs/adr/0012-worker-done-marker-visibility.md)：逐场释放标记的可见性与消费端等待。

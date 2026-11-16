@@ -41,6 +41,14 @@ def test_engine_script_does_not_shadow_matches_variable():
     assert text.count("-MatchCount $MatchCount") == 2
 
 
+def test_engine_script_is_utf8_with_bom_for_windows_powershell():
+    raw = (SCRIPTS / "verify_engine_windows.ps1").read_bytes()
+    assert raw.startswith(b"\xef\xbb\xbf"), (
+        "Windows PowerShell 5.1 reads a BOM-less script as ANSI and fails on the Chinese text"
+    )
+    raw.decode("utf-8-sig")
+
+
 def test_installer_qa_runs_in_windows_tauri_job():
     block = job_block(workflow("ci.yml"), "windows-tauri")
     assert "scripts/verify_installer_windows.ps1" in block

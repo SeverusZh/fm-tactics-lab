@@ -146,7 +146,7 @@ docs/       Development, interface, verification and fidelity docs
 
 ## Version status
 
-The current branch is `refactor/v2-modular`, the source version `2.0.0.dev0` (the frontend package version is `2.0.0-dev`), and the API version `fm27lab/v2`. No v2 installer has been released yet; remaining release items are tracked in [TODO](TODO.md). For stable versions, use the upstream Releases.
+The current branch is `main`, the source version `2.0.0.dev0` (the frontend package version is `2.0.0-dev`), and the API version `fm27lab/v2`. No v2 installer has been released yet; remaining release items are tracked in [TODO](TODO.md). For stable versions, use the upstream Releases.
 
 The new version starts with an empty SQLite database and does not migrate older experiment data; view or resume older jobs in the previous version. The supported platform is Windows x64, the adapter reference build is `27.0.1+2494687`, and the game engine and resources come from your local installation.
 

@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
     [string]$BaseUrl = "",
     [string]$Token = "",
@@ -73,14 +73,34 @@ function Get-FmJob {
     return Invoke-Api -Method Get -Path "/api/jobs/$JobId"
 }
 
-function Start-NextJob {
-    try {
-        return Invoke-Api -Method Post -Path "/api/experiments/start"
-    } catch {
-        if ($_.Exception.Message -match "HTTP 503") {
-            throw "引擎启动失败：$($_.Exception.Message)"
+function Start-NextJobAsync {
+    $request = @{
+        uri     = "$($script:BaseUrl)/api/experiments/start"
+        token   = $script:Token
+        timeout = $JobTimeoutSeconds + 120
+    }
+    return Start-Job -ArgumentList $request -ScriptBlock {
+        param($payload)
+        $headers = @{ Authorization = "Bearer $($payload.token)" }
+        try {
+            $body = Invoke-RestMethod -Method Post -Uri $payload.uri -Headers $headers -TimeoutSec $payload.timeout
+            return [ordered]@{ ok = $true; status = 200; body = $body; message = "" }
+        } catch {
+            $status = 0
+            $response = $_.Exception.Response
+            if ($null -ne $response) { $status = [int]$response.StatusCode }
+            return [ordered]@{ ok = $false; status = $status; body = $null; message = $_.Exception.Message }
         }
-        throw
+    }
+}
+
+function Complete-NextJobAsync {
+    param($Request)
+    $outcome = Receive-Job -Job $Request -Wait
+    Remove-Job -Job $Request -Force
+    if ($null -eq $outcome) { return }
+    if (-not $outcome.ok) {
+        throw ("引擎启动失败：HTTP {0} {1}" -f $outcome.status, $outcome.message)
     }
 }
 
@@ -88,21 +108,34 @@ function Wait-FmJob {
     param([string]$JobId)
     $deadline = (Get-Date).AddSeconds($JobTimeoutSeconds)
     $lastStatus = ""
-    while ((Get-Date) -lt $deadline) {
-        $job = Get-FmJob -JobId $JobId
-        if ($job.status -ne $lastStatus) {
-            Write-Host ("任务 {0} 状态 {1}，已完成 {2}/{3}" -f $JobId, $job.status, $job.completed, $job.total)
-            $lastStatus = $job.status
+    $request = Start-NextJobAsync
+    try {
+        while ((Get-Date) -lt $deadline) {
+            $job = Get-FmJob -JobId $JobId
+            if ($job.status -ne $lastStatus) {
+                Write-Host ("任务 {0} 状态 {1}，已完成 {2}/{3}" -f $JobId, $job.status, $job.completed, $job.total)
+                $lastStatus = $job.status
+            }
+            if (@("completed", "error", "cancelled", "interrupted") -contains $job.status) {
+                return $job
+            }
+            if ($null -ne $request -and $request.State -eq "Completed") {
+                Complete-NextJobAsync -Request $request
+                $request = $null
+            }
+            Start-Sleep -Seconds $PollSeconds
         }
-        if (@("completed", "error", "cancelled", "interrupted") -contains $job.status) {
-            return $job
+        throw "任务 $JobId 在 $JobTimeoutSeconds 秒内未进入终态"
+    } finally {
+        if ($null -ne $request) {
+            if ($request.State -eq "Completed") {
+                Complete-NextJobAsync -Request $request
+            } else {
+                Stop-Job -Job $request -ErrorAction SilentlyContinue
+                Remove-Job -Job $request -Force -ErrorAction SilentlyContinue
+            }
         }
-        if ($job.status -eq "queued") {
-            Start-NextJob | Out-Null
-        }
-        Start-Sleep -Seconds $PollSeconds
     }
-    throw "任务 $JobId 在 $JobTimeoutSeconds 秒内未进入终态"
 }
 
 function Get-AllRuns {
@@ -269,7 +302,6 @@ foreach ($workerCount in $workers) {
     }
     $jobId = [string]$job.id
     $watch = [System.Diagnostics.Stopwatch]::StartNew()
-    Start-NextJob | Out-Null
     $finished = Wait-FmJob -JobId $jobId
     $watch.Stop()
     $wallSeconds = [math]::Round($watch.Elapsed.TotalSeconds, 3)
