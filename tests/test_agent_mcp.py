@@ -362,7 +362,7 @@ class McpSidecarTests(unittest.TestCase):
         exported_body = exported["structuredContent"]
         path = Path(exported_body["path"])
         self.assertTrue(path.is_file())
-        self.assertTrue(path.is_relative_to(self.data_dir / "agent" / "exports"))
+        self.assertTrue(path.is_relative_to((self.data_dir / "agent" / "exports").resolve()))
         self.assertEqual(exported_body["rows"], 3)
         self.assertEqual(exported_body["sha256"], hashlib.sha256(path.read_bytes()).hexdigest())
         lines = path.read_text(encoding="utf-8").splitlines()

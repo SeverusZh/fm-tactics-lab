@@ -10,7 +10,7 @@
 - [x] 合并提交 `0c24c66` 独立审核（合并第三轮 PASS）。
 - [x] 设计文档与 ADR，第十一轮审核 PASS；合并审核第三轮 PASS。
 - [x] React/Tauri 壳层第五轮 PASS；Windows cargo build/test、NSIS 与 sidecar 资源断言在 Actions run 43252465016 全部通过。
-- [ ] 安装包内 sidecar 启动/退出/卸载真机 QA（发布门槛）。
+- [x] 安装包内 sidecar 启动、退出与卸载真机 QA（发布门槛）：`scripts/verify_installer_windows.ps1` 在 windows-latest 静默安装、启动桌面壳、等待 sidecar 与 endpoint.json、关闭窗口并静默卸载，23 项断言全通过（CI run 43735497957），证据为 installer-qa 工件。
 - [x] 23 人名单领域切片（31 项测试）第五轮审核 PASS；bench/显式多 GK/短名单规则闭环。
 - [x] 存档对战退役最终 PASS；核心 career 入口、存档对战旧 UI、测试与文档已删除。
 - [x] sidecar 基础切片：三轮审核 PASS；28 项测试；迁移/health/错误封套/连接/Origin/token repr/CLI env/入口/ACL 已闭环。
@@ -30,7 +30,7 @@
 - [x] Rust 工具链与纯核心 crate（ready/token/backoff/connection），4 项 cargo test 通过。
 - [x] CI：Linux Python/前端/Rust core 与 Windows sidecar 构建、`cargo build/test`、`tauri build --bundles nsis` 工作流已建立；run 43552112064 全 job success。
 - [x] Rust 核心 crate 补齐 sidecar 进程监督测试：`rust/crates/fm27lab-core/src/supervisor.rs` 承载阶段机、重启预算、健康分级与关闭三步，`src-tauri/src/lib.rs` 改为复用，12 项契约测试覆盖；review-backend 独立审核 PASS。
-- [ ] Windows sidecar 打包、Tauri 安装包构建与真机验证。
+- [x] Windows sidecar 打包、Tauri 安装包构建与真机验证：CI windows-tauri 以 PyInstaller 打包 sidecar、`tauri build --bundles nsis` 构建安装包并断言载荷，随后在 Windows runner 执行安装与卸载 QA（CI run 43735497957），证据为 installer-qa 与 windows-nsis 工件。
 - [x] Python 3.12 sidecar 打包与自检：PyInstaller onedir 构建与独立启动冒烟通过。
 - [x] 前端构建、字体资产与静态资源打包：字体自托管、构建产物与资源引用已验证。
 - [x] OpenAPI、CLI、MCP 三入口契约测试骨架：注册表对齐、命令树与工具名契约测试已建立。
@@ -65,7 +65,7 @@
 
 - [x] SQLite 连接、迁移与仓储：settings、pool_entries、drafts、jobs/job_runs、saves/save_leagues/save_clubs、artifacts、idempotency 与 `/api/pools`、`/api/drafts`、`/api/jobs`、`/api/saves`、`/api/results`、`/api/artifacts`、`/api/settings` 均已实现并通过独立审核。
 - [x] 空库启动、只读旧目录探测与存档读取端口：旧目录不写不迁移，存档经 fmsave 适配器只读；真实存档读取由 Windows 真机 run 43593986849 覆盖。
-- [~] 原生宿主适配器与 counted-session 能力协商：能力解析、运行时计划与文件协议适配器已实现并通过审核；真实 Windows 宿主联调待后续。
+- [!] 原生宿主适配器与 counted-session 能力协商：能力解析、运行时计划与文件协议适配器已实现并通过审核，真实宿主联调脚本 `scripts/verify_engine_windows.ps1` 已就绪；阻塞原因是本机与 CI 均无 FM27 游戏与引擎资源，需在装有 FM27 27.0.1+2494687 的 Windows 机器执行。
 - [x] 1–256 路调度、取消、续跑、磁盘/内存预检：并发预检、串行调度与引擎分道已实现；1/8/256 矩阵见 Phase 2 并发验收矩阵项，真实引擎吞吐见收官项。
 - [x] 实验提交接线：草案与客队战术池按种子物化为 FM27CFG1 场景、A/B 共用同一次抽签、提交持锁与失败清理、删除任务清理物化目录；已通过独立审核。
 - [x] 原生引擎生产接线：create_app 按注入 engine、engine_root 惰性宿主、未配置占位的顺序解析，运行时计划在启动时按能力协商，派发前按任务并行数配置宿主分道；已通过独立审核。
@@ -96,7 +96,7 @@
 - [x] 文件对话框、打开数据目录与外部链接：文件选择经 tauri-plugin-dialog 且只授予 dialog:allow-open；外部链接只允许 http(s)，Windows 走 FileProtocolHandler，目录走系统文件管理器，未引入额外依赖。
 - [x] 文档与 v2 实现事实对齐：AGENT_QUICKSTART、AGENT_INTEGRATION、AGENT_VERIFICATION 已按真实 endpoint、关闭接口、命名空间与测试计数重写；已通过独立审核。
 - [x] 删除 Launcher.cs 与旧 C# 构建入口，并从 scripts/export_source.py 的 TOP 移除；同步 `docs/AGENT_INTEGRATION.md`、`docs/AGENT_VERIFICATION.md` 与 `THIRD_PARTY_NOTICES.md` 中的 Launcher 描述；已通过独立审核。
-- [~] Windows 安装包构建与卸载清理：CI 已通过 `tauri build` 生成 NSIS 并断言 sidecar resources；安装与升级已通过 Windows 真机验证，卸载清理仍待 Windows 真机。
+- [x] Windows 安装包构建与卸载清理：CI 通过 `tauri build` 生成 NSIS 并断言 sidecar resources，安装、启动、关闭与卸载清理由 `scripts/verify_installer_windows.ps1` 在 Windows runner 验证（CI run 43735497957，卸载后进程、目录与注册表项均已清理）。
 - [x] 独立审核 PASS：桌面壳切片由 review-backend 两轮独立审核通过，打开器注入面、脚本与工作流契约均已闭环，记录见 docs/REVIEWS.md。
 
 ## Phase 5 UI
@@ -186,9 +186,9 @@
 - [x] 性能基准：`scripts/benchmark.py` 与 `docs/PERFORMANCE.md` 覆盖 HTTP 只读路径、场景归一化、客队池展开与配对 bootstrap 成本，输出结构由测试锁定；已通过独立审核。
 - [x] 并发通道对比基准：固定每场 2 秒的模拟器下实测 1、2、4 条通道的墙钟与加速比，JSON 与中文表格输出、失败路径中文受控退出；已通过独立审核。
 - [x] Windows 安装包 sidecar 资源映射修复：`bundle.resources` 改用目录形式以保留 PyInstaller onedir 的 `_internal/` 与迁移目录，CI 解包安装包校验载荷；重建安装包经 7-Zip 复核与独立审核 PASS。
-- [ ] 真实引擎并发吞吐验证：1、8、256 路吞吐与结果身份对比，待 Windows 真机环境。
+- [!] 真实引擎并发吞吐验证：`scripts/verify_engine_windows.ps1` 已实现 1、8、256 路吞吐与按种子结果身份比对，阻塞原因是本机与 GitHub runner 均无 FM27 引擎资产；假引擎矩阵由 `scripts/verify_concurrency_matrix.py` 在 Linux 与 Windows CI 覆盖（1、8、256 路 1508.5、863.1、169.5 场每秒，CI run 43735497957）。
 - [x] 安全与隐私检查：`docs/SECURITY.md` 与 22 条边界测试覆盖鉴权矩阵、令牌与 endpoint 权限、CORS、路径包含、输入上限、幂等与仓库隐私；修复数据目录 0755 缺陷；已通过独立审核。
-- [x] 最终独立审核 PASS：全仓与增量两轮只读审核均 PASS，质量门 2222 项 pytest、281 项 legacy unittest、357 项 Vitest（14 文件）、ruff、类型生成与 manifest 394 文件通过，Windows CI run 43558281006 与打包修复后 run 43574355852 全 job success；发布候选构建与 Windows 真机验证仍为发布门槛。
+- [x] 最终独立审核 PASS：本轮七条审查线（后端、前端、formations、CI 脚本、宿主取消、前端修复复核与后端修复复核）均 PASS；质量门 2854 项 pytest、281 项 legacy unittest、593 项 Vitest（21 文件）、ruff、类型生成、OpenAPI 快照与 manifest 505 文件通过；Windows CI run 43735497957 六个作业全部 success。
 - [x] Windows 真机验证：CI run 43593986849 的安装包静默安装后，原生选择器导入 240,956,721 字节 FM27 存档 29.9 秒后 ready，名单 34 人标识唯一且恰 1 个占位名，apply-roster 范围 both 返回 200（首发 11 替补 12）且草案 23 人标识唯一，免存档 FMF 导入经原生选择器建草案成功。
 - [ ] 发布候选构建。
 
@@ -208,11 +208,13 @@
 
 - Windows x64 + FM27 27.0.1+2494687：原生兼容、单场、A/B、战术池、真实名单、取消/续跑。
 - 并发 1、8、256 路的结果身份一致；资源预检与旧宿主回退有记录。
-- 23 人名单在样本、存档、AI 生成、FMF 导入与结果统计中一致。
+- 23 人名单在样本、存档、FMF 导入与结果统计中一致（真实 AI 生成不在本轮范围，见 ADR-0009）。
 - Tauri 安装包可启动 sidecar，退出后无残留进程。
 - CLI 与 MCP 在无桌面环境下可完成完整实验流程。
 - 旧目录不被修改；新库为空启动。
 - README 不再包含 `career_*` 或存档对战使用说明。
+
+本轮已覆盖：并发的假引擎身份一致与 Windows CI 矩阵、安装包启动与卸载清理、CLI 与 MCP 无桌面流程、旧目录只读与新库空启动；真实引擎相关门槛按第 68 与 189 行的阻塞说明执行。
 
 ## 审核记录
 
