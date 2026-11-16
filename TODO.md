@@ -188,9 +188,9 @@
 - [x] Windows 安装包 sidecar 资源映射修复：`bundle.resources` 改用目录形式以保留 PyInstaller onedir 的 `_internal/` 与迁移目录，CI 解包安装包校验载荷；重建安装包经 7-Zip 复核与独立审核 PASS。
 - [!] 真实引擎并发吞吐验证：`scripts/verify_engine_windows.ps1` 已实现 1、8、256 路吞吐与按种子结果身份比对，阻塞原因是本机与 GitHub runner 均无 FM27 引擎资产；假引擎矩阵由 `scripts/verify_concurrency_matrix.py` 在 Linux 与 Windows CI 覆盖（1、8、256 路 1508.5、863.1、169.5 场每秒，CI run 43735497957）。
 - [x] 安全与隐私检查：`docs/SECURITY.md` 与 22 条边界测试覆盖鉴权矩阵、令牌与 endpoint 权限、CORS、路径包含、输入上限、幂等与仓库隐私；修复数据目录 0755 缺陷；已通过独立审核。
-- [x] 最终独立审核 PASS：本轮七条审查线（后端、前端、formations、CI 脚本、宿主取消、前端修复复核与后端修复复核）均 PASS；质量门 2854 项 pytest、281 项 legacy unittest、593 项 Vitest（21 文件）、ruff、类型生成、OpenAPI 快照与 manifest 505 文件通过；Windows CI run 43735497957 六个作业全部 success。
+- [x] 最终独立审核 PASS：本轮七条审查线（后端、前端、formations、CI 脚本、宿主取消、前端修复复核与后端修复复核）均 PASS；质量门 2855 项 pytest、281 项 legacy unittest、593 项 Vitest（21 文件）、ruff、类型生成、OpenAPI 快照与 manifest 505 文件通过；Windows CI run 43735497957 六个作业全部 success。
 - [x] Windows 真机验证：CI run 43593986849 的安装包静默安装后，原生选择器导入 240,956,721 字节 FM27 存档 29.9 秒后 ready，名单 34 人标识唯一且恰 1 个占位名，apply-roster 范围 both 返回 200（首发 11 替补 12）且草案 23 人标识唯一，免存档 FMF 导入经原生选择器建草案成功。
-- [ ] 发布候选构建。
+- [x] 发布候选构建：`release.yml` 经 workflow_dispatch 在 Windows 全流程通过（run 43866462594，commit `0ea10fd`），构建、前端检查、pytest、legacy unittest、源码清单、cargo test、NSIS 安装包与安装/卸载 QA 依次成功；23 项安装断言全 PASS，工件为 release-installer `FM Tactics Lab_2.0.0_x64-setup.exe` 22.5 MB 与 release-installer-qa 证据；同提交 CI run 43866436688 六个作业 success。
 
 ### 设计评审与体验重构
 
