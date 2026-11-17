@@ -269,7 +269,7 @@
   "fm27lab/tests/test_tactics_validation.py": "b29b78d5ae9476f363707b193c3e16bc7e58fff05432b25bbc877f93a0d793e6",
   "fm27lab/tests/test_tauri_dialog_wiring.py": "575182b0efbde552293c092ac32c6e598c3007d6fae5ef582ed12aacc1b38cfb",
   "fm27lab/tests/test_verify_concurrency_script.py": "bd49bfd5496287f980a6d408a876ca6e38746e970bfdbe688a16230f61bd4f12",
-  "fm27lab/tests/test_verify_engine_windows_script.py": "d03ef4bdf6ab2e3fde2fa52c2b8a7226813b66ea94b4d1a42de0e8fcc6ebc223",
+  "fm27lab/tests/test_verify_engine_windows_script.py": "b2a6bb8fb2b462c483ef608d8eb7140343453b21b9d46ad53ce6d0fd76d46145",
   "fm27lab/tests/test_web_types.py": "51130c03d492ec016497efab8de8eedce808a88018914f5c91145bc1b7055465",
   "native/adapter_version.json": "e1795d8dfe816fd99254829c1fa4b304d73d14694d31afac050a0cb4d0dcf8ae",
   "native/desktop_host.cpp": "35b0d5340660118af55b0c4bc0adc9ddd807fe6998d1061a00812c6640e70796",

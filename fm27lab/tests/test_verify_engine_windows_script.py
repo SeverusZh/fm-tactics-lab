@@ -42,6 +42,12 @@ def pwsh_path() -> str | None:
     return None
 
 
+def windows_pwsh(executable: str) -> bool:
+    if sys.platform == "win32":
+        return True
+    return executable.lower().endswith(".exe")
+
+
 def native_path(path: Path) -> str:
     if sys.platform == "win32":
         return str(path)
@@ -56,6 +62,8 @@ def pwsh():
     executable = pwsh_path()
     if executable is None:
         pytest.skip("pwsh is required to exercise the Windows acceptance script")
+    if not windows_pwsh(executable):
+        pytest.skip("the acceptance script is exercised through Windows PowerShell")
     return executable
 
 
@@ -63,19 +71,11 @@ def run_harness(pwsh_executable: str, stubs: str, body: str) -> str:
     script = HARNESS.replace("__SCRIPT_PATH__", native_path(SCRIPT))
     script = script.replace("__STUBS__", stubs.strip())
     script = script.replace("__BODY__", body.strip())
-    completed = subprocess.run(
-        [
-            pwsh_executable,
-            "-NoProfile",
-            "-NonInteractive",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-Command",
-            script,
-        ],
-        capture_output=True,
-        timeout=180,
-    )
+    command = [pwsh_executable, "-NoProfile", "-NonInteractive"]
+    if windows_pwsh(pwsh_executable):
+        command += ["-ExecutionPolicy", "Bypass"]
+    command += ["-Command", script]
+    completed = subprocess.run(command, capture_output=True, timeout=180)
     stdout = completed.stdout.decode("utf-8", "replace")
     stderr = completed.stderr.decode("utf-8", "replace")
     assert completed.returncode == 0, stderr + stdout
