@@ -9,6 +9,8 @@ static unsigned long long execution_builds[2]={},execution_samples[2]={};
 static unsigned short execution_input_ca[2][26]={};
 static bool execution_input_seen[2][26]={};
 static unsigned char execution_calculated_overall[2][26]={};
+static unsigned char execution_applied_record[2][26][34]={};
+static unsigned execution_player_samples[2][26]={};
 using ExecutionBuild=void(*)(void*,void*,void*,void*,void*,void*,void*,void*,void*,unsigned short);
 using ExecutionSample=void(*)(void*,uintptr_t,uintptr_t,void*,uintptr_t);
 static ExecutionBuild execution_original_build=nullptr;
@@ -22,6 +24,8 @@ static void execution_reset_match(){
  memset(execution_builds,0,sizeof(execution_builds));memset(execution_samples,0,sizeof(execution_samples));
  memset(execution_input_ca,0,sizeof(execution_input_ca));memset(execution_input_seen,0,sizeof(execution_input_seen));
  memset(execution_calculated_overall,0,sizeof(execution_calculated_overall));
+ memset(execution_applied_record,0,sizeof(execution_applied_record));
+ memset(execution_player_samples,0,sizeof(execution_player_samples));
 }
 static void execution_end_match(){
  execution_active=false;memset(execution_teams,0,sizeof(execution_teams));
@@ -33,13 +37,16 @@ static int execution_side(unsigned char* player){
  auto team=*(unsigned char**)(player+0x288);
  return !team?-1:team==execution_teams[0]?0:team==execution_teams[1]?1:-1;
 }
-static int execution_ability(const unsigned char* player,const int* components){
+static int execution_ability_from_components(unsigned raw,unsigned role,const int* components){
  if(components[Ability]>=0)return components[Ability];
  // The original builder derives these two bytes from CA and the IP/OOP role
  // evaluations. Reuse them and the original float operation order.
- const float effective=player[0xcd6]*4.0f;
- const float suitability=(player[0xcd7]*2.0f)/100.0f;
+ const float effective=raw*4.0f;
+ const float suitability=(role*2.0f)/100.0f;
  return (int)(effective*suitability*100.0f/800.0f+0.5f);
+}
+static int execution_ability(const unsigned char* player,const int* components){
+ return execution_ability_from_components(player[0xcd6],player[0xcd7],components);
 }
 static int execution_overall(const unsigned char* player,const int* components){
  return (50*components[Understanding]+25*components[BuyIn]+15*components[Opposition]+10*execution_ability(player,components)+50)/100;
@@ -64,13 +71,15 @@ static void execution_build(void* record,void* plan,void* history,void* exposure
  auto player=(unsigned char*)record-0xcba;int side=execution_side(player);
  if(side<0)return;
  execution_builds[side]++;
+ const auto calculated_overall=player[0xcd8];
+ execution_apply(player,side);
  for(unsigned i=0;i<26;i++)if(original_roster[side][i]==player){
   execution_input_ca[side][i]=ca;
   execution_input_seen[side][i]=true;
-  execution_calculated_overall[side][i]=player[0xcd8];
+  execution_calculated_overall[side][i]=calculated_overall;
+  if(!execution_player_samples[side][i])memcpy(execution_applied_record[side][i],player+0xcba,34);
   break;
  }
- execution_apply(player,side);
 }
 static void execution_sample(void* actor,uintptr_t a,uintptr_t b,void* rng,uintptr_t c){
  auto player=(unsigned char*)actor;int side=execution_side(player);
@@ -82,6 +91,12 @@ static void execution_sample(void* actor,uintptr_t a,uintptr_t b,void* rng,uintp
   const auto components=execution_components[side];
   if(components[Understanding]>=0&&(player[0xcd8]!=execution_overall(player,components)
       ||player[0xcd9]!=components[BuyIn]||player[0xcda]!=components[Opposition]))desktop_finish_and_exit(245);
+  for(unsigned i=0;i<26;i++)if(original_roster[side][i]==player){
+   if(!execution_input_seen[side][i])execution_input_ca[side][i]=*(uint16_t*)(player+0xc98);
+   memcpy(execution_applied_record[side][i],player+0xcba,34);
+   execution_player_samples[side][i]++;
+   break;
+  }
  }
  execution_original_sample(actor,a,b,rng,c);
 }
@@ -124,7 +139,7 @@ static void execution_install(unsigned char* match){
   }else if(c[Understanding]<0||c[BuyIn]<0||c[Opposition]<0)desktop_finish_and_exit(244);
  }
  if(strcmp(native_image_sha256,
-    "f79b0a3413dd0e3f461b0afbc3ff397003f4a26d7525a30717428de6a8b91196"))desktop_finish_and_exit(244);
+    "8c6971ce0b1c8afe6529ea3f46205a5175aea988a97d7421a980da42e23fe340"))desktop_finish_and_exit(244);
  execution_active=true;
  for(unsigned side=0;side<2;side++)execution_teams[side]=*(unsigned char**)(match+0x15380+8*side);
  constexpr unsigned version=0x1b000000u;
@@ -151,16 +166,19 @@ static void execution_snapshot(unsigned char* match,const char* stage){
    fputc('}',log_file);
   }
   fprintf(log_file,",\"build_calls\":%llu,\"sample_calls\":%llu,\"players\":[",execution_builds[side],execution_samples[side]);
+  // An early departure can leave an action sample without a builder call.
+  // Include the record actually applied by either hook.
+  bool first=true;
   for(unsigned i=0;i<team[0x72d];i++){
-   auto p=*(unsigned char**)(team+0x138+8*i);
-   fprintf(log_file,"%s{\"slot\":%u,\"overall\":%u,\"buy_in\":%u,\"next_match_information\":%u,\"raw_ability_component\":%u,\"role_suitability_component\":%u,",i?",":"",i,p[0xcd8],p[0xcd9],p[0xcda],p[0xcd6],p[0xcd7]);
-   if(execution_policy[side]<0)fprintf(log_file,"\"ability_contribution\":%d,",execution_ability(p,execution_components[side]));
-   for(unsigned j=0;j<26;j++)if(original_roster[side][j]==p&&execution_input_seen[side][j]){
-    fprintf(log_file,"\"input_roster_slot\":%u,\"input_ca\":%u,\"calculated_overall_before_override\":%u,",
-            j,execution_input_ca[side][j],execution_calculated_overall[side][j]);break;
-   }
+   if(!execution_input_seen[side][i]&&!execution_player_samples[side][i])continue;
+   const auto record=execution_applied_record[side][i];
+   fprintf(log_file,"%s{\"slot\":%u,\"overall\":%u,\"buy_in\":%u,\"next_match_information\":%u,\"raw_ability_component\":%u,\"role_suitability_component\":%u,",first?"":",",i,record[30],record[31],record[32],record[28],record[29]);
+   first=false;
+   if(execution_policy[side]<0)fprintf(log_file,"\"ability_contribution\":%d,",execution_ability_from_components(record[28],record[29],execution_components[side]));
+   fprintf(log_file,"\"input_roster_slot\":%u,\"input_ca\":%u,\"player_sample_calls\":%u,",i,execution_input_ca[side][i],execution_player_samples[side][i]);
+   if(execution_input_seen[side][i])fprintf(log_file,"\"calculated_overall_before_override\":%u,",execution_calculated_overall[side][i]);
    fputs("\"record_hex\":\"",log_file);
-   for(unsigned j=0;j<34;j++)fprintf(log_file,"%02x",p[0xcba+j]);fputs("\"}",log_file);
+   for(unsigned j=0;j<34;j++)fprintf(log_file,"%02x",record[j]);fputs("\"}",log_file);
   }
   fputs("]}\n",log_file);fflush(log_file);
  }

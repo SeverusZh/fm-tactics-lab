@@ -33,6 +33,71 @@ ROSTER_ERRORS: dict[str, str] = {
     "roster_invalid_source_uid": "存档球员标识无效",
     "roster_duplicate_source_uid": "存档球员标识重复",
 }
+DRAFT_PLAYER_KEYS = (
+    "source_uid",
+    "name",
+    "attributes",
+    "left_foot",
+    "right_foot",
+    "position",
+    "ability",
+    "age",
+    "height_cm",
+    "personality",
+)
+
+
+def _optional_int(value: Any) -> int | None:
+    if isinstance(value, int) and not isinstance(value, bool):
+        return value
+    return None
+
+
+def _squad_player(player: Mapping[str, Any]) -> dict[str, Any]:
+    if not isinstance(player, Mapping):
+        raise ValueError("存档名单球员无效")
+    entry = dict(player)
+    entry["name"] = entry.get("name") if isinstance(entry.get("name"), str) else ""
+    attributes = entry.get("attributes")
+    entry["attributes"] = (
+        [value for value in attributes if _optional_int(value) is not None]
+        if isinstance(attributes, list)
+        else []
+    )
+    for key in ("left_foot", "right_foot"):
+        entry[key] = _optional_int(entry.get(key))
+        entry[key] = 1 if entry[key] is None else entry[key]
+    entry["position"] = entry.get("position") if isinstance(entry.get("position"), str) else ""
+    for key in ("ability", "age", "height_cm"):
+        entry[key] = _optional_int(entry.get(key))
+    personality = entry.get("personality")
+    cleaned = (
+        {
+            str(key): value
+            for key, value in personality.items()
+            if _optional_int(value) is not None
+        }
+        if isinstance(personality, Mapping)
+        else {}
+    )
+    entry["personality"] = cleaned or None
+    display_name = entry.get("display_name")
+    entry["display_name"] = display_name if isinstance(display_name, str) and display_name else None
+    entry["shirt_number"] = _optional_int(entry.get("shirt_number"))
+    on_loan = entry.get("on_loan")
+    entry["on_loan"] = on_loan if isinstance(on_loan, bool) else None
+    parent = entry.get("loan_parent_club")
+    entry["loan_parent_club"] = (
+        parent if isinstance(parent, (str, int)) and not isinstance(parent, bool) else None
+    )
+    entry["loan_end"] = entry.get("loan_end") if isinstance(entry.get("loan_end"), str) else None
+    return entry
+
+
+def _draft_player(player: Mapping[str, Any]) -> dict[str, Any]:
+    return {key: player[key] for key in DRAFT_PLAYER_KEYS if key in player}
+
+
 ReaderFactory = Callable[[Path], Any]
 
 
@@ -117,7 +182,7 @@ class SaveImportService:
                 "save_id": save_id,
                 "club_uid": club_uid,
                 "club_name": payload.get("club_name") or payload.get("name"),
-                "players": list(payload.get("players") or []),
+                "players": [_squad_player(player) for player in payload.get("players") or []],
                 "selection": payload.get("selection"),
             }
         return None
@@ -322,7 +387,10 @@ class SaveImportService:
             raise ValueError(ROSTER_ERRORS.get(str(error), "存档名单无效")) from error
         if result.generated:
             raise ValueError("存档球队不足 23 名真实球员")
-        return {"players": [dict(player) for player in result.players], "lineup": list(result.lineup)}
+        return {
+            "players": [_draft_player(player) for player in result.players],
+            "lineup": list(result.lineup),
+        }
 
     @staticmethod
     def _team(scenario: Mapping[str, Any], side_index: int) -> dict[str, Any]:

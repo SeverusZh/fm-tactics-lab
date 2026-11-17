@@ -28,6 +28,22 @@ static bool compatible_image(const fs::path& path){
     if(!error)for(auto expected:compat_ranges){
         std::vector<unsigned char> actual(expected.size);
         if(!image.read(expected.rva,actual.data(),actual.size())){error="critical_range_unreadable";failed_rva=expected.rva;break;}
+#ifdef FM27_COMPAT_DIGEST_RANGES
+        BCRYPT_ALG_HANDLE algorithm = nullptr;
+        unsigned char digest[32] = {};
+        auto status = BCryptOpenAlgorithmProvider(&algorithm, BCRYPT_SHA256_ALGORITHM, nullptr, 0);
+        if (status >= 0) {
+            status = BCryptHash(algorithm, nullptr, 0, actual.data(), (ULONG)actual.size(), digest, sizeof(digest));
+            BCryptCloseAlgorithmProvider(algorithm, 0);
+        }
+        char hex[65] = {};
+        for (unsigned i = 0; i < sizeof(digest); ++i) sprintf_s(hex + 2 * i, 3, "%02x", digest[i]);
+        if (status < 0 || strcmp(hex, expected.sha256)) {
+            error = "critical_range_digest";
+            failed_rva = expected.rva;
+            break;
+        }
+#else
         if(!memcmp(actual.data(),expected.bytes,actual.size()))continue;
         bool executable=false;
         for(auto& s:image.sections)if(expected.rva>=s.VirtualAddress&&(uint64_t)expected.rva+expected.size<=(uint64_t)s.VirtualAddress+s.SizeOfRawData&&(s.Characteristics&IMAGE_SCN_MEM_EXECUTE))executable=true;
@@ -38,6 +54,7 @@ static bool compatible_image(const fs::path& path){
         }
         warnings++;
         fprintf(log_file,"{\"event\":\"native_engine_compatibility_warning\",\"reason\":\"function_body_unverified\",\"rva\":%u}\n",expected.rva);
+#endif
     }
     if(!error){
         IMAGE_TLS_DIRECTORY64 tls={};auto d=image.nt.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_TLS];

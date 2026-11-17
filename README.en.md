@@ -42,7 +42,7 @@ MCP client                       ─┘                                         
 
 - Desktop build and run: Windows x64, Python 3.12 x64, Node 22+, pnpm 11, Rust stable, MSVC C++17 with the Windows SDK, and WebView2.
 - Python, frontend and Rust core tests run on Linux.
-- A local FM27 installation; the adapter reference build is `27.0.1+2494687`.
+- A local FM27 installation from Steam or Epic; the adapter reference builds are `27.0.1+2503222` for Steam and `27.0.1+epic` for Epic, and the native host is built locally.
 - An engine workspace containing `fm27_native/FM27Simulator.exe` and `catalog.json`; the catalog may sit at the workspace root or under `fm27_native/`.
 
 ### Install dependencies
@@ -148,7 +148,7 @@ docs/       Development, interface, verification and fidelity docs
 
 The current branch is `main`, the source version `2.0.0.dev0` (the frontend package version is `2.0.0-dev`), and the API version `fm27lab/v2`. No v2 installer has been released yet; remaining release items are tracked in [TODO](TODO.md). For stable versions, use the upstream Releases.
 
-The new version starts with an empty SQLite database and does not migrate older experiment data; view or resume older jobs in the previous version. The supported platform is Windows x64, the adapter reference build is `27.0.1+2494687`, and the game engine and resources come from your local installation.
+The new version starts with an empty SQLite database and does not migrate older experiment data; view or resume older jobs in the previous version. The supported platform is Windows x64, the adapter reference builds are `27.0.1+2503222` for Steam and `27.0.1+epic` for Epic, and the game engine and resources come from your local installation.
 
 ## Documentation
 

@@ -461,6 +461,64 @@ const SQUAD = {
   selection: { club_uid: 7, team_id: 22, team_slot: 0, lineup: [101, 102], substitutes: [103, 104, 105] },
 };
 
+const IDENTITY_SQUAD = {
+  save_id: "save-1",
+  club_uid: 7,
+  club_name: "阿森纳",
+  players: [
+    {
+      source_uid: 101,
+      name: "Bukayo Saka",
+      display_name: "萨卡",
+      position: "AMR",
+      ability: 168,
+      shirt_number: 7,
+    },
+    {
+      source_uid: 102,
+      name: "Declan Rice",
+      display_name: "赖斯",
+      position: "MC",
+      ability: 172,
+      shirt_number: 41,
+      on_loan: true,
+      loan_parent_club: "母队",
+      loan_end: "2029-07-01",
+    },
+    {
+      source_uid: 103,
+      name: "Kai Havertz",
+      display_name: "哈弗茨",
+      position: "ST",
+      ability: 160,
+      shirt_number: null,
+      on_loan: false,
+    },
+    {
+      source_uid: 104,
+      name: "青训球员",
+      position: "MC",
+      ability: 120,
+    },
+    {
+      source_uid: 105,
+      name: "租借中卫",
+      position: "DC",
+      ability: 140,
+      shirt_number: 4,
+      on_loan: true,
+      loan_parent_club: 321,
+    },
+  ],
+  selection: {
+    club_uid: 7,
+    team_id: 22,
+    team_slot: 0,
+    lineup: [101, 102],
+    substitutes: [103, 104, 105],
+  },
+};
+
 function managedSave(): Save {
   return makeSave({ metadata: { managed_club_uids: [7] } });
 }
@@ -688,6 +746,72 @@ describe("存档球队名单", () => {
     fireEvent.click(within(alert).getByRole("button", { name: "重试" }));
     expect(await within(section).findByText("萨卡")).toBeInTheDocument();
     expect(attempts).toBe(2);
+  });
+
+  it("名单展示球衣号、显示名与租借徽标", async () => {
+    stubFetch((url) => {
+      if (url.includes("/squad")) return jsonResponse(IDENTITY_SQUAD);
+      if (url.includes("/api/drafts")) {
+        return jsonResponse({ items: [], total: 0, next_offset: null });
+      }
+      return jsonResponse(makeList([managedSave()]));
+    });
+    renderLibraryPage();
+    await screen.findByText("/saves/season-1.fm");
+
+    const section = await openSquad();
+    expect(await within(section).findByText("萨卡")).toBeInTheDocument();
+    expect(within(section).getByRole("columnheader", { name: "号码" })).toBeInTheDocument();
+
+    const saka = screen.getByText("萨卡");
+    expect(saka.getAttribute("title")).toBe("Bukayo Saka");
+    const sakaRow = saka.closest("tr");
+    if (sakaRow === null) throw new Error("未找到萨卡所在行");
+    expect(within(sakaRow).getByText("7")).toBeInTheDocument();
+    expect(within(sakaRow).getByText("Bukayo Saka")).toBeInTheDocument();
+    expect(within(sakaRow).queryByText("租借")).not.toBeInTheDocument();
+
+    const riceRow = screen.getByText("赖斯").closest("tr");
+    if (riceRow === null) throw new Error("未找到赖斯所在行");
+    expect(within(riceRow).getByText("41")).toBeInTheDocument();
+    expect(within(riceRow).getByText("租借").getAttribute("title")).toBe(
+      "租借中 · 自 母队 · 至 2029-07-01",
+    );
+
+    const havertzRow = screen.getByText("哈弗茨").closest("tr");
+    if (havertzRow === null) throw new Error("未找到哈弗茨所在行");
+    expect(within(havertzRow).getByText("—")).toBeInTheDocument();
+    expect(within(havertzRow).queryByText("租借")).not.toBeInTheDocument();
+
+    const loanRow = screen.getByText("租借中卫").closest("tr");
+    if (loanRow === null) throw new Error("未找到租借中卫所在行");
+    expect(within(loanRow).getByText("租借").getAttribute("title")).toBe(
+      "租借中 · 自 俱乐部 321",
+    );
+
+    const youthRow = screen.getByText("青训球员").closest("tr");
+    if (youthRow === null) throw new Error("未找到青训球员所在行");
+    expect(within(youthRow).queryByText("租借")).not.toBeInTheDocument();
+    expect(within(youthRow).getByText("青训球员")).toBeInTheDocument();
+  });
+
+  it("名单没有球衣号时不渲染号码列与租借徽标", async () => {
+    stubFetch((url) => {
+      if (url.includes("/squad")) return jsonResponse(SQUAD);
+      if (url.includes("/api/drafts")) {
+        return jsonResponse({ items: [], total: 0, next_offset: null });
+      }
+      return jsonResponse(makeList([managedSave()]));
+    });
+    renderLibraryPage();
+    await screen.findByText("/saves/season-1.fm");
+
+    const section = await openSquad();
+    expect(await within(section).findByText("萨卡")).toBeInTheDocument();
+    expect(
+      within(section).queryByRole("columnheader", { name: "号码" }),
+    ).not.toBeInTheDocument();
+    expect(within(section).queryByText("租借")).not.toBeInTheDocument();
   });
 });
 

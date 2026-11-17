@@ -553,8 +553,26 @@ export interface SquadOutput {
   save_id: string;
   club_uid: number;
   club_name: string | null;
-  players: { [key: string]: unknown }[];
+  players: SquadPlayerOutput[];
   selection: { [key: string]: unknown } | null;
+}
+
+export interface SquadPlayerOutput {
+  source_uid: number | string;
+  name: string;
+  attributes: number[];
+  left_foot: number;
+  right_foot: number;
+  position: string;
+  ability: number | null;
+  age: number | null;
+  height_cm: number | null;
+  personality?: { [key: string]: number } | null;
+  display_name?: string | null;
+  shirt_number?: number | null;
+  on_loan?: boolean | null;
+  loan_parent_club?: string | number | null;
+  loan_end?: string | null;
 }
 
 export interface SystemResourcesOutput {

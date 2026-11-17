@@ -3044,8 +3044,7 @@
           },
           "players": {
             "items": {
-              "additionalProperties": true,
-              "type": "object"
+              "$ref": "#/components/schemas/SquadPlayerOutput"
             },
             "title": "Players",
             "type": "array"
@@ -3075,6 +3074,162 @@
           "selection"
         ],
         "title": "SquadOutput",
+        "type": "object"
+      },
+      "SquadPlayerOutput": {
+        "properties": {
+          "ability": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ability"
+          },
+          "age": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Age"
+          },
+          "attributes": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Attributes",
+            "type": "array"
+          },
+          "display_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Name"
+          },
+          "height_cm": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Height Cm"
+          },
+          "left_foot": {
+            "title": "Left Foot",
+            "type": "integer"
+          },
+          "loan_end": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Loan End"
+          },
+          "loan_parent_club": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Loan Parent Club"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "on_loan": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "On Loan"
+          },
+          "personality": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "integer"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Personality"
+          },
+          "position": {
+            "title": "Position",
+            "type": "string"
+          },
+          "right_foot": {
+            "title": "Right Foot",
+            "type": "integer"
+          },
+          "shirt_number": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Shirt Number"
+          },
+          "source_uid": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "title": "Source Uid"
+          }
+        },
+        "required": [
+          "source_uid",
+          "name",
+          "attributes",
+          "left_foot",
+          "right_foot",
+          "position",
+          "ability",
+          "age",
+          "height_cm"
+        ],
+        "title": "SquadPlayerOutput",
         "type": "object"
       },
       "SystemResourcesOutput": {

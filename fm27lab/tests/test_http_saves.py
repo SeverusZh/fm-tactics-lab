@@ -490,3 +490,94 @@ def test_save_http_service_injection_and_duplicate_id_conflict(tmp_path: Path):
     conflict = fake_client.post("/api/saves", json=save_payload(), headers=headers)
     assert_error(conflict, 409, "conflict")
     assert_error(fake_client.get("/api/saves/none", headers=headers), 404, "not_found")
+
+def test_save_http_import_payload_players_read_back_with_defaults(tmp_path: Path):
+    app, settings, _, _ = make_app(tmp_path)
+    client = TestClient(app)
+    headers = auth(settings)
+    created = create_save(client, headers, status="reading")
+    save_id = created["id"]
+
+    imported = client.post(
+        f"/api/saves/{save_id}/import",
+        json={
+            "leagues": {},
+            "clubs": {"10": {"name": "甲", "players": [{"source_uid": 5, "name": "球员"}]}},
+        },
+        headers=headers,
+    )
+    assert imported.status_code == 200
+
+    response = client.get(f"/api/saves/{save_id}/squad?club_uid=10", headers=headers)
+
+    assert response.status_code == 200, response.text
+    player = response.json()["players"][0]
+    assert player["source_uid"] == 5
+    assert player["name"] == "球员"
+    assert player["attributes"] == []
+    assert player["left_foot"] == 1
+    assert player["right_foot"] == 1
+    assert player["position"] == ""
+    assert player["ability"] is None
+
+
+def test_save_http_squad_tolerates_badly_typed_stored_players(tmp_path: Path):
+    app, settings, _, _ = make_app(tmp_path)
+    client = TestClient(app)
+    headers = auth(settings)
+    created = create_save(client, headers, status="reading")
+    save_id = created["id"]
+    app.state.saves.set_club(
+        save_id,
+        7,
+        {
+            "players": [
+                {
+                    "source_uid": 3,
+                    "name": "旧记录",
+                    "attributes": None,
+                    "ability": "high",
+                    "position": 5,
+                    "left_foot": "x",
+                    "right_foot": None,
+                    "personality": {"a": "b"},
+                }
+            ]
+        },
+    )
+
+    response = client.get(f"/api/saves/{save_id}/squad?club_uid=7", headers=headers)
+
+    assert response.status_code == 200, response.text
+    player = response.json()["players"][0]
+    assert player["attributes"] == []
+    assert player["ability"] is None
+    assert player["position"] == ""
+    assert player["left_foot"] == 1
+    assert player["right_foot"] == 1
+    assert player["personality"] is None
+
+
+def test_save_http_import_payload_rejects_invalid_players(tmp_path: Path):
+    app, settings, _, _ = make_app(tmp_path)
+    client = TestClient(app)
+    headers = auth(settings)
+    created = create_save(client, headers, status="reading")
+    save_id = created["id"]
+    app.state.saves.set_club(save_id, 7, {"v": 1})
+
+    invalid = (
+        {"leagues": {}, "clubs": {"10": {"players": "bad"}}},
+        {"leagues": {}, "clubs": {"10": {"players": [{"name": "无标识"}]}}},
+        {"leagues": {}, "clubs": {"10": {"players": [{"source_uid": 5}]}}},
+        {"leagues": {}, "clubs": {"10": {"players": ["bad"]}}},
+        {"leagues": {}, "clubs": {"10": {"players": [{"source_uid": 5, "name": "x", "attributes": None}]}}},
+        {"leagues": {}, "clubs": {"10": {"players": [{"source_uid": 5, "name": "x", "ability": "high"}]}}},
+        {"leagues": {}, "clubs": {"10": {"players": [{"source_uid": 5, "name": "x", "position": 5}]}}},
+        {"leagues": {}, "clubs": {"10": {"players": [{"source_uid": 5, "name": "x", "left_foot": "x"}]}}},
+        {"leagues": {}, "clubs": {"10": {"players": [{"source_uid": 5, "name": "x", "personality": {"a": "b"}}]}}},
+    )
+    for payload in invalid:
+        response = client.post(f"/api/saves/{save_id}/import", json=payload, headers=headers)
+        assert_error(response, 400, "validation_failed")
+        assert [row["club_uid"] for row in app.state.saves.clubs(save_id)] == [7]

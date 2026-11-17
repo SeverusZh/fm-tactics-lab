@@ -1,4 +1,4 @@
-// API 类型映射：生成别名 47 项；保留手写类型 25 项；字段派生 2 项；ApiError 类保留；明细见 api-types.test.ts。
+// API 类型映射：生成别名 48 项；保留手写类型 24 项；字段派生 2 项；ApiError 类保留；明细见 api-types.test.ts。
 
 import type { Connection } from "./connection";
 import type {
@@ -47,6 +47,7 @@ import type {
   SettingListOutput,
   SettingOutput,
   SettingPutInput,
+  SquadPlayerOutput,
   SystemResourcesOutput,
   TacticsTemplateOutput,
 } from "./api-schema";
@@ -713,15 +714,9 @@ export type ImportedClub = ImportedClubOutput;
 
 export type SaveFileImportResult = SaveFileImportOutput;
 
-// squad 负载在 OpenAPI 中是不透明对象，保留手写结构。
-export type SquadPlayer = {
-  source_uid: number | string;
-  name: string;
-  position: string;
-  ability: number | null;
-};
+export type SquadPlayer = SquadPlayerOutput;
 
-// squad 负载在 OpenAPI 中是不透明对象，保留手写结构。
+// 存档球队的 selection 负载在 OpenAPI 中仍是不透明对象，保留手写结构。
 export type SquadSelection = {
   club_uid?: number;
   team_id?: number | null;
@@ -730,7 +725,7 @@ export type SquadSelection = {
   substitutes: (number | string)[];
 };
 
-// squad 负载在 OpenAPI 中是不透明对象，保留手写结构。
+// selection 负载需要页面侧的字面量结构，SaveSquad 保留手写并复用生成的球员类型。
 export type SaveSquad = {
   save_id: string;
   club_uid: number;

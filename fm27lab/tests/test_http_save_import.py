@@ -29,7 +29,18 @@ HTTP_METHODS = {"get", "post", "patch", "put", "delete", "options", "head"}
 def save_player(uid: int, *, goalkeeper: bool = False) -> dict[str, Any]:
     attributes = [10] * ATTRIBUTE_COUNT
     attributes[0 if goalkeeper else 7] = 18
-    return {"source_uid": uid, "name": f"S{uid}", "attributes": attributes, "ability": 12}
+    return {
+        "source_uid": uid,
+        "name": f"S{uid}",
+        "display_name": f"S{uid}",
+        "attributes": attributes,
+        "left_foot": 12,
+        "right_foot": 8,
+        "position": "GK" if goalkeeper else "MC",
+        "ability": 12,
+        "age": 24,
+        "height_cm": 182,
+    }
 
 
 def draft_player(uid: int, *, goalkeeper: bool = False) -> dict[str, Any]:
@@ -293,6 +304,71 @@ def test_http_save_import_creates_ready_save_and_reads_squad(tmp_path: Path):
         assert response.json()["error"]["code"] == "validation_failed", query
 
 
+def test_http_save_import_squad_passes_display_identity(tmp_path: Path):
+    app, settings, service = make_import_app(tmp_path)
+    client = TestClient(app)
+    headers = auth(settings)
+    players = service.reader_factory.data["squads"][7]
+    players[0].update(
+        {
+            "display_name": "萨卡",
+            "shirt_number": 7,
+            "on_loan": True,
+            "loan_parent_club": "母队",
+            "loan_end": "2029-07-01",
+        }
+    )
+    players[1].update({"display_name": "赖斯", "shirt_number": None})
+    players[2].update({"on_loan": False})
+
+    imported = import_save(client, headers, source_file(tmp_path))
+    response = client.get(
+        f"/api/saves/{imported['save_id']}/squad",
+        params={"club_uid": 7},
+        headers=headers,
+    )
+    assert response.status_code == 200
+    body = response.json()
+    loaned, ambiguous, not_loaned = body["players"][:3]
+    assert loaned["name"] == "S500"
+    assert loaned["display_name"] == "萨卡"
+    assert loaned["shirt_number"] == 7
+    assert loaned["on_loan"] is True
+    assert loaned["loan_parent_club"] == "母队"
+    assert loaned["loan_end"] == "2029-07-01"
+    assert ambiguous["display_name"] == "赖斯"
+    assert ambiguous["shirt_number"] is None
+    assert ambiguous["on_loan"] is None
+    assert not_loaned["on_loan"] is False
+    assert not_loaned["shirt_number"] is None
+
+
+def test_http_save_import_squad_tolerates_payload_without_identity(tmp_path: Path):
+    app, settings, service = make_import_app(tmp_path)
+    client = TestClient(app)
+    headers = auth(settings)
+    for player in service.reader_factory.data["squads"][7]:
+        for key in (
+            "display_name",
+            "shirt_number",
+            "on_loan",
+            "loan_parent_club",
+            "loan_end",
+        ):
+            player.pop(key, None)
+
+    imported = import_save(client, headers, source_file(tmp_path))
+    response = client.get(
+        f"/api/saves/{imported['save_id']}/squad",
+        params={"club_uid": 7},
+        headers=headers,
+    )
+    assert response.status_code == 200
+    first = response.json()["players"][0]
+    for key in ("display_name", "shirt_number", "on_loan", "loan_parent_club", "loan_end"):
+        assert first[key] is None
+
+
 def test_http_save_import_duplicate_conflicts_and_replace_reuses_id(tmp_path: Path):
     app, settings, _ = make_import_app(tmp_path)
     client = TestClient(app)
@@ -533,6 +609,51 @@ def test_http_save_import_openapi_contract(tmp_path: Path):
     assert set(apply_input["properties"]) == {"save_id", "club_uid", "side", "scope"}
     assert set(apply_input["required"]) == {"save_id", "club_uid", "side", "scope"}
     assert apply_input["additionalProperties"] is False
+    squad_output = components["SquadOutput"]
+    assert set(squad_output["properties"]) == {
+        "save_id",
+        "club_uid",
+        "club_name",
+        "players",
+        "selection",
+    }
+    assert set(squad_output["required"]) == {
+        "save_id",
+        "club_uid",
+        "club_name",
+        "players",
+        "selection",
+    }
+    assert squad_output["properties"]["players"]["items"]["$ref"].endswith("SquadPlayerOutput")
+    squad_player = components["SquadPlayerOutput"]
+    assert set(squad_player["properties"]) == {
+        "source_uid",
+        "name",
+        "attributes",
+        "left_foot",
+        "right_foot",
+        "position",
+        "ability",
+        "age",
+        "height_cm",
+        "personality",
+        "display_name",
+        "shirt_number",
+        "on_loan",
+        "loan_parent_club",
+        "loan_end",
+    }
+    assert set(squad_player["required"]) == {
+        "source_uid",
+        "name",
+        "attributes",
+        "left_foot",
+        "right_foot",
+        "position",
+        "ability",
+        "age",
+        "height_cm",
+    }
     assert document["components"]["securitySchemes"]["HTTPBearer"]["scheme"] == "bearer"
 
 

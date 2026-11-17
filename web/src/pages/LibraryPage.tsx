@@ -26,6 +26,7 @@ import {
   type SaveFileImportResult,
   type SaveStatus,
   type SaveTactic,
+  type SquadPlayer,
 } from "../lib/api";
 import { addSaveTacticToPool, exportSaveTacticFmf, fmfDownloadName } from "../lib/api-save-tactics";
 import { downloadBlob } from "../lib/download";
@@ -132,6 +133,22 @@ function mentalityLabel(value: number | null): string {
 function teamSlotLabel(value: number | null): string {
   if (value === null) return "—";
   return value === 0 ? "一线队" : `槽位 ${value}`;
+}
+
+function playerDisplayName(player: SquadPlayer): string {
+  const value = player.display_name ?? player.name;
+  return value === "" ? "—" : value;
+}
+
+function loanTitle(player: SquadPlayer): string {
+  const parent =
+    typeof player.loan_parent_club === "number"
+      ? `俱乐部 ${player.loan_parent_club}`
+      : player.loan_parent_club;
+  const parts = ["租借中"];
+  if (parent) parts.push(`自 ${parent}`);
+  if (player.loan_end) parts.push(`至 ${player.loan_end}`);
+  return parts.join(" · ");
 }
 
 function tacticImportBlocker(tactic: SaveTactic): string | null {
@@ -845,6 +862,11 @@ export function LibraryPage() {
     </section>
   );
 
+  const squadPlayers = squadData?.players ?? [];
+  const hasShirtNumbers = squadPlayers.some(
+    (player) => typeof player.shirt_number === "number",
+  );
+
   let squadPanel: ReactNode = null;
   if (squadClubUid !== null) {
     if (squad.isPending) {
@@ -883,19 +905,54 @@ export function LibraryPage() {
                   <caption className="sr-only">存档球队球员名单</caption>
                   <thead>
                     <tr>
+                      {hasShirtNumbers ? <th scope="col">号码</th> : null}
                       <th scope="col">姓名</th>
                       <th scope="col">位置</th>
                       <th scope="col">能力</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {squadData.players.map((player) => (
-                      <tr key={String(player.source_uid)}>
-                        <td>{player.name === "" ? "—" : player.name}</td>
-                        <td className="jobs-kind">{player.position === "" ? "—" : player.position}</td>
-                        <td className="jobs-number">{player.ability ?? "—"}</td>
-                      </tr>
-                    ))}
+                    {squadPlayers.map((player) => {
+                      const displayName = playerDisplayName(player);
+                      const originalName =
+                        player.name !== "" && player.name !== displayName ? player.name : null;
+                      const loaned = player.on_loan === true;
+                      return (
+                        <tr key={String(player.source_uid)}>
+                          {hasShirtNumbers ? (
+                            <td className="jobs-number saves-shirt-number">
+                              {typeof player.shirt_number === "number" ? player.shirt_number : "—"}
+                            </td>
+                          ) : null}
+                          <td>
+                            <div className="saves-player-cell">
+                              <span
+                                className="saves-player-name"
+                                title={originalName ?? undefined}
+                              >
+                                {displayName}
+                              </span>
+                              {originalName === null ? null : (
+                                <span className="saves-player-raw">{originalName}</span>
+                              )}
+                              {loaned ? (
+                                <span
+                                  className="badge saves-loan-badge"
+                                  data-tone="warn"
+                                  title={loanTitle(player)}
+                                >
+                                  租借
+                                </span>
+                              ) : null}
+                            </div>
+                          </td>
+                          <td className="jobs-kind">
+                            {player.position === "" ? "—" : player.position}
+                          </td>
+                          <td className="jobs-number">{player.ability ?? "—"}</td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>

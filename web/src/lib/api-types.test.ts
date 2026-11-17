@@ -64,6 +64,7 @@ const ALIASES: AliasCase[] = [
   { name: "RosterApplyResult", generated: "RosterApplyOutput" },
   { name: "RosterUndoResult", generated: "RosterUndoOutput" },
   { name: "RosterApplied", generated: "RosterAppliedOutput" },
+  { name: "SquadPlayer", generated: "SquadPlayerOutput" },
   { name: "TacticsTemplate", generated: "TacticsTemplateOutput" },
 ];
 
@@ -85,7 +86,6 @@ const RETAINED: { name: string; declaration: string }[] = [
   { name: "Catalog", declaration: "export type Catalog = {" },
   { name: "CatalogResponse", declaration: "export type CatalogResponse = {" },
   { name: "ConcurrencyCheckQuery", declaration: "export type ConcurrencyCheckQuery = {" },
-  { name: "SquadPlayer", declaration: "export type SquadPlayer = {" },
   { name: "SquadSelection", declaration: "export type SquadSelection = {" },
   { name: "SaveSquad", declaration: "export type SaveSquad = {" },
   { name: "DraftAttributeSide", declaration: 'export type DraftAttributeSide = "home" | "away";' },
@@ -155,8 +155,8 @@ describe("api.ts 类型映射", () => {
     expect(apiSource.split("\n")[0]).toBe(summary);
     expect(mappedNames()).toHaveLength(74);
     expect(new Set(mappedNames()).size).toBe(74);
-    expect(ALIASES).toHaveLength(47);
-    expect(RETAINED).toHaveLength(25);
+    expect(ALIASES).toHaveLength(48);
+    expect(RETAINED).toHaveLength(24);
     expect(DERIVED).toHaveLength(2);
   });
 

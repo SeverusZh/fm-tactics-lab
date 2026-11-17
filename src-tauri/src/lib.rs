@@ -1,14 +1,15 @@
 use std::{
+    collections::VecDeque,
     env,
     ffi::OsStr,
     fs::File,
     io::{BufRead, BufReader, Read, Write},
     net::{SocketAddr, TcpStream},
-    path::PathBuf,
-    process::{Child, Command, Stdio},
+    path::{Path, PathBuf},
+    process::{Child, ChildStderr, Command, Stdio},
     sync::{
         atomic::{AtomicBool, AtomicUsize, Ordering},
-        mpsc, Mutex,
+        mpsc, Arc, Mutex,
     },
     thread,
     time::{Duration, Instant},
@@ -362,6 +363,70 @@ fn take_dead_child(state: &SidecarState) -> Option<Child> {
     }
 }
 
+fn capture_stderr(stderr: ChildStderr, log_path: PathBuf) -> Arc<Mutex<VecDeque<String>>> {
+    let tail = Arc::new(Mutex::new(VecDeque::with_capacity(
+        supervisor::STDERR_TAIL_LINES,
+    )));
+    let shared = Arc::clone(&tail);
+    thread::spawn(move || {
+        let mut file = File::create(&log_path).ok();
+        let mut reader = BufReader::new(stderr);
+        let mut buffer = Vec::new();
+        loop {
+            buffer.clear();
+            match reader.read_until(b'\n', &mut buffer) {
+                Ok(0) => break,
+                Ok(_) => {
+                    if let Some(file) = file.as_mut() {
+                        let _ = file.write_all(&buffer);
+                    }
+                    let text = String::from_utf8_lossy(&buffer);
+                    let line = text.trim_end_matches(&['\r', '\n'][..]).to_string();
+                    if let Ok(mut guard) = shared.lock() {
+                        if guard.len() == supervisor::STDERR_TAIL_LINES {
+                            guard.pop_front();
+                        }
+                        guard.push_back(line);
+                    }
+                }
+                Err(_) => break,
+            }
+        }
+    });
+    tail
+}
+
+fn stderr_tail(tail: &Option<Arc<Mutex<VecDeque<String>>>>) -> Vec<String> {
+    tail.as_ref()
+        .and_then(|shared| shared.lock().ok())
+        .map(|guard| guard.iter().cloned().collect())
+        .unwrap_or_default()
+}
+
+fn sidecar_failure(
+    reason: &str,
+    child: &mut Child,
+    log_path: &Path,
+    tail: &Option<Arc<Mutex<VecDeque<String>>>>,
+    data_dir: &Path,
+) -> String {
+    let exit = match child.try_wait() {
+        Ok(Some(status)) => status.code(),
+        _ => None,
+    };
+    let log = if log_path.exists() {
+        Some(log_path)
+    } else {
+        None
+    };
+    let mut message = supervisor::startup_failure(reason, exit, log, &stderr_tail(tail));
+    let diagnostic = data_dir.join("logs").join("startup-error.txt");
+    if std::fs::write(&diagnostic, format!("{message}\n")).is_ok() {
+        message.push_str(&format!("; diagnostic: {}", diagnostic.display()));
+    }
+    message
+}
+
 fn start_sidecar(app: &AppHandle) -> Result<ConnectionInfo, String> {
     start_sidecar_inner(app, false)
 }
@@ -411,19 +476,23 @@ fn start_sidecar_inner(app: &AppHandle, allow_restart: bool) -> Result<Connectio
     let mut child = command
         .spawn()
         .map_err(|error| format!("cannot start sidecar {program:?}: {error}"))?;
-    if let Some(mut stderr) = child.stderr.take() {
-        let log_path = log_dir.join(format!("sidecar-{}.stderr.log", child.id()));
-        thread::spawn(move || {
-            if let Ok(mut file) = File::create(log_path) {
-                let _ = std::io::copy(&mut stderr, &mut file);
-            }
-        });
-    }
+    let log_path = log_dir.join(format!("sidecar-{}.stderr.log", child.id()));
+    let tail = child
+        .stderr
+        .take()
+        .map(|stderr| capture_stderr(stderr, log_path.clone()));
     let Some(stdout) = child.stdout.take() else {
+        let message = sidecar_failure(
+            "sidecar stdout is unavailable",
+            &mut child,
+            &log_path,
+            &tail,
+            &data_dir,
+        );
         let _ = child.kill();
         let _ = child.wait();
         remove_endpoint(&data_dir);
-        return Err("sidecar stdout is unavailable".to_string());
+        return Err(message);
     };
     let (sender, receiver) = mpsc::channel();
     thread::spawn(move || {
@@ -437,10 +506,17 @@ fn start_sidecar_inner(app: &AppHandle, allow_restart: bool) -> Result<Connectio
     let connection = loop {
         let now = Instant::now();
         if now >= deadline {
+            let message = sidecar_failure(
+                "sidecar did not report readiness within 30 seconds",
+                &mut child,
+                &log_path,
+                &tail,
+                &data_dir,
+            );
             let _ = child.kill();
             let _ = child.wait();
             remove_endpoint(&data_dir);
-            return Err("sidecar did not report readiness within 30 seconds".to_string());
+            return Err(message);
         }
         match receiver.recv_timeout(deadline - now) {
             Ok(line) => {
@@ -449,10 +525,17 @@ fn start_sidecar_inner(app: &AppHandle, allow_restart: bool) -> Result<Connectio
                 }
             }
             Err(_) => {
+                let message = sidecar_failure(
+                    "sidecar closed before readiness",
+                    &mut child,
+                    &log_path,
+                    &tail,
+                    &data_dir,
+                );
                 let _ = child.kill();
                 let _ = child.wait();
                 remove_endpoint(&data_dir);
-                return Err("sidecar closed before readiness".to_string());
+                return Err(message);
             }
         }
     };
@@ -474,11 +557,18 @@ fn start_sidecar_inner(app: &AppHandle, allow_restart: bool) -> Result<Connectio
         }
         thread::sleep(Duration::from_millis(200));
     }
+    let message = sidecar_failure(
+        "sidecar health check did not become ready",
+        &mut child,
+        &log_path,
+        &tail,
+        &data_dir,
+    );
     let _ = child.kill();
     let _ = child.wait();
     remove_endpoint(&data_dir);
     clear_connection(&state);
-    Err("sidecar health check did not become ready".to_string())
+    Err(message)
 }
 
 fn monitor(app: AppHandle) {
@@ -867,6 +957,43 @@ mod tests {
         assert!(normalize_external_url("https://example.com/\"calc").is_err());
         assert!(normalize_external_url("https://example.com/`calc").is_err());
         assert!(normalize_external_url("https://example.com/?a=1&b=2").is_ok());
+    }
+
+    #[test]
+    fn sidecar_failure_keeps_exit_code_log_and_diagnostic() {
+        let data_dir =
+            std::env::temp_dir().join(format!("fm27lab-diagnostic-{}", std::process::id()));
+        std::fs::create_dir_all(data_dir.join("logs")).unwrap();
+        let log_path = data_dir.join("logs").join("sidecar-1.stderr.log");
+        std::fs::write(&log_path, "boom\n").unwrap();
+        let mut command = if cfg!(windows) {
+            let mut command = Command::new("cmd");
+            command.args(["/C", "exit", "3"]);
+            command
+        } else {
+            let mut command = Command::new("sh");
+            command.args(["-c", "exit 3"]);
+            command
+        };
+        let mut child = command.spawn().unwrap();
+        let _ = child.wait();
+        let tail = Some(std::sync::Arc::new(std::sync::Mutex::new(
+            std::collections::VecDeque::from(vec!["first".to_string(), "boom".to_string()]),
+        )));
+        let message = sidecar_failure(
+            "sidecar closed before readiness",
+            &mut child,
+            &log_path,
+            &tail,
+            &data_dir,
+        );
+        assert!(message.contains("exit code 3"), "{message}");
+        assert!(message.contains("sidecar-1.stderr.log"), "{message}");
+        assert!(message.contains("last stderr: first | boom"), "{message}");
+        let diagnostic =
+            std::fs::read_to_string(data_dir.join("logs").join("startup-error.txt")).unwrap();
+        assert!(diagnostic.contains("sidecar closed before readiness"));
+        let _ = std::fs::remove_dir_all(data_dir);
     }
 
     #[test]

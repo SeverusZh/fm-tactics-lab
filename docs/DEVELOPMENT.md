@@ -9,7 +9,7 @@ The v2 refactor uses Tauri 2 + Rust for the desktop shell, Python 3.12 for the s
 - Windows x64 for the desktop build; Linux is supported for Python, frontend and Rust core tests.
 - Python 3.12 x64, Node 22+, pnpm 11, Rust stable and MSVC C++17 with the Windows SDK.
 - WebView2 on the target machine.
-- A local FM27 installation; the adapter reference build is `27.0.1+2494687`.
+- A local FM27 installation from Steam or Epic; the adapter reference builds are `27.0.1+2503222` for Steam and `27.0.1+epic` for Epic.
 
 ### Python sidecar
 
@@ -96,7 +96,11 @@ The script checks the original EXE and embedded payload SHA256, then reads only 
 In an **x64 Native Tools Command Prompt for Visual Studio**:
 
 ```bat
-.venv\Scripts\python.exe scripts\build_native.py --reference-dll "D:\Games\Football Manager 27\fm_Data\Plugins\x86_64\game_plugin.dll"
+# Steam 参考构建 27.0.1+2503222
+.venv\Scripts\python.exe scripts\build_native.py --platform steam --reference-dll "D:\Games\Football Manager 27\fm_Data\Plugins\x86_64\game_plugin.dll"
+
+# Epic 参考构建 27.0.1+epic，需要 Epic 版 game_plugin.dll
+.venv\Scripts\python.exe scripts\build_native.py --platform epic --reference-dll "C:\path\to\Epic\game_plugin.dll"
 ```
 
 The public repository contains range metadata and digests. The script reconstructs comparison bytes from the exact reference DLL on your machine, verifies every range, then compiles the checked-in C++ host. Generated function bytes remain in ignored local outputs.

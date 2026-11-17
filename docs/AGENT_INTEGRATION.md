@@ -417,7 +417,7 @@ drafts_formation 只做预览：按阵型模板与名单位置熟悉度返回排
 - 字段 id、source_path、source_sha256、status、stage、metadata、created_at、updated_at。
 - 状态流转：pending 到 reading、error、cancelled；reading 到 ready、error、cancelled；ready、error、cancelled 为终态。证据 fm27lab/application/saves.py:12-18。
 - 导入分两个接口：POST /api/saves/import 从源文件登记并读取存档，返回 save_id、status、managed_clubs、clubs；POST /api/saves/{save_id}/import 上传 leagues 与 clubs 结构。证据 fm27lab/interfaces/http/routes/saves.py。
-- GET /api/saves/{save_id}/squad?club_uid= 返回球队名单与当前选择；club_uid 取值 1 到 2147483647。
+- GET /api/saves/{save_id}/squad?club_uid= 返回球队名单与当前选择；club_uid 取值 1 到 2147483647。球员条目在既有字段之外可带 display_name、shirt_number、on_loan、loan_parent_club 与 loan_end：reader 读取的名单 display_name 始终返回（本地化名或原名回退），payload 导入的历史条目可能为 null 并由前端回退原名，shirt_number 只对已验证构建 27.0.0+2486695 与 27.0.1+2503222 返回，歧义或未分配为 null，其余构建与无可用注册记录时省略；租借字段在读取不到时省略。显示身份字段只用于展示，不进入草案场景。POST /api/saves/{save_id}/import 的 players 条目需包含 source_uid 与 name，缺省其余字段时按空属性读取。
 
 产物
 

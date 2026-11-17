@@ -1,8 +1,8 @@
 use fm27lab_core::supervisor::{
-    classify_health, endpoint_paths, health_escalated, is_shutdown_accepted, is_success_status,
-    parse_port, probe_request, restart_delay_ms, restarts_settled, shutdown_request, start_allowed,
-    status_matches, Health, Phase, ShutdownStep, HEALTH_FAILURE_LIMIT, MAX_RESTARTS,
-    SHUTDOWN_STEPS, STABLE_WINDOW_MS,
+    classify_health, endpoint_paths, exit_code_label, health_escalated, is_shutdown_accepted,
+    is_success_status, parse_port, probe_request, restart_delay_ms, restarts_settled,
+    shutdown_request, start_allowed, startup_failure, status_matches, Health, Phase, ShutdownStep,
+    HEALTH_FAILURE_LIMIT, MAX_RESTARTS, SHUTDOWN_STEPS, STABLE_WINDOW_MS, STDERR_TAIL_LINES,
 };
 use std::path::Path;
 use std::time::Duration;
@@ -134,4 +134,52 @@ fn shutdown_sequence_notifies_before_cleanup() {
             ShutdownStep::RemoveEndpoint,
         ]
     );
+}
+#[test]
+fn startup_failure_keeps_exit_code_log_and_tail() {
+    let tail = vec![
+        "first".to_string(),
+        "  second  ".to_string(),
+        "".to_string(),
+    ];
+    let message = startup_failure(
+        "sidecar closed before readiness",
+        Some(-1073741515),
+        Some(Path::new("/data/logs/sidecar-7.stderr.log")),
+        &tail,
+    );
+    assert!(message.starts_with("sidecar closed before readiness (exit code 0xC0000135)"));
+    assert!(message.contains("stderr log: /data/logs/sidecar-7.stderr.log"));
+    assert!(message.contains("last stderr: first | second"));
+    assert!(!message.contains(" |  |"));
+}
+
+#[test]
+fn startup_failure_without_exit_or_log_stays_readable() {
+    let message = startup_failure("sidecar did not report readiness", None, None, &[]);
+    assert_eq!(
+        message,
+        "sidecar did not report readiness (exit code unknown)"
+    );
+    assert_eq!(exit_code_label(Some(3)), "3");
+    assert_eq!(exit_code_label(None), "unknown");
+}
+
+#[test]
+fn startup_failure_truncates_each_line() {
+    let long = "x".repeat(400);
+    let tail = vec![long, "".to_string(), "short".to_string()];
+    let message = startup_failure("failure", Some(1), None, &tail);
+    assert!(message.contains(&"x".repeat(300)));
+    assert!(!message.contains(&"x".repeat(301)));
+    assert!(message.contains(" | short"));
+    assert!(!message.contains(" |  |"));
+}
+
+#[test]
+fn startup_failure_keeps_only_the_last_lines() {
+    let tail: Vec<String> = (0..20).map(|index| format!("line-{index}")).collect();
+    let message = startup_failure("failure", Some(1), None, &tail);
+    assert!(!message.contains("line-11"));
+    assert_eq!(message.matches("line-").count(), STDERR_TAIL_LINES);
 }

@@ -53,14 +53,23 @@ def restore_profile(metadata, raw):
     return profile
 
 
-def generate(dll):
-    metadata = json.loads((ROOT / 'native/profile_metadata.json').read_text(encoding='utf8'))
+def adapter_paths(platform):
+    prefix = 'epic_' if platform == 'epic' else ''
+    engine = ROOT / 'private' / ('epic-engine' if platform == 'epic' else 'engine')
+    return prefix, engine
+
+
+def generate(dll, platform='steam'):
+    prefix, engine = adapter_paths(platform)
+    metadata = json.loads((ROOT / 'native' / (prefix + 'profile_metadata.json')).read_text(encoding='utf8'))
     profile = restore_profile(metadata, Path(dll).read_bytes())
-    native = ROOT / 'private/native'
-    engine = ROOT / 'private/engine/fm27_native'
+    if platform == 'epic':
+        profile = metadata
+    native = ROOT / 'private' / (prefix + 'native')
+    engine = engine / 'fm27_native'
     native.mkdir(parents=True, exist_ok=True)
     engine.mkdir(parents=True, exist_ok=True)
-    (native / 'engine_compat_profile.h').write_text(header(profile), encoding='ascii')
+    (native / 'engine_compat_profile.h').write_text(header(profile, digest_ranges=platform == 'epic'), encoding='ascii')
     (engine / 'engine_compat_profile.json').write_text(json.dumps(profile, indent=2), encoding='utf8')
     print('Generated private compatibility contract from the verified local reference DLL.')
 
@@ -68,4 +77,6 @@ def generate(dll):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--reference-dll', required=True, type=Path)
-    generate(parser.parse_args().reference_dll)
+    parser.add_argument('--platform', choices=('steam', 'epic'), default='steam')
+    args = parser.parse_args()
+    generate(args.reference_dll, args.platform)

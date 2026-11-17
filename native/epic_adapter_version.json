@@ -1,0 +1,13 @@
+{
+  "version": "27.0.1+epic",
+  "reference_dll_sha256": "ebf6fcf57f554dc7178fb2afa4e1fd4d6e6dcb693f65a1a11216abb8d00c8396",
+  "mapped_references": 102,
+  "unmapped_references": [
+    "0xfb2580",
+    "0x4a7c550"
+  ],
+  "native_worker_protocol": 2,
+  "session_scope": "remaining_batch_lane",
+  "execution_context_reset": true,
+  "max_worker_jobs": 1000000
+}

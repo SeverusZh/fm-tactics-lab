@@ -13,7 +13,7 @@ static void source_generation_install(unsigned char* match){
         auto p=generation_source.data()+8+288*side;
         if(*(uint32_t*)(p+272)>1||*(uint32_t*)(p+8)>10000||*(uint16_t*)(p+194)>32)desktop_finish_and_exit(230);
         for(unsigned i=0;i<52;i++)if(p[16+i]>100)desktop_finish_and_exit(230);
-        for(unsigned i=0;i<8;i++)if(p[68+i]>64||p[76+i]>(i==7?100:20))desktop_finish_and_exit(230);
+        for(unsigned i=0;i<8;i++)if(p[68+i]>69||p[76+i]>(i==7?100:20))desktop_finish_and_exit(230);
         for(unsigned i=0;i<5;i++)if(*(uint16_t*)(p+176+2*i)>(i>=3?200:10000))desktop_finish_and_exit(230);
         auto team=*(unsigned char**)(match+0x15380+8*side);auto manager=*(unsigned char**)(team+0x630);
         unsigned count=*(uint32_t*)(p+12);if(count<11||count>23)desktop_finish_and_exit(230);

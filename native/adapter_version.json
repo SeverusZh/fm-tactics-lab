@@ -1,6 +1,6 @@
 {
-  "version": "27.0.1+2494687",
-  "reference_dll_sha256": "f79b0a3413dd0e3f461b0afbc3ff397003f4a26d7525a30717428de6a8b91196",
+  "version": "27.0.1+2503222",
+  "reference_dll_sha256": "8c6971ce0b1c8afe6529ea3f46205a5175aea988a97d7421a980da42e23fe340",
   "mapped_references": 102,
   "unmapped_references": [
     "0xfb2580",

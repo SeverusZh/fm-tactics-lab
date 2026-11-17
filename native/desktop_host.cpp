@@ -65,6 +65,8 @@ static int audit_policies(){
     }
     fflush(log_file);return 0;
 }
+static constexpr uint32_t current_pi_policy_version=0x1b000000u;
+static constexpr unsigned pi_policy_version_offsets[]={0xf0,0x430,0x750,0x798};
 struct ScenarioEdit {uint32_t kind,side,a,b,value;};
 static std::vector<ScenarioEdit> scenario_edits;
 static std::vector<unsigned char> source_generation_config;
@@ -160,7 +162,16 @@ static bool apply_scenario(unsigned char* match,bool tactics_only=false){
         current_scenario_edit=edit;scenario_stage="records";
         if(edit.side>1)return false;
         auto team=*(unsigned char**)(match+0x15380+8*edit.side);
-        if(edit.kind==61){
+        if(edit.kind==62){
+            if(edit.side||edit.a||edit.b||edit.value!=current_pi_policy_version)return false;
+            // Native preparation takes the plan versions from the match, not
+            // from the old carrier's plan. Set the input plan for PI checks and export too.
+            *(uint32_t*)(match+0xa3a)=edit.value;
+            for(unsigned side=0;side<2;side++){
+                auto manager=*(unsigned char**)(*(unsigned char**)(match+0x15380+8*side)+0x630);
+                for(auto offset:pi_policy_version_offsets)*(uint32_t*)(manager+0x1818+offset)=edit.value;
+            }
+        }else if(edit.kind==61){
             if(edit.a>4||edit.b||edit.value>100)return false;
         }else if(edit.kind==17){
             if(edit.value<11||edit.value>team[0x72d])return false;
@@ -366,6 +377,13 @@ static bool verify_scenario(unsigned char* match){
     for(const auto& edit:scenario_edits){
         auto team=*(unsigned char**)(match+0x15380+8*edit.side);
         auto manager=*(unsigned char**)(team+0x630);
+        if(edit.kind==62){
+            if(*(uint32_t*)(match+0xa3a)!=edit.value)return false;
+            for(unsigned side=0;side<2;side++){
+                auto prepared=*(unsigned char**)(*(unsigned char**)(match+0x15380+8*side)+0x630);
+                for(auto offset:pi_policy_version_offsets)if(*(uint32_t*)(prepared+0x1818+offset)!=edit.value)return false;
+            }
+        }
         if(edit.kind==1){auto player=original_roster[edit.side][edit.a];if(player[0x480+edit.b]!=edit.value)return false;}
         if(edit.kind==17&&team[0x72d]!=edit.value)return false;
         if(edit.kind==18){
@@ -612,7 +630,18 @@ static bool fingerprint_image(const fs::path& path){
     }
     return okay;
 }
-static bool known_image(const fs::path& path){return compatible_image(path)&&fingerprint_image(path);}
+static bool known_image(const fs::path& path){
+#ifdef FM27_COMPAT_DIGEST_RANGES
+    if(!fingerprint_image(path)||strcmp(native_image_sha256,epic_reference_sha256)){
+        fprintf(log_file,"{\"event\":\"native_engine_compatibility\",\"compatible\":false,\"trial_allowed\":false,\"reason\":\"epic_build_fingerprint_mismatch\"}\n");
+        fflush(log_file);
+        return false;
+    }
+    return compatible_image(path);
+#else
+    return compatible_image(path)&&fingerprint_image(path);
+#endif
+}
 #include "native_statistics.h"
 #include "native_fmf_probe.h"
 #include "native_tactic_import.h"
@@ -960,6 +989,55 @@ static int worker_loop(void* object){
     fprintf(log_file,"{\"event\":\"native_worker_completed\",\"jobs\":%u}\n",index);fflush(log_file);return index?0:184;
 }
 
+static bool find_activation=false;
+static bool read_own(const void* p,void* out,size_t n){SIZE_T got=0;return ReadProcessMemory(GetCurrentProcess(),p,out,n,&got)&&got==n;}
+// Diagnostic for a new game build: the host waits for a word in the protected section (.00cfg) to drop
+// to 0 once the game's own start-up checks have finished. That section is regenerated per build, so the
+// word moves. Watch every 4-aligned word that reads 1 on disk and log those that settle at 0. Read only.
+static int scan_activation(HMODULE module,const wchar_t* path){
+    auto base=(unsigned char*)module;
+    auto nt=(IMAGE_NT_HEADERS64*)(base+((IMAGE_DOS_HEADER*)base)->e_lfanew);
+    auto sec=IMAGE_FIRST_SECTION(nt);const IMAGE_SECTION_HEADER* cfg=nullptr;
+    for(unsigned i=0;i<nt->FileHeader.NumberOfSections;i++)if(!strncmp((const char*)sec[i].Name,".00cfg",8))cfg=&sec[i];
+    if(!cfg){fprintf(log_file,"{\"event\":\"activation_scan_error\",\"reason\":\"no_00cfg\"}\n");fflush(log_file);return 120;}
+    CompatImage file;std::vector<unsigned char> disk(cfg->SizeOfRawData);
+    if(!file.open(path)||!file.read(cfg->VirtualAddress,disk.data(),disk.size())){fprintf(log_file,"{\"event\":\"activation_scan_error\",\"reason\":\"file_read\"}\n");fflush(log_file);return 121;}
+    struct Candidate{uint32_t offset;uint32_t first;int zero_ms;unsigned changes;uint32_t last;};
+    std::vector<Candidate> c;
+    for(uint32_t o=0;o+4<=disk.size();o+=4)if(*(uint32_t*)(disk.data()+o)==1)c.push_back({o,0,-1,0,0});
+    auto t0=GetTickCount64();
+    std::vector<unsigned char> page(4096);
+    auto poll=[&](bool first){
+        size_t current=SIZE_MAX;bool ok=false;
+        for(auto& x:c){
+            size_t p=x.offset/4096;
+            if(p!=current){current=p;ok=read_own(base+cfg->VirtualAddress+p*4096,page.data(),4096);}
+            uint32_t v=ok?*(uint32_t*)(page.data()+x.offset%4096):0xffffffffu;
+            if(first){x.first=x.last=v;if(!v)x.zero_ms=0;continue;}
+            if(v!=x.last){x.changes++;if(!v&&x.zero_ms<0)x.zero_ms=(int)(GetTickCount64()-t0);x.last=v;}
+        }
+    };
+    poll(true);
+    fprintf(log_file,"{\"event\":\"activation_scan_started\",\"section_rva\":\"0x%lx\",\"disk_ones\":%zu}\n",cfg->VirtualAddress,c.size());fflush(log_file);
+    while(GetTickCount64()-t0<20000){Sleep(100);poll(false);}
+    unsigned listed=0,already=0;
+    for(auto& x:c){
+        if(x.last)continue;
+        if(x.first==0){if(++already>50)continue;}
+        else if(++listed>200)continue;
+        char context[65]={};
+        for(unsigned i=0;i<32&&x.offset+i<disk.size();i++)sprintf_s(context+2*i,3,"%02x",disk[x.offset+i]);
+        fprintf(log_file,"{\"event\":\"activation_candidate\",\"rva\":\"0x%lx\",\"at_load\":%u,\"zero_ms\":%d,\"changes\":%u,\"aligned8\":%s,\"disk\":\"%s\"}\n",
+            (unsigned long)(cfg->VirtualAddress+x.offset),x.first,x.zero_ms,x.changes,x.offset%8?"false":"true",context);
+    }
+    fprintf(log_file,"{\"event\":\"activation_scan_completed\",\"turned_zero_after_load\":%u,\"already_zero_at_load\":%u}\n",listed,already);fflush(log_file);
+    // After 20 s the game's start-up is long finished: check that the engine interface comes up.
+    unsigned char object[0x48]={};
+    auto result=((void*(*)(void*))(base+0x4ba21d0))(object);
+    fprintf(log_file,"{\"event\":\"native_interface_created\",\"self_returned\":%s,\"vtable_rva\":\"0x%llx\"}\n",result==object?"true":"false",*(unsigned long long*)object-(unsigned long long)base);fflush(log_file);
+    return 0;
+}
+
 static int child(bool run_match){
     timing_start=GetTickCount64();
     SetErrorMode(SEM_FAILCRITICALERRORS|SEM_NOGPFAULTERRORBOX|SEM_NOOPENFILEERRORBOX);
@@ -991,7 +1069,9 @@ static int child(bool run_match){
     fprintf(log_file,"{\"event\":\"runtime_dependencies_checked\",\"fm_exe_unity_player_game_assembly_absent\":%s}\n",game_runtime_absent?"true":"false");fflush(log_file);
     if(!game_runtime_absent)return 100;
     if(policy_audit)return audit_policies();
-    auto flag=(volatile unsigned int*)((unsigned char*)module+0x1718f818);
+    if(find_activation)return scan_activation(module,image);
+    if(!compat_activation_flag){fprintf(log_file,"{\"event\":\"activation_flag_unmapped\"}\n");fflush(log_file);return 82;}
+    auto flag=(volatile unsigned int*)((unsigned char*)module+compat_activation_flag);
     for(unsigned i=0;i<100;i++){
         if(*flag==0){
             desktop_check_cancel();
@@ -1024,6 +1104,7 @@ int wmain(int argc,wchar_t** argv){
         else if(arg==L"--cancel-event"&&i+1<argc)desktop_cancel_name=argv[++i];
         else if(arg==L"--child")is_child=true;
         else if(arg==L"--policy-audit")policy_audit=true;
+        else if(arg==L"--find-activation")find_activation=true;
         else if(arg==L"--match"){}
         else if(arg==L"--help"){puts("FM27Simulator [--fixture INPUT.pkm] [--seed UINT32] [--output RUN.jsonl] [--tick-step 1..256]\nRuns original native simulation on a private desktop. Retains the complete native DLL; no fm.exe or Unity launch.");return 0;}
         else if((arg==L"--fixture"||arg==L"--output"||arg==L"--seed"||arg==L"--tick-step"||arg==L"--dump-input"||arg==L"--scenario-file")&&i+1<argc){
@@ -1052,6 +1133,7 @@ int wmain(int argc,wchar_t** argv){
     if(!worker_manifest.empty())command+=L" --worker-manifest "+quote(worker_manifest.wstring());
     if(seed_override)command+=L" --seed "+std::to_wstring(requested_seed);
     if(policy_audit)command+=L" --policy-audit";
+    if(find_activation)command+=L" --find-activation";
     if(!desktop_cancel_name.empty())command+=L" --cancel-event "+quote(desktop_cancel_name);
     if(!dump_input.empty())command+=L" --dump-input "+quote(dump_input.wstring());
     if(inspect_fixture_only)command+=L" --inspect-fixture";

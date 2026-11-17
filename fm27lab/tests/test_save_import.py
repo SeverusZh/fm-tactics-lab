@@ -545,6 +545,34 @@ def test_apply_roster_translates_domain_roster_errors(tmp_path: Path):
         service.apply_roster(draft["id"], save["save_id"], 7, "home", "both")
 
 
+def test_apply_roster_accepts_squad_entries_with_display_identity(tmp_path: Path):
+    data = save_data()
+    for index, player in enumerate(data["squads"][7]):
+        player.update(
+            {
+                "display_name": f"显示{index}",
+                "shirt_number": index + 1,
+                "on_loan": index == 0,
+            }
+        )
+        if index == 0:
+            player["loan_parent_club"] = "母队"
+            player["loan_end"] = "2029-07-01"
+    service, _, drafts, _ = make_service(tmp_path, data)
+    save = service.import_save(str(source_file(tmp_path)))
+    draft = created_draft(drafts)
+
+    result = service.apply_roster(draft["id"], save["save_id"], 7, "home", "both")
+
+    assert result["applied"] == {"starters": 11, "substitutes": 12}
+    home = drafts.get(draft["id"])["scenario"]["teams"][0]
+    assert uids(home["players"]) == SAVED_UIDS
+    assert all("display_name" not in player for player in home["players"])
+    assert all("shirt_number" not in player for player in home["players"])
+    assert all("on_loan" not in player for player in home["players"])
+    assert all("loan_parent_club" not in player for player in home["players"])
+
+
 def test_import_save_reader_failure_midway_leaves_no_record(tmp_path: Path):
     data = save_data([managed_club(7, "阿森纳", "ARS"), managed_club(9, "切尔西", "CHE")])
 

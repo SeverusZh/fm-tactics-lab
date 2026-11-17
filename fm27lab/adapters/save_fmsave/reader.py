@@ -13,6 +13,8 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
+from fm27lab.adapters.save_fmsave.player_display import registered_shirts, summary_names
+
 SAVE_DEPENDENCY_ERROR = "未安装存档读取依赖 fmsave"
 SAVE_INVALID_ERROR = "不是有效的 FM 存档"
 SAVE_UNSUPPORTED_ERROR = "存档来自暂不支持的游戏版本"
@@ -311,16 +313,72 @@ def _source_uid_map(players: Sequence[Any]) -> dict[int, int]:
     return mapping
 
 
+def _loan_index(save: Any) -> dict[int, Any]:
+    """Index the public contract table by player uid.
+
+    Loan identity is presentation-only metadata, so an adapter or save that cannot
+    hand out the contract table loses the loan fields instead of failing the squad.
+    """
+    try:
+        index: dict[int, Any] = {}
+        for contract in save.contracts():
+            uid = _integer(contract, "player_uid")
+            if uid is not None:
+                index.setdefault(uid, contract)
+        return index
+    except Exception:
+        return {}
+
+
+def _apply_identity(
+    entry: dict[str, Any],
+    player: Any,
+    shirts: Mapping[int, int | None],
+    names: Mapping[int, str],
+    loans: Mapping[int, Any],
+) -> None:
+    unique_id = _integer(player, "unique_id")
+    display_name = names.get(unique_id) if unique_id is not None else None
+    entry["display_name"] = display_name if display_name else entry["name"]
+    if unique_id is not None and unique_id in shirts:
+        entry["shirt_number"] = shirts[unique_id]
+    uid = _integer(player, "uid")
+    contract = loans.get(uid) if uid is not None else None
+    if contract is None:
+        return
+    on_loan = _field(contract, "on_loan")
+    if not isinstance(on_loan, bool):
+        return
+    entry["on_loan"] = on_loan
+    if not on_loan:
+        return
+    parent_name = _text(contract, "loan_parent_club_name")
+    parent_uid = _integer(contract, "loan_parent_club_uid")
+    if parent_name is not None and parent_name.strip():
+        entry["loan_parent_club"] = parent_name
+    elif parent_uid is not None:
+        entry["loan_parent_club"] = parent_uid
+    loan_end = _field(contract, "loan_end")
+    if isinstance(loan_end, date):
+        entry["loan_end"] = loan_end.isoformat()
+
+
 def _squad(save: Any, club_uid: int) -> list[dict[str, Any]]:
     players = save.players()
     mapping = _source_uid_map(players)
+    squad = [player for player in players if _integer(player, "club_uid") == club_uid]
+    if not squad:
+        return []
+    shirts = registered_shirts(save, squad)
+    names = summary_names(save, squad, shirts)
+    loans = _loan_index(save)
     entries: list[dict[str, Any]] = []
-    for player in players:
-        if _integer(player, "club_uid") != club_uid:
-            continue
+    for player in squad:
         uid = _integer(player, "uid")
         identifier = mapping.get(uid) if uid is not None else _integer(player, "unique_id")
-        entries.append(_player_entry(player, identifier))
+        entry = _player_entry(player, identifier)
+        _apply_identity(entry, player, shirts, names, loans)
+        entries.append(entry)
     return sorted(entries, key=lambda entry: entry["source_uid"])
 
 

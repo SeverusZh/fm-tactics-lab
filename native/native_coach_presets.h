@@ -86,7 +86,7 @@ static void desktop_export_coach_presets(){
 }
 
  unsigned formations=0;
- for(unsigned code=0;code<=64;code++){
+ for(unsigned code=0;code<=69;code++){
   const auto first=*reinterpret_cast<uintptr_t*>(at(0x5833cc0));
   const auto last=*reinterpret_cast<uintptr_t*>(at(0x5833cc8));
   // The native reader uses a built-in predicate before the dynamic table exists.

@@ -33,11 +33,29 @@ class SaveFileImportOutput(BaseModel):
     clubs: int
 
 
+class SquadPlayerOutput(BaseModel):
+    source_uid: int | str
+    name: str
+    attributes: list[int]
+    left_foot: int
+    right_foot: int
+    position: str
+    ability: int | None
+    age: int | None
+    height_cm: int | None
+    personality: dict[str, int] | None = None
+    display_name: str | None = None
+    shirt_number: int | None = None
+    on_loan: bool | None = None
+    loan_parent_club: str | int | None = None
+    loan_end: str | None = None
+
+
 class SquadOutput(BaseModel):
     save_id: str
     club_uid: int
     club_name: str | None
-    players: list[dict[str, Any]]
+    players: list[SquadPlayerOutput]
     selection: dict[str, Any] | None
 
 

@@ -65,7 +65,7 @@
 
 - [x] SQLite 连接、迁移与仓储：settings、pool_entries、drafts、jobs/job_runs、saves/save_leagues/save_clubs、artifacts、idempotency 与 `/api/pools`、`/api/drafts`、`/api/jobs`、`/api/saves`、`/api/results`、`/api/artifacts`、`/api/settings` 均已实现并通过独立审核。
 - [x] 空库启动、只读旧目录探测与存档读取端口：旧目录不写不迁移，存档经 fmsave 适配器只读；真实存档读取由 Windows 真机 run 43593986849 覆盖。
-- [x] 原生宿主适配器与 counted-session 能力协商：能力解析、运行时计划与文件协议适配器已实现并通过审核；Windows 真机完成真实宿主联调：宿主 `--worker-capabilities` 声明 protocol 2、max_jobs 1000000、execution_context_reset 与 per_match_resource_release，`--check-image` 对游戏镜像给出 compatible true 与 disposition verified，单场真实比赛当次墙钟 2.97 秒、宿主计时 2.875 秒完成 23797 tick 且球员统计身份校验通过；批次验收经 `scripts/verify_engine_windows.ps1` 完成，见第 189 行；批次 provenance 记录 counted_sessions true、session_scope remaining_batch_lane、capability_version 2。真机引擎版本 27.0.1+2503222 与仓库 `native/adapter_version.json` 的 27.0.1+2494687 不同，适配器按运行时镜像指纹协商而不依赖静态版本号，镜像 sha256 与游戏 dll 一致；被验收宿主为与本机游戏匹配的本地构建，发布门槛指定的 27.0.1+2494687 参考构建尚无真机执行记录。
+- [x] 原生宿主适配器与 counted-session 能力协商：能力解析、运行时计划与文件协议适配器已实现并通过审核；Windows 真机完成真实宿主联调：宿主 `--worker-capabilities` 声明 protocol 2、max_jobs 1000000、execution_context_reset 与 per_match_resource_release，`--check-image` 对游戏镜像给出 compatible true 与 disposition verified，单场真实比赛当次墙钟 2.97 秒、宿主计时 2.875 秒完成 23797 tick 且球员统计身份校验通过；批次验收经 `scripts/verify_engine_windows.ps1` 完成，见第 189 行；批次 provenance 记录 counted_sessions true、session_scope remaining_batch_lane、capability_version 2。仓库 `native/adapter_version.json` 已更新为 27.0.1+2503222，镜像 sha256 与游戏 dll 一致；适配器仍按运行时镜像指纹协商而不依赖静态版本号，被验收宿主为用仓库源码与本机 DLL 构建的本地产物。
 - [x] 1–256 路调度、取消、续跑、磁盘/内存预检：并发预检、串行调度与引擎分道已实现；1/8/256 矩阵见 Phase 2 并发验收矩阵项，真实引擎吞吐见收官项，真机 1/8/32 路取证见第 189 行。
 - [x] 实验提交接线：草案与客队战术池按种子物化为 FM27CFG1 场景、A/B 共用同一次抽签、提交持锁与失败清理、删除任务清理物化目录；已通过独立审核。
 - [x] 原生引擎生产接线：create_app 按注入 engine、engine_root 惰性宿主、未配置占位的顺序解析，运行时计划在启动时按能力协商，派发前按任务并行数配置宿主分道；已通过独立审核。
@@ -205,9 +205,18 @@
 - [x] 客队战术池 UI 含改名、权重与 FMF 条目导入；职责、个人指令、盯防球员与盯防位置编辑；六套阵型模板按位置熟悉度自动排阵；存档战术导出 FMF 与加入客队池；定位球套路、任务与角色编辑及导入导出。
 - [x] 实验进度与预计剩余、任务关键字筛选与重命名、结果单场明细与失败徽标；640px 窄屏布局、焦点可见性、对比度与加载骨架；旧引擎目录迁移提示与导入入口。
 
+## 上游同步 v1113–v1114.6
+
+- [x] 2503222 引擎兼容：`native/` 同步上游 v1113/v1113.1/v1114.6，Steam 参考构建改为 `27.0.1+2503222`（镜像 `8c6971ce…`），激活地址取自画像的 `activation_flag_rva`，执行回执按原始名单身份记录与校验；Windows 真机用仓库源码重建宿主后通过 `--worker-capabilities`、`--check-image` 与单场真实比赛（tick 23797、统计身份 verified）。存档布局延续 fmsave 0.12.4，真实 2503222 存档读取验证通过。
+- [x] Epic 适配：新增 `native/epic_adapter_version.json` 与 `native/epic_profile_metadata.json`（仅 rva/size/sha256 摘要），宿主按 `FM27_COMPAT_DIGEST_RANGES` 校验；构建支持 `--platform steam|epic`，分别输出到 `private/engine` 与 `private/epic-engine`。Windows 编译级验证通过（本机无 Epic DLL，未执行 --platform epic 完整构建，改用等价 digest header 编译与指纹拒绝分支验证），Steam DLL 对 Epic 构建返回 `epic_build_fingerprint_mismatch`；Epic 运行时验收需要具备 Epic 版游戏资产的机器。
+- [x] 存档球员显示身份：名单新增 `display_name`（存档本地化名优先，读取失败回退原名）、`shirt_number`（仅已验证构建 27.0.0+2486695 与 27.0.1+2503222 且 game_db schema 4000，后者由本机真实存档验证、前者来自上游只读参考实现；歧义或未分配为 null，无可用注册记录时省略）与租借字段 `on_loan`/`loan_parent_club`/`loan_end`；真实 2503222 存档 34 人探针得到 22 个本地化名、24 个号码、1 名租借；存档页展示号码列与租借徽标。
+- [x] 启动诊断保留：sidecar stderr 有界保留并持续写入日志文件，启动失败、超时或健康检查失败时错误信息包含退出码，并在日志文件可用时给出路径，同时写入 `<data>/logs/startup-error.txt`。
+- [x] 未绑定草案与存档绑定映射：存档导入与替换不清除既有草案（回归测试锁定）；v2 不保存按存档绑定的球员指令，上游「切换存档时隔离指令」在 v2 不适用，映射结论记录在审核记录。
+- [x] 独立审核 PASS。
+
 ## 发布门槛
 
-- Windows x64 + FM27 27.0.1+2494687：原生兼容、单场、A/B、战术池、真实名单、取消/续跑。
+- Windows x64 + FM27 Steam 27.0.1+2503222 或 Epic 27.0.1+epic：原生兼容、单场、A/B、战术池、真实名单、取消/续跑；Epic 运行时验证需要具备 Epic 版游戏资产的机器，执行力实验仅对 Steam 8c6971ce 构建开放。
 - 并发 1、8、256 路的结果身份一致；资源预检与旧宿主回退有记录。
 - 23 人名单在样本、存档、FMF 导入与结果统计中一致（真实 AI 生成不在本轮范围，见 ADR-0009）。
 - Tauri 安装包可启动 sidecar，退出后无残留进程。

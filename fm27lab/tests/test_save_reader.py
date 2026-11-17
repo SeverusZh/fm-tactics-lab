@@ -196,6 +196,7 @@ class FakeSave:
         managed_clubs: Any = (),
         clubs: Any = (),
         selections: Any = (),
+        contracts: Any = (),
         info: SimpleNamespace | None = None,
         read_error: Exception | None = None,
     ) -> None:
@@ -204,6 +205,7 @@ class FakeSave:
         self._managed_clubs = list(managed_clubs)
         self._clubs = list(clubs)
         self._selections = list(selections)
+        self._contracts = list(contracts)
         self._read_error = read_error
         self.exited = 0
 
@@ -233,6 +235,10 @@ class FakeSave:
     def selections(self) -> list[Any]:
         self._guard()
         return list(self._selections)
+
+    def contracts(self) -> list[Any]:
+        self._guard()
+        return list(self._contracts)
 
 
 def save_file(tmp_path: Path) -> Path:
@@ -826,3 +832,149 @@ def test_read_squad_uses_unique_id_when_uid_is_missing(
     install_save(monkeypatch, FakeSave(players=[player]))
     squad = FmsaveReader(save_file(tmp_path)).read_squad(7)
     assert [entry["source_uid"] for entry in squad] == [30]
+
+
+def make_contract(
+    player_uid: int,
+    *,
+    on_loan: bool | None = False,
+    parent_name: str | None = None,
+    parent_uid: int | None = None,
+    end: Any = None,
+) -> SimpleNamespace:
+    return SimpleNamespace(
+        player_uid=player_uid,
+        on_loan=on_loan,
+        loan_parent_club_name=parent_name,
+        loan_parent_club_uid=parent_uid,
+        loan_end=end,
+    )
+
+
+def install_identity(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    shirts: dict[int, int | None] | None = None,
+    names: dict[int, str] | None = None,
+) -> list[tuple[str, list[int]]]:
+    calls: list[tuple[str, list[int]]] = []
+
+    def fake_shirts(_save: Any, players: Any) -> dict[int, int | None]:
+        calls.append(("shirts", [player.uid for player in players]))
+        return dict(shirts or {})
+
+    def fake_names(_save: Any, players: Any, _shirts: Any) -> dict[int, str]:
+        calls.append(("names", [player.uid for player in players]))
+        return dict(names or {})
+
+    monkeypatch.setattr("fm27lab.adapters.save_fmsave.reader.registered_shirts", fake_shirts)
+    monkeypatch.setattr("fm27lab.adapters.save_fmsave.reader.summary_names", fake_names)
+    return calls
+
+
+def test_read_squad_prefers_summary_display_name_and_falls_back_to_name(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    players = [
+        make_player(1, unique_id=101, name="Bukayo Saka", club_uid=7),
+        make_player(2, unique_id=102, name="Declan Rice", club_uid=7),
+    ]
+    calls = install_identity(
+        monkeypatch,
+        shirts={101: 7},
+        names={101: "萨卡"},
+    )
+    install_save(monkeypatch, FakeSave(players=players))
+    squad = FmsaveReader(save_file(tmp_path)).read_squad(7)
+    assert [entry["display_name"] for entry in squad] == ["萨卡", "Declan Rice"]
+    assert [entry["name"] for entry in squad] == ["Bukayo Saka", "Declan Rice"]
+    assert "shirt_number" not in squad[1]
+    assert calls == [("shirts", [1, 2]), ("names", [1, 2])]
+
+
+def test_read_squad_uses_placeholder_as_display_name_fallback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    player = make_player(10, unique_id=None, club_uid=7)
+    player.name = None
+    install_identity(monkeypatch, names={})
+    install_save(monkeypatch, FakeSave(players=[player]))
+    entry = FmsaveReader(save_file(tmp_path)).read_squad(7)[0]
+    assert entry["name"] == "未知球员 10"
+    assert entry["display_name"] == "未知球员 10"
+
+
+def test_read_squad_keeps_ambiguous_shirt_number_as_none(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    player = make_player(1, unique_id=101, club_uid=7)
+    install_identity(monkeypatch, shirts={101: None})
+    install_save(monkeypatch, FakeSave(players=[player]))
+    entry = FmsaveReader(save_file(tmp_path)).read_squad(7)[0]
+    assert entry["shirt_number"] is None
+
+
+def test_read_squad_passes_loan_identity_from_contracts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    players = [
+        make_player(1, unique_id=101, name="Jayden Danns", club_uid=7),
+        make_player(2, unique_id=102, name="Ben White", club_uid=7),
+    ]
+    contracts = [
+        make_contract(1, on_loan=True, parent_name="母队", end=date(2029, 7, 1)),
+        make_contract(2, on_loan=False, parent_name="旧母队", end=date(2028, 1, 1)),
+    ]
+    install_identity(monkeypatch)
+    install_save(monkeypatch, FakeSave(players=players, contracts=contracts))
+    squad = FmsaveReader(save_file(tmp_path)).read_squad(7)
+    assert squad[0]["on_loan"] is True
+    assert squad[0]["loan_parent_club"] == "母队"
+    assert squad[0]["loan_end"] == "2029-07-01"
+    assert squad[1]["on_loan"] is False
+    assert "loan_parent_club" not in squad[1]
+    assert "loan_end" not in squad[1]
+
+
+def test_read_squad_falls_back_to_loan_parent_uid(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    player = make_player(1, unique_id=101, club_uid=7)
+    contract = make_contract(1, on_loan=True, parent_name="  ", parent_uid=321)
+    install_identity(monkeypatch)
+    install_save(monkeypatch, FakeSave(players=[player], contracts=[contract]))
+    entry = FmsaveReader(save_file(tmp_path)).read_squad(7)[0]
+    assert entry["loan_parent_club"] == 321
+    assert "loan_end" not in entry
+
+
+def test_read_squad_omits_loan_identity_without_contract(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    player = make_player(1, unique_id=101, club_uid=7)
+    install_identity(monkeypatch)
+    install_save(monkeypatch, FakeSave(players=[player]))
+    entry = FmsaveReader(save_file(tmp_path)).read_squad(7)[0]
+    assert "on_loan" not in entry
+    assert "loan_parent_club" not in entry
+    assert "loan_end" not in entry
+
+
+class UnreadableContracts:
+    def __iter__(self) -> Any:
+        raise RuntimeError("合同损坏")
+
+
+def test_read_squad_tolerates_unreadable_contracts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    player = make_player(1, unique_id=101, club_uid=7)
+    install_identity(monkeypatch)
+    save = FakeSave(players=[player])
+    save.contracts = lambda: UnreadableContracts()
+    install_save(monkeypatch, save)
+
+    entry = FmsaveReader(save_file(tmp_path)).read_squad(7)[0]
+
+    assert entry["source_uid"] == 101
+    assert "on_loan" not in entry
+
+
+def test_read_squad_skips_identity_work_for_empty_club(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    def fail(*_arguments: Any) -> dict[int, Any]:
+        raise AssertionError("identity work must be skipped for an empty squad")
+
+    monkeypatch.setattr("fm27lab.adapters.save_fmsave.reader.registered_shirts", fail)
+    monkeypatch.setattr("fm27lab.adapters.save_fmsave.reader.summary_names", fail)
+    install_save(monkeypatch, FakeSave(players=[make_player(1, unique_id=101, club_uid=7)]))
+    assert FmsaveReader(save_file(tmp_path)).read_squad(9) == []

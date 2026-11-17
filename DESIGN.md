@@ -25,7 +25,7 @@
 
 ## 约束
 
-- Windows x64；FM27 参考构建 27.0.1+2494687；原生适配器继续执行兼容门禁。
+- Windows x64；FM27 Steam 参考构建 27.0.1+2503222、Epic 参考构建 27.0.1+epic；原生适配器继续执行兼容门禁。
 - Python 3.12 作为 sidecar 运行时；玩家不需要安装 Python、Node 或 Rust。
 - Tauri 2 使用 Windows WebView2；安装包必须包含 sidecar，原生宿主与私有引擎输入由本地构建准备并通过 engine_root 配置，不随安装包分发。
 - HTTP 仅 loopback；HTTP 写操作需要 Bearer token 与 Origin/CORS 校验；CLI/MCP 使用同一 token；业务写操作支持幂等键，系统路由按需。
@@ -71,6 +71,7 @@ sidecar supervisor 在 ready 行后轮询 `/api/health`，失败或进程退出�
 - sidecar 只绑定 `127.0.0.1:0`；启动完成后向 stdout 输出一行 `{"event":"ready","port":...}`，同时写入 endpoint.json。
 - Rust 读取 ready 行，轮询 `GET /api/health` 直到成功；健康检查失败或进程退出时按指数退避重启，最多 3 次，并通过 Tauri event 通知前端。
 - 正常退出时 Rust 调用 `POST /api/shutdown`，等待 10 秒；超时后终止进程。sidecar 退出时删除 endpoint.json。
+- sidecar 的 stderr 持续写入 `<data>/logs/sidecar-<pid>.stderr.log`，并保留最近 8 行；启动失败、超时或健康检查失败时，错误信息包含退出码，并在 stderr 日志文件可用时给出其路径，同时写入 `<data>/logs/startup-error.txt`，保证后端无输出退出时仍可诊断。
 - 生产模式 CORS 只允许 `tauri://localhost` 与 `http://tauri.localhost`；开发模式额外允许 `http://localhost:1420`。不使用 cookie，统一使用 Bearer token。
 - CLI 与 MCP 读取 endpoint.json 与 token；MCP stdio 不暴露 HTTP 鉴权细节，只把 token 用于内部 loopback 请求。
 
@@ -122,7 +123,7 @@ fm27lab/
     events.py          EventPublisher
   adapters/
     engine_native/     原生宿主、二进制编码、counted-session、战术文件解析
-    save_fmsave/       fmsave 读取、教练与生成输入、存档战术提取
+    save_fmsave/       fmsave 读取、球员显示身份、教练与生成输入、存档战术提取
     storage_sqlite/    连接、迁移、仓储实现
     fmf/               FMF 导入导出与回读校验
     locale/            中英文
@@ -143,6 +144,7 @@ native/                C++17 适配器
 - HTTP 使用 FastAPI，OpenAPI 3.1 位于 `/api/openapi.json`，本地文档位于 `/api/docs`。
 - 错误统一为 `{"error":{"code","message","details","retriable","retry_after_seconds"}}`。
 - 列表统一支持 `limit`、`offset`，返回 `items`、`total`、`next_offset`。
+- `GET /api/saves/{save_id}/squad` 的球员条目在既有字段之外提供可选显示身份：`display_name`、`shirt_number`、`on_loan`、`loan_parent_club` 与 `loan_end`；`shirt_number` 仅对已验证构建 `27.0.0+2486695` 与 `27.0.1+2503222` 返回（后者由本机真实存档验证，前者来自上游只读参考实现），歧义或未分配时为 `null`，其余构建与无可用注册记录的球员省略该字段；显示身份字段只用于展示，不写入草案场景；身份字段读取失败时静默回退，不影响名单与选择。
 - 写操作支持 `Idempotency-Key`；同键同载荷返回首次响应，同键异载荷返回 409。
 - 长任务通过 `GET /api/events` 的 SSE 推送进度；React 使用 fetch 流式读取并携带 `Authorization: Bearer`、`Accept: text/event-stream` 与 `Last-Event-ID`，不使用 EventSource 或 URL token；CORS preflight 允许 `Authorization` 与 `Last-Event-ID`。服务端先发送 ready 事件并支持按 `Last-Event-ID` 重放，客户端仅在重连时携带最后事件 id，断开后按 1s 起、30s 封顶的指数退避重连；事件驱动的查询失效按 300ms 窗口合并，页面保留手动刷新作为降级路径，未实现自动轮询。
 - `fm27lab/registry/` 声明每个能力的名称、HTTP 方法与路径、CLI 命令路径与 MCP 工具名：`model.py` 定义动作、系统路径与能力组约定，`parts/` 按域分片声明能力，`__init__.py` 聚合为 61 项能力；三入口适配层手写并保持薄，`fm27lab/tests/test_registry_contract.py` 校验 OpenAPI 业务操作、CLI 叶子命令与 MCP 工具名同注册表一致，并检测命名、方法与路径约定漂移。输入/输出模型由路由层的 Pydantic 模型定义并纳入 OpenAPI 快照，不纳入注册表，决策见 ADR-0007。
@@ -174,6 +176,14 @@ native/                C++17 适配器
 - 验收矩阵：1、8、256 路各验证提交、取消、续跑与结果身份一致，由 `scripts/verify_concurrency_matrix.py` 在 Linux 与 Windows CI 的假引擎上执行；CI runner 的磁盘小于 256 路所需的 258 GiB，用 `--available-memory-bytes` 与 `--free-disk-bytes` 提供等效容量，实测资源同时写入证据。真实引擎的吞吐与内存只由 `scripts/verify_engine_windows.ps1` 在 Windows 真机记录，不作为 Linux 单测断言；真机实测 256 场批次 1、8、32 路墙钟 484.2、76.841、34.653 秒、按引擎计时吞吐 0.529、3.413、8.0 场每秒且按 seed 的 score 与 stats 签名零差异；吞吐按起止秒级时间戳取整，与墙钟口径不同。超过宿主真实容量时宿主在并发加载阶段以 Windows 1455 记录失败场次而不整批失败。
 - 性能目标：同一输入与种子下结果一致；并发提升不改变比分、统计与执行力回执。
 
+## 原生引擎适配器
+
+- 原生宿主按发行版维护两套画像：Steam 记录在 `native/adapter_version.json`（27.0.1+2503222，镜像 8c6971ce…），Epic 记录在 `native/epic_adapter_version.json`（27.0.1+epic，镜像 ebf6fcf5…）；`native/profile_metadata.json` 与 `native/epic_profile_metadata.json` 只保存关键 range 的 rva、size 与 sha256。
+- `scripts/generate_profile.py --reference-dll <本机 game_plugin.dll> --platform steam|epic` 在本机恢复或校验画像并生成 `engine_compat_profile.h`；`scripts/build_native.py --platform` 编译宿主到 `private/engine` 或 `private/epic-engine`。Steam 用逐字节 range 校验，Epic 用 `FM27_COMPAT_DIGEST_RANGES` 摘要校验；激活地址取自画像的 `activation_flag_rva`，缺失时由 `--find-activation` 在本机镜像上定位。
+- `scripts/rebase_profile.py` 从新的本机 DLL 重建画像元数据。兼容门禁按运行时镜像指纹协商，不依赖静态版本号，不符时 fail-closed。详细决策见 ADR-0013。
+- 存档布局与存档读取委托给 fmsave 0.12.4，覆盖 Steam 27.0.1+2503222 存档；原生适配器不自行解析存档布局。
+- 执行力实验只对 Steam 8c6971ce 构建开放：宿主执行回执以该镜像 sha 守卫，Epic 构建提交该实验时以退出码 244 拒绝，功能边界必须在文档与界面中如实标注。
+
 ## 23 人名单规则
 
 - `MATCH_ROSTER_SIZE = 23` 是唯一合法值；所有来源先归一化到 23 人。
@@ -189,7 +199,7 @@ native/                C++17 适配器
 - 深炭紫底、FM 紫主操作色、球场绿数据强调、琥珀警告、红色危险。
 - 左侧固定导航，图标加文字；每屏一个主操作；页面可深链。
 - 页面：战术板、球员属性、存档战术库、客队战术池、实验、实验结果、任务、定位球、设置与说明。
-- 战术板支持双阶段、拖拽与键盘换位、阵型模板与按位置自动排阵、职责与个人指令编辑、盯人目标选择；球员页支持隐藏属性分组；存档页支持唯一存档导入、存档战术库、导出 FMF、加入客队战术池与我的球队同步；客队战术池支持条目权重、行内改名与 FMF 条目导入；定位球页支持编辑与导入导出；结果页支持多选批量管理、对比、可折叠战术池卡片与单场明细；任务页支持重命名与关键字筛选；实验页以草案为输入，提交时自动探测主机资源并做并发预检，展示已完成场数与预计剩余时间。
+- 战术板支持双阶段、拖拽与键盘换位、阵型模板与按位置自动排阵、职责与个人指令编辑、盯人目标选择；球员页支持隐藏属性分组；存档页支持唯一存档导入、存档战术库、导出 FMF、加入客队战术池与我的球队同步，名单展示本地化显示名、注册球衣号与租借归属；客队战术池支持条目权重、行内改名与 FMF 条目导入；定位球页支持编辑与导入导出；结果页支持多选批量管理、对比、可折叠战术池卡片与单场明细；任务页支持重命名与关键字筛选；实验页以草案为输入，提交时自动探测主机资源并做并发预检，展示已完成场数与预计剩余时间。
 - 所有数据视图提供空、加载、错误、成功状态；键盘、焦点、对比度与减少动画遵循设计系统。
 - React 只保存临时 UI 状态；业务数据、草稿、设置与历史一律通过 API 写入 SQLite，不使用 localStorage 或 IndexedDB 作为第二持久化 owner。
 - OpenAPI 生成 TypeScript 类型与请求客户端；前端不得手写重复的请求/响应类型。
@@ -197,14 +207,14 @@ native/                C++17 适配器
 
 ## 兼容与打包
 
-- Tauri 安装包包含：Rust 壳、WebView2 前端资源与 Python sidecar；原生宿主与私有引擎输入由 `scripts/build_native.py` 与用户自备私有输入单独准备，安装后通过 engine_root 配置。
+- Tauri 安装包包含：Rust 壳、WebView2 前端资源与 Python sidecar；原生宿主由 `scripts/build_native.py --platform steam|epic` 与用户自备私有输入单独准备，安装后通过 engine_root 配置。仓库只公开摘要形式的画像元数据，不分发宿主与游戏字节。
 - Python sidecar 使用 PyInstaller onedir 构建到 `sidecar-dist/fm27lab-sidecar`，独立可运行；`scripts/build_sidecar.py` 负责构建，`tauri.conf.json` 的 `bundle.resources` 将其复制到 `resource/sidecar/`。资源映射必须使用目录形式：glob 形式会把 onedir 的 `_internal/` 与迁移目录平铺到同一层，安装后 sidecar 无法启动。
 - `beforeBuildCommand` 先构建前端再构建 sidecar；Windows CI 执行 sidecar 打包、Python 测试、`cargo build`、`cargo test`、Tauri 安装包构建、安装包载荷断言与安装/卸载 QA 脚本。`src-tauri/Cargo.lock` 必须提交以固定依赖；`release.yml` 由版本 tag 触发构建安装包并发布，workflow_dispatch 已在 Windows 完成发布候选全流程（run 43866462594）。
 - 仓库文本以 LF 检出：`.gitattributes` 默认规则固定 `eol=lf`，C 家族源码固定 `eol=crlf`，`SOURCE_MANIFEST.json` 的哈希在 Windows 检出后仍一致；契约测试拒绝缺少 eol 固定的 text 规则。
 - Tauri 只负责启动、健康检查、重启与退出；若 sidecar 构建失败，安装包构建失败，不生成缺少后端的发布包。
 - sidecar 通过环境变量接收数据目录、引擎目录、端口与 token；token 只保存在内存与受保护文件。
 - 保留 `fm27lab serve`、`fm27lab mcp` 与 CLI 独立入口，便于无桌面环境测试与 Agent 接入。
-- Windows 真实引擎验证不在 Linux 开发环境内完成；由 `scripts/verify_engine_windows.ps1` 在装有 FM27 的 Windows 机器上驱动 sidecar API 完成验收，已在真机 27.0.1+2503222 与仓库适配器 27.0.1+2494687 之间通过运行时镜像指纹协商完成 64 场 1、8、256 路与 256 场 1、8、32 路批次；256 场配 256 路超出宿主真实容量，宿主以 Windows 1455 记录失败场次而不整批失败，故 256 场验收以预检推荐的 32 路取证，证据记录在 TODO 第 68 与 189 行；真机宿主为与本机游戏匹配的本地构建，发布门槛指定的 27.0.1+2494687 参考构建尚无真机执行记录。
+- Windows 真实引擎验证不在 Linux 开发环境内完成；由 `scripts/verify_engine_windows.ps1` 在装有 FM27 的 Windows 机器上驱动 sidecar API 完成验收，已在 Steam 27.0.1+2503222 上完成 64 场 1、8、256 路与 256 场 1、8、32 路批次；256 场配 256 路超出宿主真实容量，宿主以 Windows 1455 记录失败场次而不整批失败，故 256 场验收以预检推荐的 32 路取证，证据记录在 TODO 第 68 与 189 行。Epic 适配完成代码、契约与编译级验证，运行时验收需要具备 Epic 版游戏资产的机器。
 
 ## 测试与审核
 
@@ -241,3 +251,4 @@ native/                C++17 适配器
 - [ADR-0010](docs/adr/0010-desktop-auto-update-scope.md)：桌面自动更新不在本轮范围。
 - [ADR-0011](docs/adr/0011-cancel-intent-delivery.md)：取消意图的传递与残余指令级窗口。
 - [ADR-0012](docs/adr/0012-worker-done-marker-visibility.md)：逐场释放标记的可见性与消费端等待。
+- [ADR-0013](docs/adr/0013-dual-platform-native-adapter.md)：双平台原生适配器与公开画像元数据。

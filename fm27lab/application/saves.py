@@ -8,6 +8,65 @@ from typing import Any
 from fm27lab.adapters.storage_sqlite.saves import SavesRepository
 
 
+def _is_int(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _validate_player_fields(player: Mapping[str, Any]) -> None:
+    if "attributes" in player:
+        attributes = player.get("attributes")
+        if not isinstance(attributes, list) or any(not _is_int(value) for value in attributes):
+            raise ValueError("存档名单球员字段无效")
+    for key in ("left_foot", "right_foot"):
+        value = player.get(key)
+        if value is not None and not _is_int(value):
+            raise ValueError("存档名单球员字段无效")
+    if player.get("position") is not None and not isinstance(player.get("position"), str):
+        raise ValueError("存档名单球员字段无效")
+    for key in ("ability", "age", "height_cm", "shirt_number"):
+        value = player.get(key)
+        if value is not None and not _is_int(value):
+            raise ValueError("存档名单球员字段无效")
+    personality = player.get("personality")
+    if personality is not None and (
+        not isinstance(personality, Mapping)
+        or any(not _is_int(value) for value in personality.values())
+    ):
+        raise ValueError("存档名单球员字段无效")
+    if player.get("display_name") is not None and not isinstance(player.get("display_name"), str):
+        raise ValueError("存档名单球员字段无效")
+    if player.get("on_loan") is not None and not isinstance(player.get("on_loan"), bool):
+        raise ValueError("存档名单球员字段无效")
+    parent = player.get("loan_parent_club")
+    if parent is not None and not (isinstance(parent, (str, int)) and not isinstance(parent, bool)):
+        raise ValueError("存档名单球员字段无效")
+    if player.get("loan_end") is not None and not isinstance(player.get("loan_end"), str):
+        raise ValueError("存档名单球员字段无效")
+
+
+def _validate_club_players(clubs: Mapping[int, Mapping]) -> None:
+    """Keep payload imports inside the squad shape the read API can serve."""
+    if not isinstance(clubs, Mapping):
+        raise ValueError("存档球队负载无效")
+    for payload in clubs.values():
+        if not isinstance(payload, Mapping):
+            raise ValueError("存档球队负载无效")
+        players = payload.get("players")
+        if players is None:
+            continue
+        if not isinstance(players, list):
+            raise ValueError("存档名单无效")
+        for player in players:
+            if not isinstance(player, Mapping):
+                raise ValueError("存档名单球员无效")
+            uid = player.get("source_uid")
+            if type(uid) not in (int, str) or isinstance(uid, bool) or uid == "":
+                raise ValueError("存档名单球员缺少有效标识")
+            if not isinstance(player.get("name"), str):
+                raise ValueError("存档名单球员缺少名称")
+            _validate_player_fields(player)
+
+
 class SavesService:
     TRANSITIONS: dict[str, set[str]] = {
         "pending": {"reading", "error", "cancelled"},
@@ -97,6 +156,7 @@ class SavesService:
         *,
         stage: str | None = None,
     ) -> dict[str, Any]:
+        _validate_club_players(clubs)
         with self.repository.database.transaction() as connection:
             if self.repository.get(save_id, connection=connection) is None:
                 raise ValueError("存档不存在")

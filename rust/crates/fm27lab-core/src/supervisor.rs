@@ -133,3 +133,39 @@ pub const SHUTDOWN_STEPS: [ShutdownStep; 3] = [
     ShutdownStep::TerminateChild,
     ShutdownStep::RemoveEndpoint,
 ];
+/// Retained stderr lines carried in a startup failure message.
+pub const STDERR_TAIL_LINES: usize = 8;
+const STDERR_LINE_CHARS: usize = 300;
+
+/// Human-readable exit code: decimal for normal codes, hex for negative statuses.
+pub fn exit_code_label(code: Option<i32>) -> String {
+    match code {
+        None => "unknown".to_string(),
+        Some(value) if value < 0 => format!("0x{:08X}", value as u32),
+        Some(value) => value.to_string(),
+    }
+}
+
+/// Describe why the sidecar failed to become ready, keeping the log path and last output.
+pub fn startup_failure(
+    reason: &str,
+    exit: Option<i32>,
+    log: Option<&Path>,
+    tail: &[String],
+) -> String {
+    let mut message = format!("{reason} (exit code {})", exit_code_label(exit));
+    if let Some(path) = log {
+        message.push_str(&format!("; stderr log: {}", path.display()));
+    }
+    let start = tail.len().saturating_sub(STDERR_TAIL_LINES);
+    let lines: Vec<String> = tail[start..]
+        .iter()
+        .map(|line| line.trim().chars().take(STDERR_LINE_CHARS).collect())
+        .filter(|line: &String| !line.is_empty())
+        .collect();
+    if !lines.is_empty() {
+        message.push_str("; last stderr: ");
+        message.push_str(&lines.join(" | "));
+    }
+    message
+}

@@ -50,6 +50,19 @@ class SaveReader(Protocol):
         position name), ability (current ability), age, height_cm and, when
         readable, personality (the seven editable personality attributes;
         unreadable entries are omitted).
+
+        Display identity is added when the save exposes it. display_name is the
+        localized name from the save summary when one joins this player's
+        registered shirt number, otherwise the same text as name. shirt_number
+        is the registered shirt number, read only from the confirmed FM27
+        layouts and game_db schema 4000; it is None when the in-force records
+        disagree on a number or store an unassigned shirt, and the key is
+        omitted when no number can be read. Loan identity (on_loan,
+        loan_parent_club, loan_end) is read from the public contract table;
+        on_loan is present only when the save reports it, loan_parent_club and
+        loan_end (ISO 8601 date string) only while on_loan is True. Any failure
+        to read display identity drops the optional keys instead of failing the
+        squad read.
         """
         ...
 

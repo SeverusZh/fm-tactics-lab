@@ -65,3 +65,26 @@
     white-space: normal;
   }
 }
+.saves-squad-table .saves-shirt-number {
+  width: 4.5rem;
+}
+
+.saves-player-cell {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.saves-player-name {
+  font-weight: 500;
+}
+
+.saves-player-raw {
+  color: var(--text-subtle);
+  font-size: var(--type-caption);
+}
+
+.saves-loan-badge {
+  flex: none;
+}
