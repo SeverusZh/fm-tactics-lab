@@ -96,8 +96,14 @@ function Start-NextJobAsync {
 
 function Complete-NextJobAsync {
     param($Request)
-    $outcome = Receive-Job -Job $Request -Wait
-    Remove-Job -Job $Request -Force
+    $outcomes = @()
+    try {
+        $outcomes = @(Receive-Job -Job $Request -Wait)
+    } finally {
+        Remove-Job -Job $Request -Force -ErrorAction SilentlyContinue
+    }
+    $outcome = $null
+    if ($outcomes.Count -gt 0) { $outcome = $outcomes[-1] }
     if ($null -eq $outcome) { return }
     if (-not $outcome.ok) {
         throw ("引擎启动失败：HTTP {0} {1}" -f $outcome.status, $outcome.message)
@@ -117,23 +123,33 @@ function Wait-FmJob {
                 $lastStatus = $job.status
             }
             if (@("completed", "error", "cancelled", "interrupted") -contains $job.status) {
+                if ($null -ne $request) {
+                    $completed = $request
+                    $request = $null
+                    Wait-Job -Job $completed -Timeout 5 | Out-Null
+                    if ($completed.State -eq "Completed") {
+                        Complete-NextJobAsync -Request $completed
+                    } else {
+                        Stop-Job -Job $completed -ErrorAction SilentlyContinue
+                        Remove-Job -Job $completed -Force -ErrorAction SilentlyContinue
+                    }
+                }
                 return $job
             }
             if ($null -ne $request -and $request.State -eq "Completed") {
-                Complete-NextJobAsync -Request $request
+                $completed = $request
                 $request = $null
+                Complete-NextJobAsync -Request $completed
             }
             Start-Sleep -Seconds $PollSeconds
         }
         throw "任务 $JobId 在 $JobTimeoutSeconds 秒内未进入终态"
     } finally {
         if ($null -ne $request) {
-            if ($request.State -eq "Completed") {
-                Complete-NextJobAsync -Request $request
-            } else {
-                Stop-Job -Job $request -ErrorAction SilentlyContinue
-                Remove-Job -Job $request -Force -ErrorAction SilentlyContinue
-            }
+            $pending = $request
+            $request = $null
+            Stop-Job -Job $pending -ErrorAction SilentlyContinue
+            Remove-Job -Job $pending -Force -ErrorAction SilentlyContinue
         }
     }
 }
