@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 from typing import Annotated
 
-from fastapi import Depends, FastAPI, HTTPException, Response
+from fastapi import Depends, FastAPI, HTTPException, Query, Response
 from fastapi import Path as PathParameter
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -48,10 +48,37 @@ class SaveTacticOutput(BaseModel):
     club_name: str | None
     team_slot: int | None
     importable: bool
+    source: str = "stored"
+    league_key: str | None = None
+    coach_name: str | None = None
+    variant: int | None = None
+    formation_code: int | None = None
+    exact: bool | None = None
+    available: bool = True
+    reason: str | None = None
+
+
+class LeagueSummaryOutput(BaseModel):
+    key: str
+    name: str | None = None
+    database_id: int | None = None
+    competition_id: int | None = None
+    stage_id: int | None = None
+    season: int | None = None
+    club_count: int
+    opponent_count: int = 0
+    fixture_count: int
+    first_date: str | None = None
+    last_date: str | None = None
+    own: bool = False
 
 
 class SaveTacticListOutput(BaseModel):
     items: list[SaveTacticOutput]
+    leagues: list[LeagueSummaryOutput] = Field(default_factory=list)
+    current: LeagueSummaryOutput | None = None
+    ambiguous: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
 
 
 class SaveTacticImportOutput(BaseModel):
@@ -100,11 +127,18 @@ def _translated(error: Exception) -> HTTPException:
 def _service(app: FastAPI) -> SaveTacticsService:
     service = getattr(app.state, "save_tactics", None)
     if service is None:
+        from fm27lab.application.league_tactics import LeagueTacticsService
+
         service = SaveTacticsService(
             app.state.saves,
             app.state.drafts,
             app.state.settings,
             pools=getattr(app.state, "pools", None),
+            league=LeagueTacticsService(
+                app.state.saves,
+                app.state.settings,
+                getattr(app.state, "pools", None),
+            ),
         )
         app.state.save_tactics = service
     return service
@@ -120,14 +154,32 @@ def register(app: FastAPI) -> None:
             404: {"model": ErrorEnvelope},
         },
     )
-    def list_save_tactics(save_id: str, _: None = Depends(require_token)):
+    def list_save_tactics(
+        save_id: str,
+        league: Annotated[str | None, Query(max_length=64)] = None,
+        include_leagues: Annotated[bool, Query()] = False,
+        _: None = Depends(require_token),
+    ):
+        league = league or None
         try:
-            items = _service(app).list_tactics(save_id)
+            service = _service(app)
+            items = service.list_tactics(save_id, league)
+            catalog = (
+                service.league_catalog(save_id)
+                if league is not None or include_leagues
+                else None
+            )
         except ValueError as error:
             raise _validation_error(error) from error
         if items is None:
             raise _not_found(SAVE_NOT_FOUND_MESSAGE)
-        return {"items": items}
+        return {
+            "items": items,
+            "leagues": [] if catalog is None else catalog["leagues"],
+            "current": None if catalog is None else catalog["current"],
+            "ambiguous": [] if catalog is None else catalog["ambiguous"],
+            "warnings": [] if catalog is None else catalog["warnings"],
+        }
 
     @app.post(
         "/api/saves/{save_id}/tactics/{tactic_index}/import",

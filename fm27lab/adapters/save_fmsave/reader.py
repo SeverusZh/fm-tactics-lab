@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import re
 from collections import Counter
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from datetime import date
 from pathlib import Path
 from typing import Any
@@ -364,14 +364,22 @@ def _apply_identity(
 
 
 def _squad(save: Any, club_uid: int) -> list[dict[str, Any]]:
-    players = save.players()
-    mapping = _source_uid_map(players)
+    players = list(save.players())
+    return _squad_from(save, players, _source_uid_map(players), _loan_index(save), club_uid)
+
+
+def _squad_from(
+    save: Any,
+    players: Sequence[Any],
+    mapping: Mapping[int, int],
+    loans: Mapping[int, Any],
+    club_uid: int,
+) -> list[dict[str, Any]]:
     squad = [player for player in players if _integer(player, "club_uid") == club_uid]
     if not squad:
         return []
     shirts = registered_shirts(save, squad)
     names = summary_names(save, squad, shirts)
-    loans = _loan_index(save)
     entries: list[dict[str, Any]] = []
     for player in squad:
         uid = _integer(player, "uid")
@@ -380,6 +388,38 @@ def _squad(save: Any, club_uid: int) -> list[dict[str, Any]]:
         _apply_identity(entry, player, shirts, names, loans)
         entries.append(entry)
     return sorted(entries, key=lambda entry: entry["source_uid"])
+
+
+def read_squads(path: Path, club_uids: Iterable[int]) -> dict[int, list[dict[str, Any]]]:
+    """一次打开存档读取多支球队名单，供联赛对手批量使用。"""
+    wanted = {int(uid) for uid in club_uids}
+    if not wanted:
+        return {}
+    fmsave = _load_fmsave()
+    target = Path(path)
+    try:
+        before = target.stat()
+    except OSError as error:
+        raise ValueError(f"{SAVE_INVALID_ERROR}：{error}") from error
+    try:
+        with fmsave.open(target) as save:
+            players = list(save.players())
+            mapping = _source_uid_map(players)
+            loans = _loan_index(save)
+            result = {
+                uid: _squad_from(save, players, mapping, loans, uid) for uid in sorted(wanted)
+            }
+    except ValueError:
+        raise
+    except Exception as error:
+        raise _reader_error(fmsave, error) from error
+    try:
+        after = target.stat()
+    except OSError as error:
+        raise ValueError(f"{SAVE_INVALID_ERROR}：{error}") from error
+    if (before.st_size, before.st_mtime_ns) != (after.st_size, after.st_mtime_ns):
+        raise ValueError(SAVE_CHANGED_ERROR)
+    return result
 
 
 def _player_index(save: Any) -> dict[int, int]:

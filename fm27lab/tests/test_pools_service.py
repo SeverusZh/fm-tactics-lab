@@ -116,3 +116,10 @@ def test_import_fmf_rejects_invalid_payloads(tmp_path: Path):
     with pytest.raises(ValueError, match="不包含可用战术"):
         pools.import_fmf(fmf_payload(with_tactic=False), "x.fmf")
     assert pools.list()["total"] == 0
+
+
+def test_create_suffixes_duplicate_names(tmp_path: Path):
+    pools = service(tmp_path)
+    first = pools.create({"name": "联赛对手", "weight": 1, "tactic": {"tactic_name": "x"}})
+    second = pools.create({"name": "联赛对手", "weight": 1, "tactic": {"tactic_name": "x"}})
+    assert [first["name"], second["name"]] == ["联赛对手", "联赛对手 2"]

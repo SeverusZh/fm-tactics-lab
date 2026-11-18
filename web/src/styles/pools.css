@@ -144,3 +144,9 @@
     justify-content: flex-end;
   }
 }
+
+.pools-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}

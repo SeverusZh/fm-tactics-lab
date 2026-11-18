@@ -330,7 +330,7 @@ drafts_formation 只做预览：按阵型模板与名单位置熟悉度返回排
 ### 4.7 文档端点
 
 - GET /api/docs 返回 Swagger UI，GET /api/openapi.json 返回 OpenAPI 文档；二者无 token 依赖，仅供本机调试。证据 fm27lab/interfaces/http/app.py:107-113。
-- 契约核对以 openapi.json 为准：当前 57 条路径、75 个操作、84 个组件模型。
+- 契约核对以 openapi.json 为准：当前 57 条路径、75 个操作、86 个组件模型。
 
 ## 5. 数据模型
 

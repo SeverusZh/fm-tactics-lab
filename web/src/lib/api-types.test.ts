@@ -31,6 +31,7 @@ const ALIASES: AliasCase[] = [
   { name: "SaveUpdate", generated: "SaveUpdateInput" },
   { name: "SaveImport", generated: "SaveImportInput" },
   { name: "SaveTactic", generated: "SaveTacticOutput" },
+  { name: "SaveTacticList", generated: "SaveTacticListOutput" },
   { name: "Draft", generated: "DraftOutput" },
   { name: "DraftSummary", generated: "DraftSummary", importAs: "GeneratedDraftSummary" },
   { name: "DraftList", generated: "DraftListOutput" },
@@ -153,9 +154,9 @@ describe("api.ts 类型映射", () => {
   it("顶部摘要与映射表计数一致", () => {
     const summary = `// API 类型映射：生成别名 ${ALIASES.length} 项；保留手写类型 ${RETAINED.length} 项；字段派生 ${DERIVED.length} 项；ApiError 类保留；明细见 api-types.test.ts。`;
     expect(apiSource.split("\n")[0]).toBe(summary);
-    expect(mappedNames()).toHaveLength(74);
-    expect(new Set(mappedNames()).size).toBe(74);
-    expect(ALIASES).toHaveLength(48);
+    expect(mappedNames()).toHaveLength(75);
+    expect(new Set(mappedNames()).size).toBe(75);
+    expect(ALIASES).toHaveLength(49);
     expect(RETAINED).toHaveLength(24);
     expect(DERIVED).toHaveLength(2);
   });

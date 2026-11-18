@@ -31,6 +31,7 @@ MCP client                       ─┘                                         
 ## What works today
 
 - Domain model: two-phase tactics with 11 players in each phase, a 23-player squad, 69 player attributes including 15 position attributes, and an away tactic pool with random or rotation draws and uniform or real-roster players.
+- Save leagues: read every opponent in the current league and their first-team coach preferences, generate tactics from installed presets, export FMF or add them to the away pool; pool entries export and import as a JSON bundle.
 - Experiment execution: same-seed A/B comparison, 1–256 workers, a resource pre-check that rejects submissions by default when less than 2 GiB of memory or insufficient disk is available, with an explicit override, and 14 metrics per job.
 - Result analysis: per-match records, CSV export, home-side aggregation; job comparison over 1–32 candidates and 1–20000 resamples with paired deltas and bootstrap confidence intervals.
 - Interfaces: 52 capabilities in 11 groups; OpenAPI lists 64 operations; the CLI has 55 leaf commands; MCP exposes 49 tools, 4 read-only resources and 2 prompts.

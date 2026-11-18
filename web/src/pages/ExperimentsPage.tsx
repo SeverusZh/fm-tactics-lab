@@ -7,6 +7,7 @@ import { useAppContext } from "../app-context";
 import { EmptyState } from "../components/EmptyState";
 import { JobProgress } from "../components/JobProgress";
 import { Panel } from "../components/Panel";
+import { PoolConfig } from "../components/PoolConfig";
 import { PoolManager } from "../components/PoolManager";
 import {
   ApiError,
@@ -133,11 +134,35 @@ function generateSeeds(count: number): number[] {
 function parseAwayTacticPool(scenario: { [key: string]: unknown }): {
   enabled: boolean;
   count: number;
+  mode: "random" | "rotation";
+  rounds: number;
+  players: "uniform" | "real";
 } {
   const pool = scenario["away_tactic_pool"];
-  if (!isRecord(pool)) return { enabled: false, count: 0 };
+  if (!isRecord(pool)) {
+    return { enabled: false, count: 0, mode: "random", rounds: 1, players: "uniform" };
+  }
   const entries = Array.isArray(pool["entries"]) ? pool["entries"] : [];
-  return { enabled: pool["enabled"] === true, count: entries.length };
+  const rotation = isRecord(pool["rotation"]) ? pool["rotation"] : {};
+  const real = isRecord(pool["real"]) ? pool["real"] : {};
+  return {
+    enabled: pool["enabled"] === true,
+    count: entries.length,
+    mode: rotation["enabled"] === true ? "rotation" : "random",
+    rounds: typeof rotation["rounds"] === "number" ? rotation["rounds"] : 1,
+    players: real["enabled"] === true ? "real" : "uniform",
+  };
+}
+
+function uniqueSeeds(count: number): number[] {
+  const seeds = new Set<number>();
+  while (seeds.size < count) {
+    for (const seed of generateSeeds(count - seeds.size)) {
+      seeds.add(seed);
+      if (seeds.size === count) break;
+    }
+  }
+  return Array.from(seeds);
 }
 
 function integerInRange(value: string, minimum: number, maximum: number): boolean {
@@ -268,6 +293,14 @@ export function ExperimentsPage() {
     queryFn: () => getDraft(connection!, draftId),
     enabled: connection !== null && draftId !== "",
   });
+  const baselineDetailQuery = useQuery({
+    queryKey: ["draft", connection?.url, baselineDraftId],
+    queryFn: () => getDraft(connection!, baselineDraftId),
+    enabled:
+      connection !== null &&
+      baselineDraftId !== "" &&
+      baselineDraftId !== draftId,
+  });
   const resourcesQuery = useQuery({
     queryKey: ["host-resources", connection?.url],
     queryFn: () => getHostResources(connection!),
@@ -363,6 +396,20 @@ export function ExperimentsPage() {
   const draftsAvailable = drafts.length > 0;
   const draftDetail = draftDetailQuery.data;
   const pool = draftDetail === undefined ? null : parseAwayTacticPool(draftDetail.scenario);
+  const baselinePool =
+    baselineDetailQuery.data === undefined
+      ? null
+      : parseAwayTacticPool(baselineDetailQuery.data.scenario);
+  const effectivePool =
+    pool !== null && pool.enabled
+      ? pool
+      : baselinePool !== null && baselinePool.enabled
+        ? baselinePool
+        : pool;
+  const rotationRequired =
+    effectivePool !== null && effectivePool.enabled && effectivePool.mode === "rotation"
+      ? effectivePool.count * effectivePool.rounds
+      : null;
 
   const seedParse = useMemo(() => parseSeedText(seedsText), [seedsText]);
   const seedsActive = seedParse.active;
@@ -416,6 +463,25 @@ export function ExperimentsPage() {
     });
   }
   if (totalProblem !== null) problems.push({ text: totalProblem, tone: "error" });
+  if (
+    rotationRequired !== null &&
+    matchCount !== null &&
+    matchCount !== rotationRequired
+  ) {
+    problems.push({
+      text:
+        "轮战模式需要 " +
+        String(rotationRequired) +
+        " 个种子（" +
+        String(effectivePool?.count ?? 0) +
+        " 套 × " +
+        String(effectivePool?.rounds ?? 1) +
+        " 轮），当前为 " +
+        String(matchCount) +
+        " 场",
+      tone: "error",
+    });
+  }
   if (connection !== null) {
     if (resourcesQuery.isPending) {
       problems.push({ text: "正在读取本机资源…", tone: "info" });
@@ -465,7 +531,7 @@ export function ExperimentsPage() {
     if (connection === null || problems.length > 0 || matchCount === null) return null;
     return {
       name: name.trim() === "" ? null : name.trim(),
-      seeds: seedsActive ? seedParse.seeds : generateSeeds(matchCount),
+      seeds: seedsActive ? seedParse.seeds : uniqueSeeds(matchCount),
       draft_id: draftId,
       baseline_draft_id: baselineSelected ? baselineDraftId : null,
       workers: Number(workers),
@@ -590,14 +656,28 @@ export function ExperimentsPage() {
                         重试
                       </button>
                     </div>
-                  ) : pool !== null ? (
-                    <p className="experiment-pool">
+                  ) : pool !== null && draftDetail !== undefined && connection !== null ? (
+                    <div className="experiment-pool-wrap">
+                      <p className="experiment-pool">
                       {pool.enabled
                         ? "客队战术池：" +
                           String(pool.count) +
-                          " 套客队战术，每个种子随机抽取（用于检验泛化）"
-                        : "固定对手（用于验证对特定打法的稳定性）"}
-                    </p>
+                          " 套客队战术，" +
+                          (pool.mode === "rotation"
+                            ? "轮战 " + String(pool.rounds) + " 轮"
+                            : "每个种子随机抽取") +
+                          "（用于检验泛化）"
+                          : "固定对手（用于验证对特定打法的稳定性）"}
+                      </p>
+                      <PoolConfig
+                        connection={connection}
+                        draftId={draftId}
+                        scenario={draftDetail.scenario}
+                        onApplied={() => {
+                          void draftDetailQuery.refetch();
+                        }}
+                      />
+                    </div>
                   ) : null
                 ) : null}
               </section>
@@ -699,6 +779,16 @@ export function ExperimentsPage() {
                         onChange={(event) => setSeedsText(event.target.value)}
                       />
                       <p className="experiment-hint">留空时每次提交自动生成随机种子。</p>
+                      {rotationRequired !== null ? (
+                        <button
+                          className="button small"
+                          type="button"
+                          disabled={formLocked}
+                          onClick={() => setSeedsText(uniqueSeeds(rotationRequired).join(", "))}
+                        >
+                          生成 {rotationRequired} 个轮战种子
+                        </button>
+                      ) : null}
                     </div>
                     {seedsActive && seedParse.problem !== null ? (
                       <p className="experiment-error" role="alert">

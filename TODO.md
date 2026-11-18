@@ -84,7 +84,7 @@
 - [x] CLI 全功能命令与退出码：61 项能力对应 64 个叶子命令含三个下载命令，0/1/2 退出码已实现并 PASS。
 - [x] MCP tools/resources/prompts 全功能同步：stdio 协议层、58 个工具、4 个 resources、2 个 prompts 与 `fm27lab mcp` 命令已实现并通过审核。
 - [x] 前端 API 类型统一到生成的 OpenAPI schema：68 个类型中 41 项别名与 2 项派生复用生成接口、25 项保留手写并记录理由、前后端状态枚举按领域状态机收紧；已通过独立审核。
-- [x] 契约测试：三入口能力对齐、错误码与幂等契约已覆盖；OpenAPI 快照 `docs/openapi.json` 记录 57 条路径、75 个操作与 84 个组件模型，由 `scripts/generate_openapi_snapshot.py` 生成、`fm27lab/tests/test_openapi_snapshot.py` 校验。
+- [x] 契约测试：三入口能力对齐、错误码与幂等契约已覆盖；OpenAPI 快照 `docs/openapi.json` 记录 57 条路径、75 个操作与 86 个组件模型，由 `scripts/generate_openapi_snapshot.py` 生成、`fm27lab/tests/test_openapi_snapshot.py` 校验。
 - [x] 独立审核 PASS：Phase 3 各切片由独立审核子代理给出 PASS，记录见 docs/REVIEWS.md。
 
 ## Phase 4 桌面壳
@@ -192,6 +192,15 @@
 - [x] Windows 真机验证：CI run 43593986849 的安装包静默安装后，原生选择器导入 240,956,721 字节 FM27 存档 29.9 秒后 ready，名单 34 人标识唯一且恰 1 个占位名，apply-roster 范围 both 返回 200（首发 11 替补 12）且草案 23 人标识唯一，免存档 FMF 导入经原生选择器建草案成功。
 - [x] 发布候选构建：`release.yml` 经 workflow_dispatch 在 Windows 全流程通过（run 43866462594，commit `0ea10fd`），构建、前端检查、pytest、legacy unittest、源码清单、cargo test、NSIS 安装包与安装/卸载 QA 依次成功；23 项安装断言全 PASS，工件为 release-installer `FM Tactics Lab_2.0.0_x64-setup.exe` 22.5 MB 与 release-installer-qa 证据；同提交 CI run 43866436688 六个作业 success。
 - [x] 逐场释放标记竞态修复：消费端对不可解析标记做有界等待（宿主存活 5 秒上限、宿主已退出即判无效），并同步修复 legacy 源码版入口；假引擎以 partial_ack、garbage_alive、bad_exit_ack、bad_index_ack 夹具确定性覆盖，变异证明用例具判别力；4 核绑定探针修复前 22 次中 3 次失败，修复后 40 次全部完成 256 场，全量矩阵校验 229/229 通过；ADR-0012 记录写端原子发布为后续改进。
+
+### 联赛对手战术池
+
+- [x] 联赛目录、当前联赛、对手与一线队主教练偏好读取；真实存档验证 19 个对手与 17–18 名主教练。
+- [x] 原装预设匹配、主/次偏好战术生成、FMF 导出与加入客队池；原生不可用时逐队返回原因。
+- [x] 客队池随机/轮战模式、轮数、统一属性/真实名单写回草案；轮战种子数校验与前端提示。
+- [x] 客队池 JSON 包导出/导入与前端测试；pytest、vitest、ruff 与 OpenAPI 快照通过。
+- [x] 独立审核 PASS（2026-11-18，两轮；Critical 队伍指令位端序与 Important 索引、名单缓存、陈旧战术、偏好校验均已闭环）。
+- [ ] 原生引擎真机验收（当前游戏 2026-11-18 自动更新后与适配画像不匹配，待引擎同步）。
 
 ### 设计评审与体验重构
 

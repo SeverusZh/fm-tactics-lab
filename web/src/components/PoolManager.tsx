@@ -2,12 +2,14 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState, type ChangeEvent } from "react";
 
 import {
+  createPool,
   deletePool,
   importPoolsFmf,
   listPools,
   updatePool,
   type PoolEntry,
 } from "../lib/api-pools";
+import { downloadBlob } from "../lib/download";
 import type { Connection } from "../lib/connection";
 import { Panel } from "./Panel";
 import "../styles/pools.css";
@@ -137,6 +139,7 @@ export function PoolManager({ connection }: { connection: Connection }) {
   const [fileError, setFileError] = useState<string | null>(null);
   const [confirmId, setConfirmId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const bundleInputRef = useRef<HTMLInputElement | null>(null);
   const confirmButtonRef = useRef<HTMLButtonElement | null>(null);
   const deleteTriggerRef = useRef<HTMLButtonElement | null>(null);
 
@@ -183,6 +186,24 @@ export function PoolManager({ connection }: { connection: Connection }) {
     },
   });
 
+  const bundleImportMutation = useMutation({
+    mutationFn: async (entries: PoolEntry[]) => {
+      for (const entry of entries) {
+        await createPool(connection, {
+          name: entry.name,
+          weight: entry.weight,
+          tactic: entry.tactic,
+          roster: entry.roster,
+        });
+      }
+      return entries.length;
+    },
+    onSuccess: (count) => {
+      setNotice("已导入 " + String(count) + " 套客队战术");
+      refresh();
+    },
+  });
+
   const importMutation = useMutation({
     mutationFn: (input: { content_base64: string; name?: string }) =>
       importPoolsFmf(connection, input),
@@ -207,7 +228,55 @@ export function PoolManager({ connection }: { connection: Connection }) {
   }
 
   const items = poolsQuery.data?.items ?? [];
-  const actionError = updateMutation.error ?? deleteMutation.error ?? importMutation.error;
+  const actionError =
+    updateMutation.error ??
+    deleteMutation.error ??
+    importMutation.error ??
+    bundleImportMutation.error;
+
+  function exportBundle() {
+    const payload = JSON.stringify(
+      {
+        profile: "fm27lab-pool-bundle-v1",
+        exported_at: new Date().toISOString(),
+        entries: items.map((entry) => ({
+          name: entry.name,
+          weight: entry.weight,
+          tactic: entry.tactic,
+          roster: entry.roster,
+        })),
+      },
+      null,
+      2,
+    );
+    downloadBlob(new Blob([payload], { type: "application/json" }), "fm27lab-pool.json");
+    setNotice("已导出 " + String(items.length) + " 套客队战术");
+  }
+
+  async function handleBundleSelected(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (file === undefined) return;
+    setNotice(null);
+    setFileError(null);
+    try {
+      const parsed = JSON.parse(await file.text()) as { entries?: unknown };
+      if (!Array.isArray(parsed.entries)) {
+        throw new Error("客队战术池文件缺少 entries");
+      }
+      const rows = parsed.entries.filter(
+        (entry): entry is PoolEntry =>
+          typeof entry === "object" &&
+          entry !== null &&
+          typeof (entry as { name?: unknown }).name === "string" &&
+          typeof (entry as { tactic?: unknown }).tactic === "object",
+      );
+      if (rows.length === 0) throw new Error("客队战术池文件没有可导入条目");
+      bundleImportMutation.mutate(rows);
+    } catch (error) {
+      setFileError(errorMessage(error));
+    }
+  }
   const pendingEntryId = updateMutation.isPending
     ? updateMutation.variables?.entryId
     : undefined;
@@ -217,17 +286,44 @@ export function PoolManager({ connection }: { connection: Connection }) {
       title="客队战术池"
       className="pools-panel"
       action={
-        <button
-          type="button"
-          className="button small"
-          disabled={importMutation.isPending}
-          aria-busy={importMutation.isPending || undefined}
-          onClick={() => fileInputRef.current?.click()}
-        >
-          导入 FMF
-        </button>
+        <div className="pools-actions">
+          <button
+            type="button"
+            className="button small"
+            disabled={bundleImportMutation.isPending || importMutation.isPending}
+            aria-busy={bundleImportMutation.isPending || undefined}
+            onClick={() => bundleInputRef.current?.click()}
+          >
+            导入池
+          </button>
+          <button
+            type="button"
+            className="button small"
+            disabled={items.length === 0}
+            onClick={exportBundle}
+          >
+            导出池
+          </button>
+          <button
+            type="button"
+            className="button small"
+            disabled={importMutation.isPending}
+            aria-busy={importMutation.isPending || undefined}
+            onClick={() => fileInputRef.current?.click()}
+          >
+            导入 FMF
+          </button>
+        </div>
       }
     >
+      <input
+        ref={bundleInputRef}
+        className="pools-file-input"
+        type="file"
+        accept="application/json,.json"
+        aria-label="客队战术池文件"
+        onChange={(event) => void handleBundleSelected(event)}
+      />
       <input
         ref={fileInputRef}
         className="pools-file-input"

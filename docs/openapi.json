@@ -2069,6 +2069,116 @@
         "title": "JobUpdateInput",
         "type": "object"
       },
+      "LeagueSummaryOutput": {
+        "properties": {
+          "club_count": {
+            "title": "Club Count",
+            "type": "integer"
+          },
+          "competition_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Competition Id"
+          },
+          "database_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Database Id"
+          },
+          "first_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Date"
+          },
+          "fixture_count": {
+            "title": "Fixture Count",
+            "type": "integer"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "last_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Date"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "opponent_count": {
+            "default": 0,
+            "title": "Opponent Count",
+            "type": "integer"
+          },
+          "own": {
+            "default": false,
+            "title": "Own",
+            "type": "boolean"
+          },
+          "season": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Season"
+          },
+          "stage_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stage Id"
+          }
+        },
+        "required": [
+          "key",
+          "club_count",
+          "fixture_count"
+        ],
+        "title": "LeagueSummaryOutput",
+        "type": "object"
+      },
       "PairedOutput": {
         "properties": {
           "goal_difference_delta": {
@@ -2815,11 +2925,42 @@
       },
       "SaveTacticListOutput": {
         "properties": {
+          "ambiguous": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Ambiguous",
+            "type": "array"
+          },
+          "current": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LeagueSummaryOutput"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "items": {
             "items": {
               "$ref": "#/components/schemas/SaveTacticOutput"
             },
             "title": "Items",
+            "type": "array"
+          },
+          "leagues": {
+            "items": {
+              "$ref": "#/components/schemas/LeagueSummaryOutput"
+            },
+            "title": "Leagues",
+            "type": "array"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Warnings",
             "type": "array"
           }
         },
@@ -2831,6 +2972,11 @@
       },
       "SaveTacticOutput": {
         "properties": {
+          "available": {
+            "default": true,
+            "title": "Available",
+            "type": "boolean"
+          },
           "club_name": {
             "anyOf": [
               {
@@ -2853,6 +2999,39 @@
             ],
             "title": "Club Uid"
           },
+          "coach_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Coach Name"
+          },
+          "exact": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exact"
+          },
+          "formation_code": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Formation Code"
+          },
           "importable": {
             "title": "Importable",
             "type": "boolean"
@@ -2860,6 +3039,17 @@
           "index": {
             "title": "Index",
             "type": "integer"
+          },
+          "league_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "League Key"
           },
           "mentality": {
             "anyOf": [
@@ -2876,6 +3066,22 @@
             "title": "Name",
             "type": "string"
           },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "source": {
+            "default": "stored",
+            "title": "Source",
+            "type": "string"
+          },
           "style": {
             "title": "Style",
             "type": "string"
@@ -2890,6 +3096,17 @@
               }
             ],
             "title": "Team Slot"
+          },
+          "variant": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Variant"
           }
         },
         "required": [
@@ -6992,6 +7209,33 @@
             "schema": {
               "title": "Save Id",
               "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "league",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "League"
+            }
+          },
+          {
+            "in": "query",
+            "name": "include_leagues",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Include Leagues",
+              "type": "boolean"
             }
           }
         ],

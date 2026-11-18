@@ -23,6 +23,13 @@ export type PoolUpdateInput = {
   weight?: number;
 };
 
+export type PoolCreateInput = {
+  name: string;
+  weight?: number;
+  tactic: PoolTactic;
+  roster?: PoolTactic | null;
+};
+
 export type PoolImportInput = {
   content_base64: string;
   name?: string;
@@ -39,6 +46,16 @@ function poolPath(entryId: string): string {
 
 export async function listPools(connection: Connection): Promise<PoolList> {
   return apiJson<PoolList>(connection, "/api/pools");
+}
+
+export async function createPool(
+  connection: Connection,
+  input: PoolCreateInput,
+): Promise<PoolEntry> {
+  return apiJson<PoolEntry>(connection, "/api/pools", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
 }
 
 export async function updatePool(

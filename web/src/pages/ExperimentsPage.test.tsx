@@ -14,6 +14,7 @@ import type {
   Job,
 } from "../lib/api";
 import {
+  createPool,
   deletePool,
   importPoolsFmf,
   listPools,
@@ -23,6 +24,7 @@ import {
 import { ExperimentsPage } from "./ExperimentsPage";
 
 vi.mock("../lib/api-pools", () => ({
+  createPool: vi.fn(),
   listPools: vi.fn(),
   updatePool: vi.fn(),
   deletePool: vi.fn(),
@@ -242,7 +244,7 @@ function makeJob(overrides: Partial<Job> = {}): Job {
 type ScenarioOptions = {
   drafts?: DraftSummary[];
   draftsResponse?: () => Response;
-  detail?: (draftId: string) => Response;
+  detail?: (draftId: string, init: RequestInit) => Response;
   resources?: () => Response;
   check?: (url: string) => Response;
   submit?: (body: ExperimentSubmitInput) => Response | Promise<Response>;
@@ -268,7 +270,7 @@ function stubScenario(options: ScenarioOptions = {}) {
     }
     if (url.includes("/api/drafts/")) {
       const draftId = decodeURIComponent(url.slice(url.indexOf("/api/drafts/") + 12));
-      return detail(draftId);
+      return detail(draftId, init);
     }
     if (url.endsWith("/api/system/resources")) return resources();
     if (url.includes("/api/concurrency/check")) return check(url);
@@ -344,6 +346,7 @@ describe("ExperimentsPage", () => {
     fetchMock.mockReset();
     vi.stubGlobal("fetch", fetchMock);
     vi.mocked(listPools).mockReset().mockResolvedValue({ items: [], total: 0, next_offset: null });
+    vi.mocked(createPool).mockReset();
     vi.mocked(updatePool).mockReset();
     vi.mocked(deletePool).mockReset();
     vi.mocked(importPoolsFmf).mockReset();
@@ -1432,4 +1435,83 @@ describe("ExperimentsPage", () => {
       await screen.findByText("还没有客队战术。导入 FMF 文件后，条目会出现在这里。"),
     ).toBeInTheDocument();
   });
+
+  it("配置客队战术池为轮战并写回草案", async () => {
+    vi.mocked(listPools).mockResolvedValue({
+      items: [poolEntry()],
+      total: 1,
+      next_offset: null,
+    });
+    let scenario: { [key: string]: unknown } = {};
+    stubScenario({
+      detail: (draftId, init) => {
+        if (init.method === "PATCH") {
+          const body = JSON.parse(String(init.body)) as { scenario: { [key: string]: unknown } };
+          scenario = body.scenario;
+        }
+        return jsonResponse({ ...makeDraft(draftId), scenario });
+      },
+    });
+    renderExperimentsPage();
+    await waitForResources();
+    await selectDraft();
+
+    fireEvent.click(screen.getByRole("button", { name: "配置" }));
+    fireEvent.click(await screen.findByRole("checkbox", { name: /长传冲吊/ }));
+    fireEvent.click(screen.getByRole("radio", { name: "轮战" }));
+    fireEvent.change(screen.getByLabelText("轮战每套轮数"), { target: { value: "2" } });
+    fireEvent.click(screen.getByRole("button", { name: "应用到草案" }));
+
+    await waitFor(() => {
+      const patch = fetchCalls().find(
+        (call) => call.url.endsWith("/api/drafts/draft-alpha") && call.init.method === "PATCH",
+      );
+      expect(patch).toBeDefined();
+      const body = JSON.parse(String(patch?.init.body)) as {
+        scenario: { away_tactic_pool: { rotation: { enabled: boolean; rounds: number } } };
+      };
+      expect(body.scenario.away_tactic_pool.rotation).toEqual({ enabled: true, rounds: 2 });
+    });
+
+    expect(await screen.findByText(/轮战 2 轮/)).toBeInTheDocument();
+    expect(
+      await screen.findByText(/轮战模式需要 2 个种子（1 套 × 2 轮），当前为 100 场/),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "生成 2 个轮战种子" }));
+    await waitFor(() => {
+      const seeds = screen.getByLabelText("固定种子") as HTMLTextAreaElement;
+      expect(seeds.value.split(",")).toHaveLength(2);
+    });
+  });
+
+
+  it("导入客队战术池 JSON 包并逐条创建条目", async () => {
+    vi.mocked(listPools).mockResolvedValue({
+      items: [poolEntry()],
+      total: 1,
+      next_offset: null,
+    });
+    vi.mocked(createPool).mockResolvedValue(poolEntry({ name: "包内战术" }));
+    stubScenario();
+    renderExperimentsPage();
+
+    const input = (await screen.findByLabelText("客队战术池文件")) as HTMLInputElement;
+    const content = JSON.stringify({
+      entries: [{ name: "包内战术", weight: 2, tactic: { tactic_name: "包内战术" }, roster: null }],
+    });
+    const file = new File([content], "pool.json", { type: "application/json" });
+    Object.defineProperty(file, "text", { value: async () => content });
+    fireEvent.change(input, { target: { files: [file] } });
+
+    await waitFor(() =>
+      expect(createPool).toHaveBeenCalledWith(connection, {
+        name: "包内战术",
+        weight: 2,
+        tactic: { tactic_name: "包内战术" },
+        roster: null,
+      }),
+    );
+    expect(await screen.findByText("已导入 1 套客队战术")).toBeInTheDocument();
+  });
+
 });

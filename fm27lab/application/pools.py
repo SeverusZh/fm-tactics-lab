@@ -63,7 +63,12 @@ class PoolService:
         self.repository = repository
 
     def create(self, value: Mapping[str, Any]) -> dict[str, Any]:
-        return self.repository.add(value)
+        raw = dict(value)
+        name = raw.get("name")
+        if isinstance(name, str) and name.strip():
+            taken = {entry["name"] for entry in self.repository.list()}
+            raw["name"] = _unique_name(name.strip(), taken)
+        return self.repository.add(raw)
 
     def get(self, entry_id: str) -> dict[str, Any] | None:
         return self.repository.get(entry_id)
