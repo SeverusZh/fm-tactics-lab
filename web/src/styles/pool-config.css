@@ -1,0 +1,109 @@
+.pool-config {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-panel);
+  padding: var(--space-3) var(--space-4);
+  background: var(--surface-raised);
+  display: grid;
+  gap: var(--space-2);
+}
+
+.pool-config-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.pool-config-head .experiment-pool {
+  margin: 0;
+}
+
+.pool-config-notice {
+  margin: 0;
+  color: var(--pitch);
+  font-size: var(--type-body-sm);
+}
+
+.pool-config-body {
+  display: grid;
+  gap: var(--space-3);
+  border-top: 1px solid var(--border);
+  padding-top: var(--space-3);
+}
+
+.pool-config-entries {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: var(--space-1);
+  max-height: 220px;
+  overflow: auto;
+}
+
+.pool-config-entries legend,
+.pool-config-body legend {
+  font-size: var(--type-caption);
+  color: var(--text-muted);
+  margin-bottom: var(--space-1);
+}
+
+.pool-config-entry {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--type-body-sm);
+}
+
+.pool-config-weight,
+.pool-config-tag {
+  color: var(--text-muted);
+  font-size: var(--type-caption);
+}
+
+.pool-config-tag {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-tag);
+  padding: 0 var(--space-1);
+}
+
+.pool-config-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  align-items: flex-start;
+}
+
+.pool-config-row fieldset,
+.pool-config-players {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: var(--space-1);
+}
+
+.pool-config-row label,
+.pool-config-players label {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--type-body-sm);
+}
+
+.pool-config-hint {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--type-body-sm);
+}
+
+.pool-config-error {
+  margin: 0;
+  color: var(--danger);
+  font-size: var(--type-body-sm);
+}
+
+.pool-config-actions {
+  display: flex;
+  gap: var(--space-2);
+}

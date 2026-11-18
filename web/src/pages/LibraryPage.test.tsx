@@ -1719,7 +1719,9 @@ describe("存档存储战术", () => {
 
     const calls = callsTo("/api/saves/save-1/tactics");
     expect(calls).toHaveLength(1);
-    expect(calls[0].url).toBe("http://127.0.0.1:43210/api/saves/save-1/tactics");
+    expect(calls[0].url).toBe(
+      "http://127.0.0.1:43210/api/saves/save-1/tactics?include_leagues=true",
+    );
     expect(new Headers(calls[0].init.headers).get("Authorization")).toBe("Bearer test-token");
   });
 
@@ -1951,15 +1953,24 @@ describe("存档战术 API 客户端", () => {
     vi.unstubAllGlobals();
   });
 
-  it("listSaveTactics 请求存档战术并解包 items", async () => {
-    stubFetch(() => jsonResponse({ items: [makeSaveTactic({ index: 3 })] }));
+  it("listSaveTactics 请求存档战术并返回联赛元数据", async () => {
+    stubFetch(() =>
+      jsonResponse({
+        items: [makeSaveTactic({ index: 3 })],
+        leagues: [],
+        current: null,
+        ambiguous: [],
+        warnings: [],
+      }),
+    );
 
-    const items = await listSaveTactics(connection, "save-1");
+    const result = await listSaveTactics(connection, "save-1");
 
-    expect(items).toHaveLength(1);
-    expect(items[0].index).toBe(3);
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0].index).toBe(3);
+    expect(result.leagues).toEqual([]);
     const [call] = fetchCalls();
-    expect(call.url).toBe("http://127.0.0.1:43210/api/saves/save-1/tactics");
+    expect(call.url).toBe("http://127.0.0.1:43210/api/saves/save-1/tactics?include_leagues=true");
     expect(call.init.method).toBeUndefined();
   });
 
@@ -2023,5 +2034,152 @@ describe("存档战术 API 客户端", () => {
     const [call] = fetchCalls();
     expect(call.url).toBe("http://127.0.0.1:43210/api/saves/save-1/tactics/2/pool");
     expect(call.init.method).toBe("POST");
+  });
+});
+
+describe("联赛对手战术", () => {
+  beforeEach(() => {
+    fetchMock.mockReset();
+    vi.stubGlobal("fetch", fetchMock);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  const league = {
+    key: "7:257:2029",
+    name: "联赛 #11 · 2029",
+    database_id: 11,
+    competition_id: 7,
+    stage_id: 257,
+    season: 2029,
+    club_count: 20,
+    opponent_count: 19,
+    fixture_count: 380,
+    first_date: "2029-08-17",
+    last_date: "2030-05-26",
+    own: true,
+  };
+
+  it("选择联赛后展示教练预设并支持全部加入客队池", async () => {
+    stubFetch((url) => {
+      if (url.includes("league=")) {
+        return jsonResponse({
+          items: [
+            makeSaveTactic(),
+            makeSaveTactic({
+              index: 10000,
+              name: "阿森纳 · 控球甲 · 主偏好",
+              style: "教练偏好预设",
+              club_name: "阿森纳",
+              source: "coach_preset",
+              coach_name: "阿尔特塔",
+              variant: 1,
+              formation_code: 10,
+              exact: true,
+              available: true,
+              reason: null,
+            }),
+          ],
+          leagues: [league],
+          current: league,
+          ambiguous: [],
+          warnings: [],
+        });
+      }
+      if (url.includes("/tactics")) {
+        return jsonResponse({
+          items: [makeSaveTactic()],
+          leagues: [league],
+          current: league,
+          ambiguous: [],
+          warnings: [],
+        });
+      }
+      if (url.endsWith("/pool")) {
+        return jsonResponse(
+          {
+            id: "pool-1",
+            name: "阿森纳 · 控球甲 · 主偏好",
+            weight: 1,
+            tactic: {},
+            roster: null,
+            created_at: "2026-01-01T00:00:00Z",
+          },
+          201,
+        );
+      }
+      return jsonResponse(makeList([makeSave()]));
+    });
+    renderLibraryPage();
+    await screen.findByText("/saves/season-1.fm");
+
+    const section = openTactics();
+    fireEvent.change(await within(section).findByLabelText("联赛"), {
+      target: { value: "7:257:2029" },
+    });
+
+    expect(await within(section).findByText("教练预设")).toBeInTheDocument();
+    expect(within(section).getByText("阿尔特塔")).toBeInTheDocument();
+    fireEvent.click(within(section).getByRole("button", { name: "全部加入客队池" }));
+
+    expect(await screen.findByText("已加入 1 套客队战术")).toBeInTheDocument();
+    expect(callsTo("/tactics/10000/pool")[0]?.init.method).toBe("POST");
+    expect(callsTo("/tactics/0/pool")).toHaveLength(0);
+  });
+
+  it("联赛对手不可用时展示原因并禁用操作", async () => {
+    stubFetch((url) => {
+      if (url.includes("league=")) {
+        return jsonResponse({
+          items: [
+            makeSaveTactic(),
+            makeSaveTactic({
+              index: 10000,
+              name: "阿森纳 · 战术不可用",
+              style: "",
+              club_name: "阿森纳",
+              source: "coach_preset",
+              coach_name: "",
+              variant: 0,
+              formation_code: 0,
+              exact: false,
+              importable: false,
+              available: false,
+              reason: "当前引擎与游戏版本不一致",
+            }),
+          ],
+          leagues: [league],
+          current: league,
+          ambiguous: [],
+          warnings: ["当前联赛范围未唯一确定，请手动选择联赛"],
+        });
+      }
+      if (url.includes("/tactics")) {
+        return jsonResponse({
+          items: [makeSaveTactic()],
+          leagues: [league],
+          current: league,
+          ambiguous: [],
+          warnings: [],
+        });
+      }
+      return jsonResponse(makeList([makeSave()]));
+    });
+    renderLibraryPage();
+    await screen.findByText("/saves/season-1.fm");
+
+    const section = openTactics();
+    fireEvent.change(await within(section).findByLabelText("联赛"), {
+      target: { value: "7:257:2029" },
+    });
+
+    expect(await within(section).findByText("当前引擎与游戏版本不一致")).toBeInTheDocument();
+    expect(within(section).getByRole("button", { name: "全部加入客队池" })).toBeDisabled();
+    const row = within(section).getByText("阿森纳 · 战术不可用").closest("tr");
+    if (row === null) throw new Error("未找到联赛对手行");
+    expect(within(row).getByRole("button", { name: "加入客队池" })).toBeDisabled();
   });
 });

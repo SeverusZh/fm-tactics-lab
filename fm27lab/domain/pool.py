@@ -409,6 +409,11 @@ def _roster(value: Any, label: str) -> dict[str, Any]:
     }
 
 
+def normalize_pool_roster(value: Any, label: str = "存档名单") -> dict[str, Any]:
+    """校验并归一化单套客队名单，供联赛对手入池前复用。"""
+    return _roster(value, label)
+
+
 def _entry(value: Any, index: int) -> dict[str, Any]:
     label = f"第 {index + 1} 套客队战术"
     if not isinstance(value, dict):

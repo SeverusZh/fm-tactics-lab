@@ -50,6 +50,14 @@ ITEMS = [
         "club_name": "Sev",
         "team_slot": 0,
         "importable": True,
+        "source": "stored",
+        "league_key": None,
+        "coach_name": None,
+        "variant": None,
+        "formation_code": None,
+        "exact": None,
+        "available": True,
+        "reason": None,
     }
 ]
 DRAFT = {
@@ -82,11 +90,14 @@ class FakeService:
         self.entry = entry
         self.calls = []
 
-    def list_tactics(self, save_id):
+    def list_tactics(self, save_id, league_key=None):
         self.calls.append(("list", save_id))
         if self.error is not None:
             raise self.error
         return self.items
+
+    def league_catalog(self, save_id):
+        return {"leagues": [], "current": None, "ambiguous": [], "warnings": []}
 
     def import_tactic(self, save_id, tactic_index, name=None):
         self.calls.append(("import", save_id, tactic_index, name))
@@ -215,7 +226,13 @@ def test_save_tactics_http_lists_items(tmp_path: Path):
     response = client.get(LIST_PATH.format(save_id="save-1"), headers=auth(settings))
 
     assert response.status_code == 200
-    assert response.json() == {"items": ITEMS}
+    assert response.json() == {
+        "items": ITEMS,
+        "leagues": [],
+        "current": None,
+        "ambiguous": [],
+        "warnings": [],
+    }
     assert service.calls == [("list", "save-1")]
 
 
@@ -447,6 +464,14 @@ def test_save_tactics_http_round_trip_with_real_services(tmp_path: Path):
             "club_name": "Sev",
             "team_slot": 0,
             "importable": True,
+            "source": "stored",
+            "league_key": None,
+            "coach_name": None,
+            "variant": None,
+            "formation_code": None,
+            "exact": None,
+            "available": True,
+            "reason": None,
         }
     ]
 

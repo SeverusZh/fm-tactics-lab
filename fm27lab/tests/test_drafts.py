@@ -211,3 +211,63 @@ def test_draft_service_rejects_invalid_instruction_groups(tmp_path: Path):
     value["teams"][0]["phases"][0][0]["instructions"] = {"14": 34}
     with pytest.raises(ValueError, match="对方名单序号"):
         service.create("Draft", value)
+
+
+def pool_scenario() -> dict:
+    cell = {
+        "position": "DC",
+        "role": "CentreBack",
+        "duty": "0",
+        "instructions": {},
+        "target_player": 255,
+        "target_position": 0,
+    }
+    tactic = {
+        "tactic_name": "客队战术",
+        "mentality": 4,
+        "instructions": {},
+        "native_extra_team_bits": "0",
+        "phases": [[dict(cell) for _ in range(11)], [dict(cell) for _ in range(11)]],
+    }
+    return {
+        "enabled": True,
+        "entries": [{"name": "客队战术", "weight": 1, "tactic": tactic}],
+        "uniform": {"enabled": True, "attribute_value": 15},
+        "rotation": {"enabled": True, "rounds": 2},
+        "real": {"enabled": False},
+    }
+
+
+def test_draft_update_normalizes_away_pool(tmp_path: Path):
+    service = DraftService(DraftRepository(database(tmp_path)))
+    draft = service.create("Draft", scenario())
+    value = {**scenario(), "away_tactic_pool": pool_scenario()}
+    updated = service.update(draft["id"], scenario=value)
+    pool = updated["scenario"]["away_tactic_pool"]
+    assert pool["rotation"] == {"enabled": True, "rounds": 2}
+    assert pool["entries"][0]["name"] == "客队战术"
+
+
+def test_draft_update_rejects_invalid_rotation_rounds(tmp_path: Path):
+    service = DraftService(DraftRepository(database(tmp_path)))
+    draft = service.create("Draft", scenario())
+    pool = pool_scenario()
+    pool["rotation"] = {"enabled": True, "rounds": 0}
+    with pytest.raises(ValueError, match="轮战每套轮数"):
+        service.update(draft["id"], scenario={**scenario(), "away_tactic_pool": pool})
+
+
+def test_draft_update_rejects_real_roster_without_snapshots(tmp_path: Path):
+    service = DraftService(DraftRepository(database(tmp_path)))
+    draft = service.create("Draft", scenario())
+    pool = pool_scenario()
+    pool["real"] = {"enabled": True}
+    with pytest.raises(ValueError, match="真实名单模式"):
+        service.update(draft["id"], scenario={**scenario(), "away_tactic_pool": pool})
+
+
+def test_draft_update_treats_null_away_pool_as_absent(tmp_path: Path):
+    service = DraftService(DraftRepository(database(tmp_path)))
+    draft = service.create("Draft", scenario())
+    updated = service.update(draft["id"], scenario={**scenario(), "away_tactic_pool": None})
+    assert "away_tactic_pool" not in updated["scenario"]

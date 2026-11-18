@@ -153,6 +153,9 @@ function loanTitle(player: SquadPlayer): string {
 
 function tacticImportBlocker(tactic: SaveTactic): string | null {
   if (tactic.importable) return null;
+  if (tactic.available === false && tactic.reason !== null && tactic.reason !== undefined) {
+    return tactic.reason;
+  }
   return tactic.team_slot === 0 ? "需要先配置引擎资源" : "非一线队存储战术";
 }
 
@@ -181,6 +184,7 @@ export function LibraryPage() {
   const [squadSaveId, setSquadSaveId] = useState<string | null>(null);
   const [squadClubUid, setSquadClubUid] = useState<number | null>(null);
   const [tacticsSaveId, setTacticsSaveId] = useState<string | null>(null);
+  const [tacticsLeague, setTacticsLeague] = useState("");
   const [rosterDraftId, setRosterDraftId] = useState("");
   const [rosterSide, setRosterSide] = useState<RosterSide>("home");
   const [rosterScope, setRosterScope] = useState<RosterScope>("starters");
@@ -205,8 +209,8 @@ export function LibraryPage() {
   });
 
   const saveTactics = useQuery({
-    queryKey: ["save-tactics", connection?.url, tacticsSaveId],
-    queryFn: () => listSaveTactics(connection!, tacticsSaveId!),
+    queryKey: ["save-tactics", connection?.url, tacticsSaveId, tacticsLeague],
+    queryFn: () => listSaveTactics(connection!, tacticsSaveId!, tacticsLeague),
     enabled: connection !== null && tacticsSaveId !== null,
   });
 
@@ -493,6 +497,7 @@ export function LibraryPage() {
 
   const openTactics = (saveId: string) => {
     setTacticsSaveId(saveId);
+    setTacticsLeague("");
     setSquadSaveId(null);
     setSquadClubUid(null);
     setRosterError(null);
@@ -998,7 +1003,31 @@ export function LibraryPage() {
     );
 
   const tacticsSave = items.find((save) => save.id === tacticsSaveId);
-  const tactics = saveTactics.data ?? [];
+  const tacticList = saveTactics.data;
+  const tactics = tacticList?.items ?? [];
+  const tacticLeagues = tacticList?.leagues ?? [];
+  const tacticWarnings = tacticList?.warnings ?? [];
+  const coachTactics = tactics.filter((row) => row.source === "coach_preset");
+  const bulkPool = useMutation({
+    mutationFn: async (rows: SaveTactic[]) => {
+      const added: string[] = [];
+      for (const row of rows) {
+        if (!row.available) continue;
+        await addSaveTacticToPool(connection!, tacticsSaveId!, row.index);
+        added.push(row.name);
+      }
+      return added;
+    },
+    onSuccess: (added) => {
+      setActionError(null);
+      setNotice(added.length === 0 ? "没有可加入的战术" : `已加入 ${added.length} 套客队战术`);
+      void queryClient.invalidateQueries({ queryKey: ["pools", connection?.url] });
+    },
+    onError: (error) => {
+      setNotice(null);
+      setActionError(errorMessage(error));
+    },
+  });
   const importTacticEngineUnavailable =
     importTactic.error instanceof ApiError &&
     (importTactic.error.status === 503 || importTactic.error.code === "engine_unavailable");
@@ -1016,12 +1045,52 @@ export function LibraryPage() {
       </div>
     );
   } else if (saveTactics.isSuccess) {
+    const leagueSelect = (
+      <div className="saves-tactics-league">
+        <label htmlFor="tactics-league">联赛</label>
+        <select
+          id="tactics-league"
+          value={tacticsLeague}
+          onChange={(event) => setTacticsLeague(event.target.value)}
+        >
+          <option value="">仅存储战术</option>
+          {tacticLeagues.map((league) => (
+            <option key={league.key} value={league.key}>
+              {league.name ?? league.key} · {league.opponent_count} 个对手
+              {league.own ? " · 当前" : ""}
+            </option>
+          ))}
+        </select>
+        {tacticsLeague !== "" ? (
+          <button
+            className="button small"
+            type="button"
+            disabled={bulkPool.isPending || coachTactics.every((row) => !row.available)}
+            onClick={() =>
+              bulkPool.mutate(coachTactics.filter((row) => row.available))
+            }
+          >
+            {bulkPool.isPending ? "加入中…" : "全部加入客队池"}
+          </button>
+        ) : null}
+      </div>
+    );
     tacticsPanel =
       tactics.length === 0 ? (
-        <p className="field-hint">该存档没有可用的存储战术</p>
+        <>
+          {leagueSelect}
+          <p className="field-hint">该存档没有可用的存储战术</p>
+        </>
       ) : (
-        <div
-          className="jobs-table-wrap"
+        <>
+          {leagueSelect}
+          {tacticWarnings.length === 0 ? null : (
+            <p className="field-hint" role="status">
+              {tacticWarnings.join("；")}
+            </p>
+          )}
+          <div
+            className="jobs-table-wrap"
           tabIndex={0}
           role="region"
           aria-label="存档存储战术列表"
@@ -1031,7 +1100,9 @@ export function LibraryPage() {
             <thead>
               <tr>
                 <th scope="col">名称</th>
+                <th scope="col">来源</th>
                 <th scope="col">风格</th>
+                <th scope="col">主教练</th>
                 <th scope="col">心态</th>
                 <th scope="col">槽位</th>
                 <th scope="col">可导入</th>
@@ -1051,7 +1122,11 @@ export function LibraryPage() {
                 return (
                   <tr key={tactic.index}>
                     <td>{tactic.name === "" ? "—" : tactic.name}</td>
+                    <td className="jobs-kind">
+                      {tactic.source === "coach_preset" ? "教练预设" : "存储战术"}
+                    </td>
                     <td className="jobs-kind">{tactic.style === "" ? "—" : tactic.style}</td>
+                    <td>{tactic.coach_name === null || tactic.coach_name === "" ? "—" : tactic.coach_name}</td>
                     <td>{mentalityLabel(tactic.mentality)}</td>
                     <td>
                       <span
@@ -1105,7 +1180,8 @@ export function LibraryPage() {
               })}
             </tbody>
           </table>
-        </div>
+          </div>
+        </>
       );
   }
 

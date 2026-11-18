@@ -140,7 +140,7 @@ TOKEN=$(python -c "import json,sys;print(json.load(open(sys.argv[1]))['token'])"
 | OpenAPI 文档 | curl -s -o /dev/null -w '%{http_code}' "$URL/api/openapi.json" | 200 |
 | Swagger UI | curl -s -o /dev/null -w '%{http_code}' "$URL/api/docs" | 200 |
 | 路径数与操作数 | python -c "import json,urllib.request,sys;d=json.load(urllib.request.urlopen(sys.argv[1]));ops=sum(len([k for k in v if k in ('get','post','put','patch','delete')]) for v in d['paths'].values());print(len(d['paths']),ops)" "$URL/api/openapi.json" | 57 条路径，75 个操作 |
-| 组件模型数 | python -c "import json,urllib.request,sys;d=json.load(urllib.request.urlopen(sys.argv[1]));print(len(d['components']['schemas']))" "$URL/api/openapi.json" | 84 |
+| 组件模型数 | python -c "import json,urllib.request,sys;d=json.load(urllib.request.urlopen(sys.argv[1]));print(len(d['components']['schemas']))" "$URL/api/openapi.json" | 86 |
 
 证据 fm27lab/interfaces/http/app.py:107-113。
 

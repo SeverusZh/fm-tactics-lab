@@ -255,3 +255,8 @@
     width: 100%;
   }
 }
+
+.experiment-pool-wrap {
+  display: grid;
+  gap: var(--space-2);
+}

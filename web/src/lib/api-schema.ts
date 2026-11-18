@@ -366,6 +366,21 @@ export interface JobUpdateInput {
   name?: string | null;
 }
 
+export interface LeagueSummaryOutput {
+  key: string;
+  name?: string | null;
+  database_id?: number | null;
+  competition_id?: number | null;
+  stage_id?: number | null;
+  season?: number | null;
+  club_count: number;
+  opponent_count?: number;
+  fixture_count: number;
+  first_date?: string | null;
+  last_date?: string | null;
+  own?: boolean;
+}
+
 export interface PairedOutput {
   n: number;
   goal_difference_delta: number | null;
@@ -513,6 +528,10 @@ export interface SaveTacticImportOutput {
 
 export interface SaveTacticListOutput {
   items: SaveTacticOutput[];
+  leagues?: LeagueSummaryOutput[];
+  current?: LeagueSummaryOutput | null;
+  ambiguous?: string[];
+  warnings?: string[];
 }
 
 export interface SaveTacticOutput {
@@ -524,6 +543,14 @@ export interface SaveTacticOutput {
   club_name: string | null;
   team_slot: number | null;
   importable: boolean;
+  source?: string;
+  league_key?: string | null;
+  coach_name?: string | null;
+  variant?: number | null;
+  formation_code?: number | null;
+  exact?: boolean | null;
+  available?: boolean;
+  reason?: string | null;
 }
 
 export interface SaveUpdateInput {

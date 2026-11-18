@@ -519,3 +519,118 @@ def test_add_to_pool_checks_pool_before_save_lookup(tmp_path: Path):
 
     with pytest.raises(ValueError, match=POOL_UNAVAILABLE_ERROR):
         service.add_to_pool("missing", 0)
+
+
+LEAGUE_ROW = {
+    "index": 10000,
+    "name": "阿森纳 · 控球甲 · 主偏好",
+    "style": "教练偏好预设",
+    "mentality": 4,
+    "club_uid": 2,
+    "club_name": "阿森纳",
+    "team_slot": 0,
+    "importable": True,
+    "source": "coach_preset",
+    "coach_name": "阿尔特塔",
+    "variant": 1,
+    "formation_code": 10,
+    "exact": True,
+    "available": True,
+    "reason": None,
+}
+
+
+class FakeLeagueTactic:
+    def __init__(self):
+        self.name = "阿森纳 · 控球甲 · 主偏好"
+        self.available = True
+        self.reason = None
+        self.scenario = {"teams": [{"name": "Home"}, {"name": "Away"}]}
+
+    def public(self):
+        return dict(LEAGUE_ROW)
+
+
+class FakeLeague:
+    def __init__(self):
+        self.calls = []
+
+    def rows(self, save_id, league_key):
+        self.calls.append(("rows", save_id, league_key))
+        return [dict(LEAGUE_ROW)]
+
+    def catalog(self, save_id):
+        return {
+            "leagues": [{"key": "7:257:2029", "name": "联赛 #11", "club_count": 20}],
+            "current": {"key": "7:257:2029", "name": "联赛 #11", "club_count": 20},
+            "ambiguous": [],
+            "warnings": [],
+        }
+
+    def materialize(self, save_id, index):
+        self.calls.append(("materialize", save_id, index))
+        return FakeLeagueTactic()
+
+    def export_fmf(self, save_id, index):
+        self.calls.append(("export", save_id, index))
+        return "阿森纳 · 控球甲 · 主偏好", b"league-fmf"
+
+    def pool_entry(self, save_id, index):
+        self.calls.append(("pool", save_id, index))
+        return {"name": "阿森纳 · 控球甲 · 主偏好", "weight": 1, "tactic": {"phases": []}}
+
+
+class FakePoolsCreate(FakePools):
+    def create(self, value):
+        self.calls.append({"create": dict(value)})
+        return {"id": "entry-2", **value}
+
+
+def make_league_service(tmp_path: Path, *, league=None):
+    service, deps = make_service(tmp_path, rows=(stored(0),))
+    service.league = league if league is not None else FakeLeague()
+    service.pools = FakePoolsCreate()
+    return service, deps
+
+
+def test_list_tactics_appends_league_rows(tmp_path: Path):
+    service, _deps = make_league_service(tmp_path)
+    items = service.list_tactics("save-1", "7:257:2029")
+    assert [item["index"] for item in items] == [0, 10000]
+    assert items[1]["source"] == "coach_preset"
+
+
+def test_list_tactics_with_league_returns_none_for_unknown_save(tmp_path: Path):
+    service, _deps = make_league_service(tmp_path)
+    assert service.list_tactics("missing") is None
+
+
+def test_league_catalog_returns_warnings_when_reader_fails(tmp_path: Path):
+    service, _deps = make_league_service(tmp_path)
+
+    def broken(_save_id):
+        raise ValueError("存档无法读取")
+
+    service.league.catalog = broken
+    assert service.league_catalog("save-1")["warnings"] == ["存档无法读取"]
+
+
+def test_import_league_tactic_creates_draft(tmp_path: Path):
+    service, deps = make_league_service(tmp_path)
+    draft = service.import_tactic("save-1", 10000, "自定义")
+    assert draft["name"] == "自定义"
+    assert deps["drafts"].calls[0]["scenario"]["teams"][0]["name"] == "Home"
+
+
+def test_export_league_tactic_delegates_to_league_service(tmp_path: Path):
+    service, _deps = make_league_service(tmp_path)
+    title, payload = service.export_tactic("save-1", 10000)
+    assert title == "阿森纳 · 控球甲 · 主偏好"
+    assert payload == b"league-fmf"
+
+
+def test_add_league_tactic_to_pool_uses_pool_entry(tmp_path: Path):
+    service, _deps = make_league_service(tmp_path)
+    entry = service.add_to_pool("save-1", 10000)
+    assert entry["id"] == "entry-2"
+    assert entry["name"] == "阿森纳 · 控球甲 · 主偏好"

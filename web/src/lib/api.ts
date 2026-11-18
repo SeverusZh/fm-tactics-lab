@@ -1,4 +1,4 @@
-// API 类型映射：生成别名 48 项；保留手写类型 24 项；字段派生 2 项；ApiError 类保留；明细见 api-types.test.ts。
+// API 类型映射：生成别名 49 项；保留手写类型 24 项；字段派生 2 项；ApiError 类保留；明细见 api-types.test.ts。
 
 import type { Connection } from "./connection";
 import type {
@@ -42,6 +42,7 @@ import type {
   SaveImportInput,
   SaveListOutput,
   SaveOutput,
+  SaveTacticListOutput,
   SaveTacticOutput,
   SaveUpdateInput,
   SettingListOutput,
@@ -351,6 +352,8 @@ export type SaveImport = SaveImportInput;
 
 export type SaveTactic = SaveTacticOutput;
 
+export type SaveTacticList = SaveTacticListOutput;
+
 // 存档查询参数未在 OpenAPI 中单独建模，保留手写。
 export type SaveQuery = {
   status?: SaveStatus;
@@ -399,12 +402,17 @@ export function importSave(
 export async function listSaveTactics(
   connection: Connection,
   saveId: string,
-): Promise<SaveTactic[]> {
-  const body = await apiJson<{ items: SaveTactic[] }>(
+  league?: string,
+  includeLeagues = true,
+): Promise<SaveTacticList> {
+  const query = new URLSearchParams();
+  if (league !== undefined && league !== "") query.set("league", league);
+  if (includeLeagues) query.set("include_leagues", "true");
+  const search = query.size === 0 ? "" : `?${query.toString()}`;
+  return apiJson<SaveTacticList>(
     connection,
-    `/api/saves/${encodeURIComponent(saveId)}/tactics`,
+    `/api/saves/${encodeURIComponent(saveId)}/tactics${search}`,
   );
-  return body.items;
 }
 
 export async function importSaveTactic(

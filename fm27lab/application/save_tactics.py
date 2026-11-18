@@ -15,6 +15,11 @@ from fm27lab.adapters.engine_native.tactic_file import (
 )
 from fm27lab.adapters.save_fmsave.tactics import StoredTactic, read_tactic_stream, read_tactics
 from fm27lab.application.drafts import DraftService
+from fm27lab.application.league_tactics import (
+    LEAGUE_INDEX_BASE,
+    LEAGUE_LIST_REQUIRED,
+    LeagueTacticsService,
+)
 from fm27lab.application.saves import SavesService
 from fm27lab.application.source_paths import clean_path_text
 from fm27lab.application.tactic_export import TacticExporter, archive_title
@@ -60,6 +65,7 @@ class SaveTacticsService:
         builder: Builder = build_scenario,
         pools: PoolService | None = None,
         exporter: TacticExporter | None = None,
+        league: LeagueTacticsService | None = None,
     ) -> None:
         self.saves = saves
         self.drafts = drafts
@@ -71,6 +77,7 @@ class SaveTacticsService:
         self.builder = builder
         self.pools = pools
         self.exporter = exporter if exporter is not None else TacticExporter()
+        self.league = league
         self._cache: dict[str, tuple[tuple[Any, ...], tuple[dict[str, Any], ...]]] = {}
 
     def engine_ready(self) -> bool:
@@ -80,11 +87,31 @@ class SaveTacticsService:
             and self.settings.game_root is not None
         )
 
-    def list_tactics(self, save_id: str) -> list[dict[str, Any]] | None:
+    def list_tactics(self, save_id: str, league_key: str | None = None) -> list[dict[str, Any]] | None:
         save = self.saves.get(save_id)
         if save is None:
             return None
-        return self._items(save_id, self._source_path(save))
+        items = self._items(save_id, self._source_path(save))
+        if league_key is None:
+            return items
+        if self.league is None:
+            raise ValueError(LEAGUE_LIST_REQUIRED)
+        return [*items, *self.league.rows(save_id, league_key)]
+
+    def league_catalog(self, save_id: str) -> dict[str, Any] | None:
+        if self.saves.get(save_id) is None:
+            return None
+        if self.league is None:
+            return {"leagues": [], "current": None, "ambiguous": [], "warnings": []}
+        try:
+            return self.league.catalog(save_id)
+        except (OSError, ValueError) as error:
+            return {
+                "leagues": [],
+                "current": None,
+                "ambiguous": [],
+                "warnings": [str(error)],
+            }
 
     def import_tactic(
         self,
@@ -100,6 +127,12 @@ class SaveTacticsService:
         return self.drafts.create(self._draft_name(name, item["name"]), scenario, source)
 
     def export_tactic(self, save_id: str, tactic_index: int) -> tuple[str, bytes] | None:
+        if tactic_index >= LEAGUE_INDEX_BASE:
+            if self.league is None:
+                raise ValueError(LEAGUE_LIST_REQUIRED)
+            if self.saves.get(save_id) is None:
+                return None
+            return self.league.export_fmf(save_id, tactic_index)
         target = self._target(save_id, tactic_index)
         if target is None:
             return None
@@ -116,6 +149,12 @@ class SaveTacticsService:
     def add_to_pool(self, save_id: str, tactic_index: int) -> dict[str, Any] | None:
         if self.pools is None:
             raise ValueError(POOL_UNAVAILABLE_ERROR)
+        if tactic_index >= LEAGUE_INDEX_BASE:
+            if self.league is None:
+                raise ValueError(LEAGUE_LIST_REQUIRED)
+            if self.saves.get(save_id) is None:
+                return None
+            return self.pools.create(self.league.pool_entry(save_id, tactic_index))
         target = self._target(save_id, tactic_index)
         if target is None:
             return None
@@ -127,6 +166,15 @@ class SaveTacticsService:
         save_id: str,
         tactic_index: int,
     ) -> tuple[dict[str, Any], dict[str, Any]] | None:
+        if tactic_index >= LEAGUE_INDEX_BASE:
+            if self.league is None:
+                raise ValueError(LEAGUE_LIST_REQUIRED)
+            if self.saves.get(save_id) is None:
+                return None
+            item = self.league.materialize(save_id, tactic_index)
+            if not item.available:
+                raise ValueError(item.reason or TACTIC_MISSING_ERROR)
+            return item.public(), item.scenario
         save = self.saves.get(save_id)
         if save is None:
             return None

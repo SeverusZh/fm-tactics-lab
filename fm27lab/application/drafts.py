@@ -7,7 +7,19 @@ from typing import Any
 
 from fm27lab.adapters.storage_sqlite.repositories import DraftRepository
 from fm27lab.application.tactics_validation import TacticalValidator
+from fm27lab.domain.pool import normalize_away_pool
 from fm27lab.domain.scenario import normalize_scenario
+
+
+def _normalize(scenario: Mapping[str, Any]) -> dict[str, Any]:
+    normalized = normalize_scenario(scenario)
+    if "away_tactic_pool" in normalized:
+        pool = normalized["away_tactic_pool"]
+        if pool is None:
+            normalized.pop("away_tactic_pool")
+        else:
+            normalized["away_tactic_pool"] = normalize_away_pool(pool)
+    return normalized
 
 
 class DraftService:
@@ -23,7 +35,7 @@ class DraftService:
     ) -> dict[str, Any]:
         if source is not None and not isinstance(source, Mapping):
             raise ValueError("草案来源必须是对象")
-        normalized = normalize_scenario(scenario)
+        normalized = _normalize(scenario)
         if self.validator is not None:
             checked = self.validator.validate(normalized)
             if checked is not None:
@@ -68,7 +80,7 @@ class DraftService:
         if self.repository.get(draft_id) is None:
             return None
         if "scenario" in changes:
-            changes["scenario"] = normalize_scenario(changes["scenario"])
+            changes["scenario"] = _normalize(changes["scenario"])
         if "source" in changes and not isinstance(changes["source"], Mapping):
             raise ValueError("草案来源必须是对象")
         if self.validator is not None and "scenario" in changes:
