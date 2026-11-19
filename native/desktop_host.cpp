@@ -38,23 +38,30 @@ static int tick_step=1;
 static bool policy_audit=false;
 static bool probe_engine=false;
 static bool diagnostic_mode=false;
+static bool trial_profile=false;
 static fs::path worker_manifest;static bool worker_bootstrapped=false;
 static ULONGLONG timing_start=0,timing_loaded=0,timing_active=0,timing_prepare=0,timing_ready=0;
 static FILE* log_file;
 static unsigned char* native_base;
 static uint64_t input_cursor=0,input_reads=0;
 #include "native_steam_lifecycle.h"
+static unsigned char adapter_zero_page[0x1000]={};
+static void* adapter_trial_alloc(size_t size){return calloc(1,size?size:1);}
+static void* image_at(uintptr_t rva){return native_base+rva;}
 static void* at(uintptr_t rva){
     if(rva>=0xf0000000){
         static const unsigned missing[]={0xfb2580,0x4a7c550};
         fprintf(log_file,"{\"event\":\"formal_unmapped_reference\",\"reference\":%u}\n",missing[rva-0xf0000000]);
         fflush(log_file);desktop_finish_and_exit(251);
     }
+    if(trial_profile&&rva==0xa9fff0)return(void*)adapter_trial_alloc;
     if(adapter_profile.loaded){
         auto entry=adapter_profile.rva_map.find((unsigned)rva);
         if(entry!=adapter_profile.rva_map.end())return native_base+entry->second;
         fprintf(log_file,"{\"event\":\"adapter_anchor_unmapped\",\"rva\":%u}\n",(unsigned)rva);
-        fflush(log_file);desktop_finish_and_exit(252);
+        fflush(log_file);
+        if(trial_profile)return adapter_zero_page;
+        desktop_finish_and_exit(252);
     }
     return native_base+rva;
 }
@@ -534,7 +541,7 @@ static const char* native_type(void* pointer){
     if(col<base||col+24>=base+434540544||*(uint32_t*)col!=1)return nullptr;
     auto descriptor=*(uint32_t*)(col+12);
     if(descriptor+256>=434540544)return nullptr;
-    auto name=(char*)at(descriptor+16);
+    auto name=(char*)image_at(descriptor+16);
     return strncmp(name,".?A",3)?nullptr:name;
 }
 static void dump_match_input(unsigned char* match){
@@ -749,9 +756,12 @@ static int native_match(void* interface_object){
     auto resources=*(void**)at(0x580eb40);
     ((void(*)(void*,void*))at(0xc71eb0))(resources,at(0x581e6a0));
     // Canonical JSON resource type; its native initializer handles the binary
-    // and text resource readers used by the original match data.
-    ((void(*)(void*,void*))at(0xc723c0))(resources,at(0x5831568));
-    desktop_coach_preset_resource_types(resources);
+    // and text resource readers used by the original match data. A trial profile
+    // may omit optional registrations while the required anchors are located.
+    if(!trial_profile){
+        ((void(*)(void*,void*))at(0xc723c0))(resources,at(0x5831568));
+        desktop_coach_preset_resource_types(resources);
+    }
     ((void(*)(void*))at(0xc72460))(resources);
     auto type_begin=((uintptr_t*)resources)[0x60/8],type_end=((uintptr_t*)resources)[0x68/8];
     fprintf(log_file,"{\"event\":\"native_resource_type_count\",\"count\":%llu}\n",(unsigned long long)((type_end-type_begin)/8));fflush(log_file);
@@ -784,9 +794,19 @@ static int native_match(void* interface_object){
     fprintf(log_file,"{\"event\":\"native_resource_index_built\",\"status\":%d,\"indexed_keys\":%llu}\n",scan_status[0],((unsigned long long*)resources)[0x58/8]);fflush(log_file);
     uintptr_t query[2]={},folder_list[3]={};
     ((void*(*)(void*,void*))at(0x1266b0))(query,at(0x58340c8));
+    if(trial_profile){
+        auto key=(unsigned char*)at(0x58340c8);
+        fprintf(log_file,"{\"event\":\"adapter_trial_query\",\"q0\":\"%llu\",\"q1\":\"%llu\",\"key0\":\"%llu\",\"key1\":\"%llu\",\"key_bytes\":\"",(unsigned long long)query[0],(unsigned long long)query[1],(unsigned long long)*(uintptr_t*)key,(unsigned long long)*((uintptr_t*)key+1));
+        for(unsigned i=0;i<32;i++)fprintf(log_file,"%02x",key[i]);
+        fputs("\",\"query_bytes\":\"",log_file);
+        auto q=(unsigned char*)(uintptr_t)query[0];
+        if(q){for(unsigned i=0;i<64;i++)fprintf(log_file,"%02x",q[i]);}
+        fputs("\"}\n",log_file);fflush(log_file);
+    }
     auto folder_found=((unsigned char(*)(void*,void*,void*))at(0x126a00))(resources,query,folder_list);
     fprintf(log_file,"{\"event\":\"native_xg_folder_probe\",\"found\":%s,\"entries\":%llu}\n",folder_found?"true":"false",(unsigned long long)((folder_list[1]-folder_list[0])/8));fflush(log_file);
-    if(scan_status[0]||!folder_found||folder_list[0]==folder_list[1])desktop_finish_and_exit(95);
+    if(!trial_profile && (scan_status[0]||!folder_found||folder_list[0]==folder_list[1]))desktop_finish_and_exit(95);
+    if(trial_profile) fprintf(log_file,"{\"event\":\"native_xg_folder_probe_trial\",\"found\":%s,\"entries\":%llu}\n",folder_found?"true":"false",(unsigned long long)((folder_list[1]-folder_list[0])/8));
     // Execute the complete original bootstrap, preserving its native default
     // input rather than manually setting its success/readiness flags.
     static unsigned char init_input[0x88];memcpy(init_input,at(0x5821530),sizeof(init_input));
@@ -794,13 +814,18 @@ static int native_match(void* interface_object){
     fprintf(log_file,"{\"event\":\"native_engine_bootstrap_returned\",\"accepted\":%s}\n",initialized?"true":"false");fflush(log_file);
     if(!initialized)desktop_finish_and_exit(93);
     worker_bootstrapped=true;
+    if(trial_profile){
+        auto getter=(void*(*)(void*))GetProcAddress((HMODULE)native_base,"i_interface_get_instance");
+        if(getter){auto result=getter(interface_object);fprintf(log_file,"{\"event\":\"adapter_trial_interface_refresh\",\"self_returned\":%s,\"vtable_rva\":\"0x%llx\"}\n",result==interface_object?"true":"false",*(unsigned long long*)interface_object-(unsigned long long)native_base);fflush(log_file);}
+    }
     }else{fputs("{\"event\":\"native_worker_bootstrap_reused\"}\n",log_file);}
     auto resources=*(void**)at(0x580eb40);
     auto stats=*(uintptr_t**)at(0x58215b8);
     size_t versions=(stats[2]-stats[1])/32,models=0;
     for(auto p=stats[1];p<stats[2];p+=32){auto row=(uintptr_t*)p;models+=(row[2]-row[1])/32;}
     fprintf(log_file,"{\"event\":\"native_xg_models_parsed\",\"version_groups\":%llu,\"model_records\":%llu}\n",(unsigned long long)versions,(unsigned long long)models);fflush(log_file);
-    if(!versions||!models)desktop_finish_and_exit(96);
+    if(!trial_profile && (!versions||!models))desktop_finish_and_exit(96);
+    if(trial_profile) fprintf(log_file,"{\"event\":\"native_xg_models_trial\",\"version_groups\":%llu,\"model_records\":%llu}\n",(unsigned long long)versions,(unsigned long long)models);
     interface_object=*(void**)at(0x581cab0);
     // Open the PKM container with the same native reader factory as a84eec.
     // This delegates container decoding and stream/EOF semantics to FM itself.
@@ -827,7 +852,7 @@ static int native_match(void* interface_object){
     auto slots=(void**)__readgsqword(0x58);
     // Read the TLS-index RVA from the PE TLS directory rather than assuming it.
     auto dos=(IMAGE_DOS_HEADER*)native_base;auto nt=(IMAGE_NT_HEADERS64*)(native_base+dos->e_lfanew);
-    auto tls_directory=(IMAGE_TLS_DIRECTORY64*)at(nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_TLS].VirtualAddress);
+    auto tls_directory=(IMAGE_TLS_DIRECTORY64*)image_at(nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_TLS].VirtualAddress);
     auto index=*(unsigned int*)tls_directory->AddressOfIndex;
     auto tls=(unsigned char*)slots[index];
     if(!tls[0x4b8])((void(*)())at(0x4941140))();
@@ -980,6 +1005,13 @@ static LONG WINAPI observe(EXCEPTION_POINTERS* p){
     std::lock_guard<std::recursive_mutex> lock(worker_log_lock);
     fprintf(log_file,"{\"event\":\"exception\",\"code\":\"0x%lx\",\"address\":\"0x%llx\"}\n",p->ExceptionRecord->ExceptionCode,(unsigned long long)p->ExceptionRecord->ExceptionAddress);fflush(log_file);
     debug_text(p->ExceptionRecord);
+    if(p->ExceptionRecord->ExceptionCode!=EXCEPTION_ACCESS_VIOLATION){
+        HMODULE fault_module=nullptr;wchar_t fault_path[MAX_PATH]={};
+        GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS|GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,(LPCWSTR)p->ExceptionRecord->ExceptionAddress,&fault_module);
+        if(fault_module)GetModuleFileNameW(fault_module,fault_path,MAX_PATH);
+        auto fault_name=wcsrchr(fault_path,L'\\');if(fault_name)fault_name++;else fault_name=fault_path;
+        fprintf(log_file,"{\"event\":\"native_exception_rva\",\"module\":\"%ls\",\"rva\":\"0x%llx\"}\n",fault_name,fault_module?(unsigned long long)((uintptr_t)p->ExceptionRecord->ExceptionAddress-(uintptr_t)fault_module):0ULL);fflush(log_file);
+    }
     if(p->ExceptionRecord->ExceptionCode==EXCEPTION_ACCESS_VIOLATION){
         auto c=p->ContextRecord;HMODULE module=nullptr;wchar_t path[MAX_PATH]={};
         GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS|GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,(LPCWSTR)c->Rip,&module);
@@ -1115,7 +1147,7 @@ static int child(bool run_match){
         fprintf(log_file,"{\"event\":\"adapter_profile_invalid\",\"reason\":\"%s\"}\n",adapter_profile.error.c_str());fflush(log_file);
         return 253;
     }
-    AddVectoredExceptionHandler(0,observe);
+    if(!trial_profile)AddVectoredExceptionHandler(0,observe);
     wchar_t desktop[256]={};DWORD needed=0;
     GetUserObjectInformationW(GetThreadDesktop(GetCurrentThreadId()),UOI_NAME,desktop,sizeof(desktop),&needed);
     fprintf(log_file,"{\"event\":\"simulator_started\",\"isolated_desktop\":%s,\"full_match_completed\":false,\"extracted_engine\":false}\n",wcsstr(desktop,L"FmEngineControl_")?"true":"false");fflush(log_file);
@@ -1211,6 +1243,7 @@ int wmain(int argc,wchar_t** argv){
         else if(arg==L"--policy-audit")policy_audit=true;
         else if(arg==L"--find-activation"){find_activation=true;diagnostic_mode=true;}
         else if(arg==L"--probe-engine"){probe_engine=true;diagnostic_mode=true;}
+        else if(arg==L"--trial-profile"){trial_profile=true;diagnostic_mode=true;}
         else if(arg==L"--match"){}
         else if(arg==L"--help"){puts("FM27Simulator [--fixture INPUT.pkm] [--seed UINT32] [--output RUN.jsonl] [--tick-step 1..256]\nRuns original native simulation on a private desktop. Retains the complete native DLL; no fm.exe or Unity launch.");return 0;}
         else if((arg==L"--fixture"||arg==L"--output"||arg==L"--seed"||arg==L"--tick-step"||arg==L"--dump-input"||arg==L"--scenario-file")&&i+1<argc){
@@ -1246,6 +1279,7 @@ int wmain(int argc,wchar_t** argv){
     if(policy_audit)command+=L" --policy-audit";
     if(find_activation)command+=L" --find-activation";
     if(probe_engine)command+=L" --probe-engine";
+    if(trial_profile)command+=L" --trial-profile";
     if(!desktop_cancel_name.empty())command+=L" --cancel-event "+quote(desktop_cancel_name);
     if(!dump_input.empty())command+=L" --dump-input "+quote(dump_input.wstring());
     if(inspect_fixture_only)command+=L" --inspect-fixture";
