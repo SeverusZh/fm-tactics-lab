@@ -259,6 +259,8 @@ def test_engine_diagnose_returns_diagnosis(tmp_path: Path, monkeypatch):
         "reason": "镜像哈希匹配",
         "adapter_version": "2.1.0",
         "image_sha256": "a" * 64,
+        "missing": None,
+        "mode": None,
     }
     assert calls == [(engine.resolve(), game.resolve())]
 
@@ -343,6 +345,8 @@ def test_engine_openapi_documents_paths_and_models(tmp_path: Path):
         "reason",
         "adapter_version",
         "image_sha256",
+        "missing",
+        "mode",
     }
     assert set(schemas["EngineDiagnosisOutput"]["required"]) == {"compatible", "trial_allowed", "reason", "image_sha256"}
     imported = paths["/api/engine/import"]["post"]

@@ -42,14 +42,21 @@ def test_steam_adapter_version_matches_profile_and_execution_guard():
     assert guard.group(1) == profile["reference_sha256"]
 
 
-def test_steam_host_waits_on_profile_activation_flag():
+def test_steam_host_resolves_activation_before_the_flag_fallback():
     host = (NATIVE / "desktop_host.cpp").read_text(encoding="utf8")
     assert "0x1718f818" not in host
     assert "0x1718f818" not in (NATIVE / "profile_metadata.json").read_text(encoding="utf8")
-    assert re.search(r"if\s*\(\s*!\s*compat_activation_flag\s*\)\s*\{", host)
-    assert re.search(r"module\s*\+\s*compat_activation_flag", host)
+    assert 'GetProcAddress(module,"WaitForActivation")' in host
+    assert "native_activation_wait_returned" in host
+    assert "adapter_activation_rva" in host
+    assert "adapter_profile.activation_rva" in host
     assert "activation_flag_unmapped" in host
+    assert "adapter_profile_partial_requires_diagnostic" in host
     assert "--find-activation" in host
+    profile = (NATIVE / "fm27_adapter_profile.h").read_text(encoding="utf8")
+    assert "FM27_ADAPTER_PROFILE" in profile
+    assert "adapter_hex" in profile
+    assert "map_conflict" in profile
 
 
 def test_epic_adapter_and_profile_publish_digests_only():
@@ -91,6 +98,7 @@ def test_profile_header_renders_steam_bytes_and_epic_digests():
     rendered_ranges = steam_header.split("compat_ranges[]={", 1)[1].split("};", 1)[0]
     assert rendered_ranges.count("compat_bytes_") == len(steam["ranges"])
     assert "FM27_COMPAT_DIGEST_RANGES" not in steam_header
+    assert "#define FM27_COMPAT_ACTIVATION_FLAG compat_activation_flag" in steam_header
     assert f"compat_activation_flag={steam['activation_flag_rva']}u;" in steam_header
     epic = metadata("epic_profile_metadata.json")
     epic_header = header(epic, digest_ranges=True)

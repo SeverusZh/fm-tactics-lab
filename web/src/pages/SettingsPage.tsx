@@ -136,6 +136,15 @@ function shortSha(value: string | null | undefined): string | null {
 }
 
 function reasonExplanation(reason: string): string {
+  if (/adapter_profile_incomplete/i.test(reason)) {
+    return "游戏构建尚未完整适配，缺少关键引擎锚点；请更新运行时适配画像。";
+  }
+  if (/adapter_profile_reference_mismatch/i.test(reason)) {
+    return "运行时适配画像与当前宿主参考版本不一致，请使用匹配的画像。";
+  }
+  if (/adapter_profile_partial_requires_diagnostic/i.test(reason)) {
+    return "该适配画像仅供诊断，不能用于正式比赛。";
+  }
   if (/fingerprint|sha-?256|镜像|指纹/i.test(reason)) {
     return "引擎与游戏版本不一致，请重新构建或选择匹配的引擎。";
   }
@@ -1219,6 +1228,9 @@ export function SettingsPage() {
                     原始原因 <code className="data-path">{diagnosis.reason}</code>
                   </p>
                 </>
+              )}
+              {diagnosis.missing === null || diagnosis.missing === undefined || diagnosis.missing === 0 ? null : (
+                <p className="settings-diagnosis-reason">缺失锚点 {diagnosis.missing} 个</p>
               )}
               <dl className="settings-diagnosis-meta">
                 <dt>适配器版本</dt>

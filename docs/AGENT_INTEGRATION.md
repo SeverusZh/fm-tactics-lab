@@ -456,6 +456,7 @@ drafts_formation 只做预览：按阵型模板与名单位置熟悉度返回排
 
 - 引擎解析顺序为注入 EnginePort、settings.engine_root 非空的惰性原生宿主、MissingEngine 占位；未配置 engine_root 时 POST /api/experiments/start 返回 503 engine_unavailable，消息为「原生引擎未配置」。惰性宿主在首次能力协商或启动批次时构造，并在派发前按任务并行数配置分道。证据 fm27lab/interfaces/http/app.py:102、126-149、fm27lab/adapters/engine_native/lazy.py:22-71、fm27lab/sidecar.py:28。
 - 引擎宿主真实要求：可执行文件默认位于引擎工作区 fm27_native/FM27Simulator.exe，单批超时 190 秒，重试 1 次。证据 fm27lab/adapters/engine_native/host.py:231-330。
+- Steam 宿主可读取运行时适配画像 `adapter_profile.txt`（环境变量 FM27_ADAPTER_PROFILE 优先，其次可执行文件同目录）：画像绑定安装镜像 SHA-256，映射参考 RVA 到安装 RVA；缺失锚点、目标越界、镜像/参考身份不符时拒绝加载；部分画像只允许 `--check-image` 与 `--probe-engine` 诊断，正式比赛拒绝。证据 native/fm27_adapter_profile.h、native/desktop_host.cpp。
 
 ## 7. CLI
 

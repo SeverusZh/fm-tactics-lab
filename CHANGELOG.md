@@ -38,6 +38,7 @@
 - 新增 `DELETE /api/jobs` 原子批量删除与任务页多选管理：运行中保护、失败明细、可访问确认与焦点还原；已通过独立审核。
 - 新增 `/api/jobs/{id}/pool-summary`：客队战术池模式、条目、名单来源与抽中次数；已通过独立审核。
 - 新增原生引擎适配器：worker manifest 文件协议、逐场释放回执、无进展超时、只重试未完成场次、退出码 180 处理与取消清理；已通过独立审核。
+- 新增运行时适配画像：宿主按安装 DLL 的 SHA-256 读取 `adapter_profile.txt`，从 `WaitForActivation` 导出解析激活字，并提供 `--probe-engine` 诊断；`scripts/adapt_profile.py` 用公开掩码窗口摘要与操作数描述重定位参考 RVA，补齐失败时 fail-closed 输出缺失锚点。
 - 新增实验调度 HTTP：提交、启动、取消、续跑与资源预检 409；已通过独立审核。
 - 新增 MCP resources 与 prompts：四个资源读取与两个中文提示词，initialize 声明能力；已通过独立审核。
 - 新增只读球员属性页：草稿选择、主客切换、六组属性与隐藏开关；已通过独立审核。
