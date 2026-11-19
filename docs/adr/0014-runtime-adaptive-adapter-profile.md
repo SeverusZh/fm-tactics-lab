@@ -25,6 +25,7 @@ ADR-0013 以参考构建的 PE 布局、关键 range 摘要和 VTable 身份做 
 - 掩码窗口摘要比整段函数字节更耐重定位和局部重编译，但函数被重写时仍可能无法定位；此时报告缺失锚点比猜测目标地址安全。
 - 公开元数据体积增加约 0.6 MB；源码清单和 OpenAPI 不受影响。
 - 执行编辑实验仍只接受已验证的参考镜像；运行时画像只解锁普通比赛，不解锁 `native_execution_experiment.h` 的写操作，宿主记录 `execution_reference_only` 后以 244 拒绝。
+- 2026-11-19 试验：在 75 个映射（含临时占位）下，宿主完成加载/激活、资源索引、引擎 bootstrap、fixture 反序列化、preparation 与模拟 tick 0，随后在 `.tls` 保护代码触发未处理的 `STATUS_SINGLE_STEP`（0x80000004，RVA 0x74b5950/0x47b4ac0）；游戏自身 VEH 不处理该异常码，关闭宿主 VEH 结果相同。补齐剩余 42 个锚点本身不足以绕过该保护层，当前构建维持 blocked；试验代码保留在 `feature/current-build-profile`，不进入 main。
 
 ## 备选
 
