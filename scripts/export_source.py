@@ -2,9 +2,9 @@
 import argparse
 import hashlib
 import json
-from pathlib import Path
 import re
 import zipfile
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 TOP = {'README.md', 'README.en.md', 'LICENSE', 'THIRD_PARTY_NOTICES.md', 'CONTRIBUTING.md',
@@ -71,6 +71,9 @@ def validate(root=ROOT):
             raise ValueError('Unexpected long hexadecimal dump: ' + str(path.relative_to(root)))
     profile = json.loads((root / 'native/profile_metadata.json').read_text(encoding='utf8'))
     if any('hex' in row for row in profile['ranges']):
+        raise ValueError('Original game function bytes must not be published')
+    signatures = profile.get('signatures', {})
+    if any('hex' in row for row in signatures.get('ranges', [])):
         raise ValueError('Original game function bytes must not be published')
     return paths
 

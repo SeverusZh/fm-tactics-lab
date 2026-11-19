@@ -134,10 +134,9 @@ def test_diagnose_engine_reports_nonzero_exit(tmp_path: Path):
     host = write_host(
         engine,
         """
-        import json
         import sys
 
-        print(json.dumps({"event": "native_engine_compatibility", "compatible": True, "trial_allowed": False}))
+        print("host failed before compatibility", file=sys.stderr)
         sys.exit(99)
         """,
     )
@@ -148,6 +147,28 @@ def test_diagnose_engine_reports_nonzero_exit(tmp_path: Path):
     message = str(caught.value)
     assert "诊断失败" in message
     assert "99" in message
+
+
+def test_diagnose_engine_keeps_compatibility_event_on_nonzero_exit(tmp_path: Path):
+    engine = build_engine_root(tmp_path / "engine")
+    game = build_game_root(tmp_path / "game")
+    host = write_host(
+        engine,
+        """
+        import json
+        import sys
+
+        print(json.dumps({"event": "native_engine_compatibility", "compatible": False, "trial_allowed": False, "reason": "adapter_profile_incomplete", "missing": 42, "mode": "adaptive"}))
+        sys.exit(99)
+        """,
+    )
+
+    diagnosis = diagnose_engine(engine, game, executable=host)
+
+    assert diagnosis.compatible is False
+    assert diagnosis.reason == "adapter_profile_incomplete"
+    assert diagnosis.missing == 42
+    assert diagnosis.mode == "adaptive"
 
 
 def test_diagnose_engine_requires_compatibility_event(tmp_path: Path):

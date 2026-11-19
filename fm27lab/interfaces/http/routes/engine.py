@@ -53,6 +53,8 @@ class EngineDiagnosisOutput(BaseModel):
     reason: str | None
     adapter_version: str | None = None
     image_sha256: str | None
+    missing: int | None = None
+    mode: str | None = None
 
 
 class EngineImportCopiedOutput(BaseModel):
@@ -99,6 +101,8 @@ def _diagnosis_output(diagnosis: EngineDiagnosis) -> EngineDiagnosisOutput:
         reason=diagnosis.reason,
         adapter_version=diagnosis.adapter_version,
         image_sha256=diagnosis.image_sha256,
+        missing=diagnosis.missing,
+        mode=diagnosis.mode,
     )
 
 

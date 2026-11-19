@@ -105,6 +105,18 @@ In an **x64 Native Tools Command Prompt for Visual Studio**:
 
 The public repository contains range metadata and digests. The script reconstructs comparison bytes from the exact reference DLL on your machine, verifies every range, then compiles the checked-in C++ host. Generated function bytes remain in ignored local outputs.
 
+### Adapt to a different game build
+
+Keep an existing host binary and generate a runtime profile for the installed image:
+
+```powershell
+.venv\Scripts\python.exe scripts/adapt_profile.py --dll "D:\Games\Football Manager 27\fm_Data\Plugins\x86_64\game_plugin.dll" --out adapter_profile.txt
+```
+
+The command writes `adapter_profile.txt` plus `adapter_profile.txt.report.json`. Place the profile next to `FM27Simulator.exe` or set `FM27_ADAPTER_PROFILE`. The host rejects a profile whose image SHA-256 or host reference id differs, and aborts on the first unmapped anchor; a report with `complete=false` is a diagnostic, not a usable profile. `FM27Simulator.exe --probe-engine --output probe.jsonl` verifies image load, activation and fingerprint without creating the engine interface.
+
+`scripts/adapt_profile.py --write-signatures` is a maintainer command: it needs `objdump` and the local `private/engine/fm27_native/engine_compat_profile.json` reference bytes, then refreshes the derived window digests and operand descriptors in `native/profile_metadata.json`. Every used range must match the published SHA-256; a local reference with a different whole-image hash additionally needs `--allow-mixed-reference`. Normal adaptation only reads those published signatures.
+
 ### Run from source
 
 ```powershell

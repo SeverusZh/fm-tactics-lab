@@ -101,6 +101,7 @@ def rebase(old, raw, version, flag):
     pe = Pe(raw)
     sha = hashlib.sha256(raw).hexdigest()
     new = dict(old)
+    new.pop('signatures', None)
     new['id'] = f'fm27_desktop_{sha[:8]}_adapter_v1'
     new['reference_sha256'] = sha
     new['image_base'] = pe.image_base

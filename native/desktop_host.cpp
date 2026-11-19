@@ -16,6 +16,10 @@
 #include <mutex>
 #include <map>
 #include <array>
+#include <thread>
+#include <atomic>
+#include <chrono>
+#include "fm27_adapter_profile.h"
 static std::recursive_mutex worker_log_lock;
 #include "fm27_tactic_bindings.h"
 #pragma comment(lib,"bcrypt.lib")
@@ -32,6 +36,8 @@ static bool inspect_fixture_only=false;
 static uint32_t requested_seed=0;
 static int tick_step=1;
 static bool policy_audit=false;
+static bool probe_engine=false;
+static bool diagnostic_mode=false;
 static fs::path worker_manifest;static bool worker_bootstrapped=false;
 static ULONGLONG timing_start=0,timing_loaded=0,timing_active=0,timing_prepare=0,timing_ready=0;
 static FILE* log_file;
@@ -43,6 +49,12 @@ static void* at(uintptr_t rva){
         static const unsigned missing[]={0xfb2580,0x4a7c550};
         fprintf(log_file,"{\"event\":\"formal_unmapped_reference\",\"reference\":%u}\n",missing[rva-0xf0000000]);
         fflush(log_file);desktop_finish_and_exit(251);
+    }
+    if(adapter_profile.loaded){
+        auto entry=adapter_profile.rva_map.find((unsigned)rva);
+        if(entry!=adapter_profile.rva_map.end())return native_base+entry->second;
+        fprintf(log_file,"{\"event\":\"adapter_anchor_unmapped\",\"rva\":%u}\n",(unsigned)rva);
+        fflush(log_file);desktop_finish_and_exit(252);
     }
     return native_base+rva;
 }
@@ -632,6 +644,42 @@ static bool fingerprint_image(const fs::path& path){
 }
 static bool known_image(const fs::path& path){
 #ifdef FM27_COMPAT_DIGEST_RANGES
+    if(adapter_profile.loaded){
+        fputs("{\"event\":\"native_engine_compatibility\",\"compatible\":false,\"trial_allowed\":false,\"reason\":\"adapter_profile_platform_unsupported\",\"mode\":\"adaptive\"}\n",log_file);fflush(log_file);
+        return false;
+    }
+#endif
+    if(adapter_profile.loaded){
+        CompatImage image;
+        if(!image.open(path)){
+            fputs("{\"event\":\"native_engine_compatibility\",\"compatible\":false,\"trial_allowed\":false,\"reason\":\"invalid_PE_or_architecture\",\"mode\":\"adaptive\"}\n",log_file);fflush(log_file);
+            return false;
+        }
+        for(const auto& entry:adapter_profile.rva_map)if(!entry.second||entry.first>=image.nt.OptionalHeader.SizeOfImage||entry.second>=image.nt.OptionalHeader.SizeOfImage||!image.mapped(entry.second,1)){
+            fprintf(log_file,"{\"event\":\"native_engine_compatibility\",\"compatible\":false,\"trial_allowed\":false,\"reason\":\"adapter_profile_target_out_of_image\",\"rva\":%u,\"target\":%u,\"mode\":\"adaptive\"}\n",entry.first,entry.second);fflush(log_file);
+            return false;
+        }
+        if(adapter_profile.reference_id!=compat_profile_id){
+            fprintf(log_file,"{\"event\":\"native_engine_compatibility\",\"compatible\":false,\"trial_allowed\":false,\"reason\":\"adapter_profile_reference_mismatch\",\"reference\":\"%s\",\"mode\":\"adaptive\"}\n",adapter_profile.reference_id.c_str());fflush(log_file);
+            return false;
+        }
+        if(!fingerprint_image(path))return false;
+        if(strcmp(native_image_sha256,adapter_profile.image_sha256.c_str())){
+            fputs("{\"event\":\"native_engine_compatibility\",\"compatible\":false,\"trial_allowed\":false,\"reason\":\"adapter_profile_image_mismatch\",\"mode\":\"adaptive\"}\n",log_file);fflush(log_file);
+            return false;
+        }
+        if(adapter_profile.missing&&!adapter_profile.allow_partial){
+            fprintf(log_file,"{\"event\":\"native_engine_compatibility\",\"compatible\":false,\"trial_allowed\":false,\"reason\":\"adapter_profile_incomplete\",\"missing\":%u,\"mode\":\"adaptive\"}\n",adapter_profile.missing);fflush(log_file);
+            return false;
+        }
+        if(adapter_profile.allow_partial&&!diagnostic_mode){
+            fprintf(log_file,"{\"event\":\"native_engine_compatibility\",\"compatible\":false,\"trial_allowed\":false,\"reason\":\"adapter_profile_partial_requires_diagnostic\",\"missing\":%u,\"mode\":\"adaptive\"}\n",adapter_profile.missing);fflush(log_file);
+            return false;
+        }
+        fprintf(log_file,"{\"event\":\"native_engine_compatibility\",\"profile\":\"%s\",\"compatible\":true,\"trial_allowed\":false,\"disposition\":\"adaptive\",\"mode\":\"adaptive\",\"mappings\":%zu,\"missing\":%u,\"reason\":\"runtime_profile\",\"whole_file_hash_is_gate\":false}\n",compat_profile_id,adapter_profile.rva_map.size(),adapter_profile.missing);fflush(log_file);
+        return true;
+    }
+#ifdef FM27_COMPAT_DIGEST_RANGES
     if(!fingerprint_image(path)||strcmp(native_image_sha256,epic_reference_sha256)){
         fprintf(log_file,"{\"event\":\"native_engine_compatibility\",\"compatible\":false,\"trial_allowed\":false,\"reason\":\"epic_build_fingerprint_mismatch\"}\n");
         fflush(log_file);
@@ -1031,18 +1079,42 @@ static int scan_activation(HMODULE module,const wchar_t* path){
             (unsigned long)(cfg->VirtualAddress+x.offset),x.first,x.zero_ms,x.changes,x.offset%8?"false":"true",context);
     }
     fprintf(log_file,"{\"event\":\"activation_scan_completed\",\"turned_zero_after_load\":%u,\"already_zero_at_load\":%u}\n",listed,already);fflush(log_file);
+    if(adapter_profile.allow_partial){
+        fputs("{\"event\":\"activation_interface_skipped\",\"reason\":\"partial_profile\"}\n",log_file);fflush(log_file);
+        return 0;
+    }
     // After 20 s the game's start-up is long finished: check that the engine interface comes up.
     unsigned char object[0x48]={};
-    auto result=((void*(*)(void*))(base+0x4ba21d0))(object);
+    auto result=((void*(*)(void*))at(0x4ba21d0))(object);
     fprintf(log_file,"{\"event\":\"native_interface_created\",\"self_returned\":%s,\"vtable_rva\":\"0x%llx\"}\n",result==object?"true":"false",*(unsigned long long*)object-(unsigned long long)base);fflush(log_file);
     return 0;
 }
 
+#ifdef FM27_COMPAT_ACTIVATION_FLAG
+static unsigned compiled_activation_rva=FM27_COMPAT_ACTIVATION_FLAG;
+#else
+static unsigned compiled_activation_rva=0;
+#endif
+static unsigned adapter_activation_rva=0;
+static bool mapped_in_module(HMODULE module,unsigned rva){
+    auto base=(unsigned char*)module;
+    auto nt=(IMAGE_NT_HEADERS64*)(base+((IMAGE_DOS_HEADER*)base)->e_lfanew);
+    if(rva+4>nt->OptionalHeader.SizeOfImage)return false;
+    auto section=IMAGE_FIRST_SECTION(nt);
+    for(unsigned i=0;i<nt->FileHeader.NumberOfSections;i++)if(rva>=section[i].VirtualAddress&&rva+4<=(uint64_t)section[i].VirtualAddress+std::max(section[i].Misc.VirtualSize,section[i].SizeOfRawData))return true;
+    return false;
+}
 static int child(bool run_match){
     timing_start=GetTickCount64();
     SetErrorMode(SEM_FAILCRITICALERRORS|SEM_NOGPFAULTERRORBOX|SEM_NOOPENFILEERRORBOX);
     log_file=_wfsopen(output.c_str(),L"w",_SH_DENYNO);
     if(!log_file)return 98;
+    if(load_adapter_profile(bundle)){
+        fprintf(log_file,"{\"event\":\"adapter_profile_loaded\",\"mappings\":%zu,\"missing\":%u,\"partial\":%s}\n",adapter_profile.rva_map.size(),adapter_profile.missing,adapter_profile.allow_partial?"true":"false");fflush(log_file);
+    }else if(adapter_profile.loaded){
+        fprintf(log_file,"{\"event\":\"adapter_profile_invalid\",\"reason\":\"%s\"}\n",adapter_profile.error.c_str());fflush(log_file);
+        return 253;
+    }
     AddVectoredExceptionHandler(0,observe);
     wchar_t desktop[256]={};DWORD needed=0;
     GetUserObjectInformationW(GetThreadDesktop(GetCurrentThreadId()),UOI_NAME,desktop,sizeof(desktop),&needed);
@@ -1070,22 +1142,55 @@ static int child(bool run_match){
     if(!game_runtime_absent)return 100;
     if(policy_audit)return audit_policies();
     if(find_activation)return scan_activation(module,image);
-    if(!compat_activation_flag){fprintf(log_file,"{\"event\":\"activation_flag_unmapped\"}\n");fflush(log_file);return 82;}
-    auto flag=(volatile unsigned int*)((unsigned char*)module+compat_activation_flag);
-    for(unsigned i=0;i<100;i++){
-        if(*flag==0){
-            desktop_check_cancel();
-            timing_active=GetTickCount64();
-            fprintf(log_file,"{\"event\":\"native_activation_completed\"}\n");fflush(log_file);
-            unsigned char object[0x48]={};
-            auto result=((void*(*)(void*))((unsigned char*)module+0x4ba21d0))(object);
-            fprintf(log_file,"{\"event\":\"native_interface_created\",\"self_returned\":%s,\"vtable_rva\":\"0x%llx\"}\n",result==object?"true":"false",*(unsigned long long*)object-(unsigned long long)module);fflush(log_file);
-            if(run_match)return worker_manifest.empty()?native_match(object):worker_loop(object);
-            return 0;
+    auto wait_export=(void(*)())GetProcAddress(module,"WaitForActivation");
+    bool activation_ready=false;
+    const char* activation_source="flag";
+    if(wait_export){
+        auto started=GetTickCount64();
+        static std::atomic<bool> activation_done{false};
+        activation_done=false;
+        auto exported=wait_export;
+        std::thread runner([exported](){exported();activation_done=true;});
+        runner.detach();
+        for(unsigned i=0;i<150;i++){
+            if(activation_done){activation_ready=true;break;}
+            desktop_check_cancel();Sleep(100);
         }
-        Sleep(100);
+        if(!activation_ready){fprintf(log_file,"{\"event\":\"activation_export_timeout\"}\n");fflush(log_file);return 82;}
+        fprintf(log_file,"{\"event\":\"native_activation_wait_returned\",\"source\":\"export\",\"ms\":%llu}\n",(unsigned long long)(GetTickCount64()-started));fflush(log_file);
+        activation_source="export";
+    }else{
+        if(adapter_profile.loaded){
+            if(adapter_profile.activation_rva){
+                if(adapter_profile.activation_rva%4||!mapped_in_module(module,adapter_profile.activation_rva)){
+                    fprintf(log_file,"{\"event\":\"activation_word_invalid\",\"source\":\"profile\",\"rva\":%u}\n",adapter_profile.activation_rva);fflush(log_file);
+                    return 82;
+                }
+                adapter_activation_rva=adapter_profile.activation_rva;
+            }
+        }else if(compiled_activation_rva){
+            adapter_activation_rva=compiled_activation_rva;
+        }
+        if(!adapter_activation_rva){fprintf(log_file,"{\"event\":\"activation_flag_unmapped\"}\n");fflush(log_file);return 82;}
+        auto flag=(volatile unsigned int*)((unsigned char*)module+adapter_activation_rva);
+        for(unsigned i=0;i<100;i++){
+            if(*flag==0){activation_ready=true;break;}
+            desktop_check_cancel();Sleep(100);
+        }
+        if(!activation_ready){fprintf(log_file,"{\"event\":\"activation_still_pending\",\"word\":%u}\n",*flag);fflush(log_file);return 82;}
     }
-    fprintf(log_file,"{\"event\":\"activation_still_pending\",\"word\":%u}\n",*flag);fflush(log_file);return 82;
+    desktop_check_cancel();
+    timing_active=GetTickCount64();
+    fprintf(log_file,"{\"event\":\"native_activation_completed\",\"source\":\"%s\"}\n",activation_source);fflush(log_file);
+    if(probe_engine){
+        fprintf(log_file,"{\"event\":\"probe_engine_completed\",\"interface_created\":false}\n");fflush(log_file);
+        return 0;
+    }
+    unsigned char object[0x48]={};
+    auto result=((void*(*)(void*))at(0x4ba21d0))(object);
+    fprintf(log_file,"{\"event\":\"native_interface_created\",\"self_returned\":%s,\"vtable_rva\":\"0x%llx\"}\n",result==object?"true":"false",*(unsigned long long*)object-(unsigned long long)module);fflush(log_file);
+    if(run_match)return worker_manifest.empty()?native_match(object):worker_loop(object);
+    return 0;
 }
 int wmain(int argc,wchar_t** argv){
     wchar_t executable[MAX_PATH];GetModuleFileNameW(nullptr,executable,MAX_PATH);bundle=fs::path(executable).parent_path();
@@ -1104,7 +1209,8 @@ int wmain(int argc,wchar_t** argv){
         else if(arg==L"--cancel-event"&&i+1<argc)desktop_cancel_name=argv[++i];
         else if(arg==L"--child")is_child=true;
         else if(arg==L"--policy-audit")policy_audit=true;
-        else if(arg==L"--find-activation")find_activation=true;
+        else if(arg==L"--find-activation"){find_activation=true;diagnostic_mode=true;}
+        else if(arg==L"--probe-engine"){probe_engine=true;diagnostic_mode=true;}
         else if(arg==L"--match"){}
         else if(arg==L"--help"){puts("FM27Simulator [--fixture INPUT.pkm] [--seed UINT32] [--output RUN.jsonl] [--tick-step 1..256]\nRuns original native simulation on a private desktop. Retains the complete native DLL; no fm.exe or Unity launch.");return 0;}
         else if((arg==L"--fixture"||arg==L"--output"||arg==L"--seed"||arg==L"--tick-step"||arg==L"--dump-input"||arg==L"--scenario-file")&&i+1<argc){
@@ -1122,9 +1228,14 @@ int wmain(int argc,wchar_t** argv){
             }
         }else{fputs("Unknown or incomplete argument\n",stderr);return 79;}
     }
-    if(!check_image.empty()){log_file=stdout;return known_image(check_image)?0:99;}
+    if(!check_image.empty()){
+        diagnostic_mode=true;log_file=stdout;
+        if(load_adapter_profile(bundle))fprintf(log_file,"{\"event\":\"adapter_profile_loaded\",\"mappings\":%zu,\"missing\":%u,\"partial\":%s}\n",adapter_profile.rva_map.size(),adapter_profile.missing,adapter_profile.allow_partial?"true":"false");
+        else if(adapter_profile.loaded){fprintf(log_file,"{\"event\":\"adapter_profile_invalid\",\"reason\":\"%s\"}\n",adapter_profile.error.c_str());return 253;}
+        return known_image(check_image)?0:99;
+    }
     if(!desktop_cancel_name.empty()){desktop_cancel_event=OpenEventW(SYNCHRONIZE|EVENT_MODIFY_STATE,FALSE,desktop_cancel_name.c_str());if(!desktop_cancel_event)return 181;}
-    if(is_child){unsigned status=child(true);desktop_finish_and_exit(status);}
+    if(is_child){unsigned status=child(!probe_engine);desktop_finish_and_exit(status);}
     wchar_t desktop_name[96];swprintf_s(desktop_name,L"FmEngineControl_%lu",GetCurrentProcessId());
     auto desktop=CreateDesktopW(desktop_name,nullptr,nullptr,0,GENERIC_ALL,nullptr);
     if(!desktop){printf("desktop_create_error=%lu\n",GetLastError());return 83;}
@@ -1134,6 +1245,7 @@ int wmain(int argc,wchar_t** argv){
     if(seed_override)command+=L" --seed "+std::to_wstring(requested_seed);
     if(policy_audit)command+=L" --policy-audit";
     if(find_activation)command+=L" --find-activation";
+    if(probe_engine)command+=L" --probe-engine";
     if(!desktop_cancel_name.empty())command+=L" --cancel-event "+quote(desktop_cancel_name);
     if(!dump_input.empty())command+=L" --dump-input "+quote(dump_input.wstring());
     if(inspect_fixture_only)command+=L" --inspect-fixture";

@@ -151,6 +151,8 @@ export interface EngineDiagnosisOutput {
   reason: string | null;
   adapter_version?: string | null;
   image_sha256: string | null;
+  missing?: number | null;
+  mode?: string | null;
 }
 
 export interface EngineImportCopiedOutput {

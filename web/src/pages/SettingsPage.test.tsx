@@ -599,6 +599,27 @@ describe("引擎兼容性诊断", () => {
     expect(callsTo(fetchMock, "/api/engine/diagnose", "POST")).toHaveLength(1);
   });
 
+  it("诊断缺失锚点时展示适配未完成与缺失数量", async () => {
+    fetchMock = stubApi({
+      diagnose: () =>
+        jsonResponse({
+          ...INCOMPATIBLE_DIAGNOSIS,
+          reason: "adapter_profile_incomplete",
+          missing: 42,
+          mode: "adaptive",
+        }),
+    });
+    renderSettingsPage();
+    await screen.findByText("引擎目录可用");
+    fireEvent.click(screen.getByRole("button", { name: "诊断引擎兼容性" }));
+    expect(await screen.findByText("不兼容")).toBeInTheDocument();
+    expect(
+      screen.getByText("游戏构建尚未完整适配，缺少关键引擎锚点；请更新运行时适配画像。"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("缺失锚点 42 个")).toBeInTheDocument();
+    expect(screen.getByText("adapter_profile_incomplete")).toBeInTheDocument();
+  });
+
   it("诊断不兼容时展示中文解释与原始原因", async () => {
     fetchMock = stubApi({ diagnose: () => jsonResponse(INCOMPATIBLE_DIAGNOSIS) });
     renderSettingsPage();

@@ -30,6 +30,8 @@ class EngineDiagnosis:
     reason: str | None
     adapter_version: str | None
     image_sha256: str | None
+    missing: int | None = None
+    mode: str | None = None
 
 
 def diagnose_engine(
@@ -66,11 +68,11 @@ def diagnose_engine(
         text = completed.stdout or ""
         if output.is_file():
             text += "\n" + output.read_text(encoding="utf-8", errors="replace")
-        if completed.returncode != 0:
+        events = _json_events(text)
+        if completed.returncode != 0 and _last_event(events, COMPATIBILITY_EVENT) is None:
             detail = (completed.stderr or "").strip()
             message = f"引擎诊断失败：宿主退出码 {completed.returncode}"
             raise EngineDiagnoseError(f"{message}；{detail}" if detail else message)
-        events = _json_events(text)
     compatibility = _last_event(events, COMPATIBILITY_EVENT)
     if compatibility is None:
         raise EngineDiagnoseError("引擎诊断未返回兼容性声明")
@@ -83,12 +85,16 @@ def diagnose_engine(
     image_sha256 = None
     if fingerprint is not None and isinstance(fingerprint.get("sha256"), str):
         image_sha256 = fingerprint["sha256"]
+    missing = compatibility.get("missing")
+    mode = compatibility.get("mode")
     return EngineDiagnosis(
         compatible=compatible,
         trial_allowed=trial_allowed,
         reason=reason if isinstance(reason, str) else None,
         adapter_version=_adapter_version(engine),
         image_sha256=image_sha256,
+        missing=missing if isinstance(missing, int) and not isinstance(missing, bool) else None,
+        mode=mode if isinstance(mode, str) else None,
     )
 
 
