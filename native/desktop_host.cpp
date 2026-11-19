@@ -44,6 +44,7 @@ static FILE* log_file;
 static unsigned char* native_base;
 static uint64_t input_cursor=0,input_reads=0;
 #include "native_steam_lifecycle.h"
+static void* image_at(uintptr_t rva){return native_base+rva;}
 static void* at(uintptr_t rva){
     if(rva>=0xf0000000){
         static const unsigned missing[]={0xfb2580,0x4a7c550};
@@ -534,7 +535,7 @@ static const char* native_type(void* pointer){
     if(col<base||col+24>=base+434540544||*(uint32_t*)col!=1)return nullptr;
     auto descriptor=*(uint32_t*)(col+12);
     if(descriptor+256>=434540544)return nullptr;
-    auto name=(char*)at(descriptor+16);
+    auto name=(char*)image_at(descriptor+16);
     return strncmp(name,".?A",3)?nullptr:name;
 }
 static void dump_match_input(unsigned char* match){
@@ -827,7 +828,7 @@ static int native_match(void* interface_object){
     auto slots=(void**)__readgsqword(0x58);
     // Read the TLS-index RVA from the PE TLS directory rather than assuming it.
     auto dos=(IMAGE_DOS_HEADER*)native_base;auto nt=(IMAGE_NT_HEADERS64*)(native_base+dos->e_lfanew);
-    auto tls_directory=(IMAGE_TLS_DIRECTORY64*)at(nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_TLS].VirtualAddress);
+    auto tls_directory=(IMAGE_TLS_DIRECTORY64*)image_at(nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_TLS].VirtualAddress);
     auto index=*(unsigned int*)tls_directory->AddressOfIndex;
     auto tls=(unsigned char*)slots[index];
     if(!tls[0x4b8])((void(*)())at(0x4941140))();

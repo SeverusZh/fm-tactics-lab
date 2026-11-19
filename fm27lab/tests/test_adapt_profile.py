@@ -271,6 +271,8 @@ def test_native_host_loads_runtime_profile_and_fails_closed():
     assert "adapter_profile_target_out_of_image" in host
     assert "adapter_profile_partial_requires_diagnostic" in host
     assert "diagnostic_mode" in host
+    assert "image_at(descriptor+16)" in host
+    assert "image_at(nt->OptionalHeader" in host
     assert "--probe-engine" in host
     assert "FM27_ADAPTER_PROFILE" in profile
     assert "map_conflict" in profile
