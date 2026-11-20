@@ -21,7 +21,17 @@ static int desktop_probe_fmf(void* resources){
             // The native adapter has consumed the eight-byte standalone TAC
             // stream header. Do not read beyond the remaining archive entry.
             std::vector<unsigned char> bytes((size_t)size-8);if(bytes.size()<8)continue;((void*(*)(void*,void*,size_t))(*(void***)stream)[5])(stream,bytes.data(),bytes.size());
-            if(desktop_fmf_routine_type>=0){auto title=*(unsigned**)(node+0x18);if(!title||(*title==5&&!memcmp(title+1,"image",5)))continue;void* raw=nullptr;((void*(*)(void*,void**,void*))(*(void***)node)[21])(node,&raw,nullptr);unsigned char header[8]={};if(!raw)continue;((void*(*)(void*,void*,size_t))(*(void***)raw)[5])(raw,header,8);desktop_fmf_stream_revision=*(unsigned short*)(header+6);if(desktop_fmf_stream_revision!=60)continue;desktop_fmf_tactic_name.assign((char*)(title+1),*title);desktop_fmf_payload=std::move(bytes);break;}
+            if(desktop_fmf_routine_type>=0){
+                auto title=*(unsigned**)(node+0x18);if(!title||(*title==5&&!memcmp(title+1,"image",5)))continue;
+                void* raw=nullptr;((void*(*)(void*,void**,void*))(*(void***)node)[21])(node,&raw,nullptr);
+                unsigned char header[8]={};if(!raw)continue;
+                ((void*(*)(void*,void*,size_t))(*(void***)raw)[5])(raw,header,8);
+                desktop_fmf_stream_revision=*(unsigned short*)(header+6);
+                if(desktop_fmf_stream_revision!=60&&
+                    !(native_layout::steam_27_1()&&desktop_fmf_stream_revision==61))continue;
+                desktop_fmf_tactic_name.assign((char*)(title+1),*title);
+                desktop_fmf_payload=std::move(bytes);break;
+            }
             // Identify a standalone TAC by its native stream type. The installed
             // game's bounded plan reader decides which plan revisions/majors it
             // can import; older compatible plans must not be rejected here.

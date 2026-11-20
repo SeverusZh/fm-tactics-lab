@@ -2,7 +2,7 @@
 
 FM27 stores a player's registered shirt number in the contract chain of the game
 database and the localized squad labels of the managed club in the save summary.
-fmsave 0.12.4 exposes the layout lookup, contract decoder and player record index
+fmsave exposes the layout lookup, contract decoder and player record index
 needed to read them, but not as public API: every reader here fails closed and
 returns an empty mapping, so a save whose layout differs only loses the optional
 identity fields.

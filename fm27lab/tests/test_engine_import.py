@@ -241,6 +241,7 @@ def test_reports_copied_manifest_and_total_bytes(tmp_path: Path):
     (workspace / "fm27_native" / "editor_advanced_snapshot.json").write_bytes(b"advanced")
     (workspace / "fm27_native" / "editor_setpieces_default.json").write_bytes(b"setpieces")
     (workspace / "fm27_native" / "engine_compat_profile.json").write_bytes(b"profile")
+    (workspace / "fm27_native" / "adapter_profile.txt").write_text("fm27-adapter-profile 1\n", encoding="utf-8")
     write_catalog(source, payload=b"catalog-bytes")
     target = tmp_path / "engine"
     result = import_engine_workspace(source, target)
@@ -255,6 +256,7 @@ def test_reports_copied_manifest_and_total_bytes(tmp_path: Path):
         "fm27_native/editor_advanced_snapshot.json",
         "fm27_native/editor_setpieces_default.json",
         "fm27_native/engine_compat_profile.json",
+        "fm27_native/adapter_profile.txt",
         "catalog.json",
     }
     actual = {

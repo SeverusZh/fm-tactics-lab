@@ -265,7 +265,8 @@ def test_native_host_loads_runtime_profile_and_fails_closed():
     assert '#include "fm27_adapter_profile.h"' in host
     assert "adapter_profile.rva_map.find" in host
     assert "adapter_anchor_unmapped" in host
-    assert "adapter_profile_image_mismatch" in host
+    assert "adapter_profile_fallback" in host
+    assert "image_sha256_mismatch" in host
     assert "adapter_profile_reference_mismatch" in host
     assert "adapter_profile_incomplete" in host
     assert "adapter_profile_target_out_of_image" in host
