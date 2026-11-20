@@ -1,0 +1,116 @@
+#pragma once
+
+#include <cstdint>
+
+// 27.1.0 native call sites shared by the Steam and Epic reference builds.
+// Each storefront uses its own PE and startup compatibility contract.
+static constexpr uintptr_t steam_27_1_rva(uintptr_t rva) {
+    switch (rva) {
+    case 0x4d30: return 0x4f90;
+    case 0x27740: return 0x26a20;
+    case 0x465b0: return 0x42460;
+    case 0x69520: return 0x68210;
+    case 0x6a370: return 0x69060;
+    case 0x71370: return 0x70610;
+    case 0x87b80: return 0x86050;
+    case 0x8b530: return 0x89d60;
+    case 0x8da40: return 0x8c280;
+    case 0xc03d0: return 0xb43d0;
+    case 0xc3220: return 0xb73f0;
+    case 0x122880: return 0x11f2d0;
+    case 0x1266b0: return 0x123450;
+    case 0x126a00: return 0x1239a0;
+    case 0x1281c0: return 0x94e20;
+    case 0x1484e0: return 0x148dc0;
+    case 0x15d080: return 0x166ff0;
+    case 0x161d20: return 0x16bc30;
+    case 0x18b080: return 0x189a50;
+    case 0x1ecc30: return 0x1eca20;
+    case 0x6687d0: return 0x675e30;
+    case 0x7bd250: return 0x7cdf40;
+    case 0x9d4f40: return 0x9e8840;
+    case 0x9fa910: return 0xa34530;
+    case 0xa9fff0: return 0xc5d1f0;
+    case 0xad9390: return 0xc96690;
+    case 0xc6a290: return 0xe2a130;
+    case 0xc70910: return 0xe306a0;
+    case 0xc71eb0: return 0xe31c40;
+    case 0xc723c0: return 0xe32150;
+    case 0xc72460: return 0xe321f0;
+    case 0xc733d0: return 0xe33160;
+    case 0xc73ab0: return 0xe33840;
+    case 0xe16120: return 0xe4cf70;
+    case 0xe16260: return 0xe4d0b0;
+    case 0xe25b60: return 0xe5c8b0;
+    case 0xe61f50: return 0xe98a60;
+    case 0x144f520: return 0x1497890;
+    case 0x148bac0: return 0x14d3d60;
+    case 0x1711a50: return 0x175ba10;
+    case 0x180d030: return 0x1854860;
+    case 0x1b77700: return 0x1bba320;
+    case 0x1b8bfc0: return 0x1bcec20;
+    case 0x1ba2a30: return 0x1be5850;
+    case 0x2153f30: return 0x21a0b50;
+    case 0x26329a0: return 0x2682e10;
+    case 0x26b0c00: return 0x27050b0;
+    case 0x30714c0: return 0x30b3090;
+    case 0x31c27d0: return 0x321f580;
+    case 0x32dffe0: return 0x333d450;
+    case 0x32e4380: return 0x33417f0;
+    case 0x35558d0: return 0x35bb730;
+    case 0x3634a00: return 0x37312b0;
+    case 0x3919b10: return 0x39f07f0;
+    case 0x39f72a0: return 0x3ac8e00;
+    case 0x3a36a40: return 0x3607c40;
+    case 0x4187300: return 0x41cf8c0;
+    case 0x4764ac0: return 0x47b46f0;
+    case 0x4764c1d: return 0x47b484d;
+    case 0x4764dcd: return 0x47b49fd;
+    case 0x4764e90: return 0x47b4ac0;
+    case 0x47ff410: return 0x484e580;
+    case 0x493a280: return 0x498de50;
+    case 0x4940da0: return 0x4998c10;
+    case 0x4941140: return 0x4998ed0;
+    case 0x4b98f50: return 0x4bf2180;
+    case 0x4ba15a0: return 0x4bf9c80;
+    case 0x4ba21d0: return 0x4bfa8b0;
+    case 0x4ba6800: return 0x4bff050;
+    case 0x4ba8840: return 0x4c02c90;
+    case 0x4bab520: return 0x4c03de0;
+    case 0x4bb38e0: return 0x4c0c1e0;
+    case 0x4bbc470: return 0x4c15e00;
+    case 0x4bcffd0: return 0x4c28f20;
+    case 0x4bd12c0: return 0x4c2a210;
+    case 0x4c015d9: return 0x4c5a959;
+    case 0x4d8e888: return 0x4dfd318;
+    case 0x4e90848: return 0x4eecf08;
+    case 0x4e90868: return 0x4eecf28;
+    case 0x4e908b8: return 0x4eecf78;
+    case 0x4f437f0: return 0x4f9fab0;
+    case 0x52737c0: return 0x52cedb8;
+    case 0x580eaf0: return 0x586b5b8;
+    case 0x580eb38: return 0x586b600;
+    case 0x580eb40: return 0x586b608;
+    case 0x580ebf8: return 0x586b6c0;
+    case 0x580ec68: return 0x586b740;
+    case 0x581bf30: return 0x5878d48;
+    case 0x581ca40: return 0x587c320;
+    case 0x581ca48: return 0x587c328;
+    case 0x581cab0: return 0x587c390;
+    case 0x581e6a0: return 0x587de58;
+    case 0x58204dc: return 0x587b584;
+    case 0x5820e62: return 0x587bf0a;
+    case 0x5820e63: return 0x587bf0b;
+    case 0x5821530: return 0x587e360;
+    case 0x58215b8: return 0x587e3e8;
+    case 0x5824c90: return 0x5881af0;
+    case 0x582dd78: return 0x588acd8;
+    case 0x5831568: return 0x588e378;
+    case 0x5831968: return 0x588e7d8;
+    case 0x5831a20: return 0x588e890;
+    case 0x5833cc0: return 0x588f270;
+    case 0x5833cc8: return 0x588f278;
+    case 0x58340c8: return 0x5890d70;
+    default: return 0;
+    }
+}

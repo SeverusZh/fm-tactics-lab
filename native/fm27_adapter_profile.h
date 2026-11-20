@@ -3,6 +3,9 @@
 // relocates the reference RVAs to the installed image and binds the profile to
 // one image hash.
 #pragma once
+#ifdef _WIN32
+#include <windows.h>
+#endif
 #include <map>
 #include <string>
 #include <fstream>
@@ -13,12 +16,22 @@
 
 struct AdapterProfile {
     bool loaded = false;
+    bool active = false;
     bool allow_partial = false;
     unsigned missing = 0;
     std::string image_sha256;
     std::string reference_id;
     unsigned activation_rva = 0;
     std::map<unsigned, unsigned> rva_map;
+    // Object layout deltas for the installed build. A zero value keeps the
+    // compiled-in reference layout; a loaded profile only applies while active.
+    bool layout_steam_27_1 = false;
+    unsigned layout_manager = 0;
+    unsigned layout_player_input = 0;
+    unsigned layout_player_runtime = 0;
+    unsigned layout_player_statistics = 0;
+    unsigned layout_tactic_version = 0;
+    unsigned layout_execution_sample_stack = 0;
     std::string error;
     std::wstring path;
 };
@@ -108,6 +121,29 @@ static bool load_adapter_profile(const std::filesystem::path& bundle) {
             unsigned long parsed = std::strtoul(value.c_str(), &end, 10);
             if (value.empty() || *end || parsed > UINT_MAX) { adapter_profile.error = "missing"; break; }
             adapter_profile.missing = (unsigned)parsed;
+        } else if (key == "layout_steam_27_1") {
+            std::string value;
+            unsigned parsed = 0;
+            if (!(row >> value) || !adapter_hex(value, parsed) || parsed > 1) {
+                adapter_profile.error = "layout_steam_27_1";
+                break;
+            }
+            adapter_profile.layout_steam_27_1 = parsed == 1;
+        } else if (key == "layout_manager" || key == "layout_player_input" ||
+                   key == "layout_player_runtime" || key == "layout_player_statistics" ||
+                   key == "layout_tactic_version" || key == "layout_execution_sample_stack") {
+            std::string value;
+            unsigned parsed = 0;
+            if (!(row >> value) || !adapter_hex(value, parsed)) {
+                adapter_profile.error = key;
+                break;
+            }
+            if (key == "layout_manager") adapter_profile.layout_manager = parsed;
+            else if (key == "layout_player_input") adapter_profile.layout_player_input = parsed;
+            else if (key == "layout_player_runtime") adapter_profile.layout_player_runtime = parsed;
+            else if (key == "layout_player_statistics") adapter_profile.layout_player_statistics = parsed;
+            else if (key == "layout_tactic_version") adapter_profile.layout_tactic_version = parsed;
+            else adapter_profile.layout_execution_sample_stack = parsed;
         } else if (key == "map") {
             std::string source, target;
             unsigned from = 0, to = 0;
@@ -129,6 +165,8 @@ static bool load_adapter_profile(const std::filesystem::path& bundle) {
     if (!magic && adapter_profile.error.empty()) adapter_profile.error = "empty";
     if (adapter_profile.reference_id.empty() && adapter_profile.error.empty()) adapter_profile.error = "reference";
     if (!adapter_sha(adapter_profile.image_sha256) && adapter_profile.error.empty()) adapter_profile.error = "image";
+    if (adapter_profile.layout_steam_27_1 && !adapter_profile.layout_tactic_version && adapter_profile.error.empty())
+        adapter_profile.error = "layout";
     adapter_profile.loaded = true;
     return adapter_profile.error.empty();
 }

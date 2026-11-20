@@ -1,8 +1,8 @@
 """Compile the checked-in adapter using an x64 MSVC developer shell."""
 import argparse
-from pathlib import Path
 import shutil
 import subprocess
+from pathlib import Path
 
 from generate_profile import adapter_paths, generate
 
@@ -30,6 +30,8 @@ def main():
     dest = engine / 'fm27_native'
     shutil.copy2(out / 'FM27Simulator.exe', dest / 'FM27Simulator.exe')
     shutil.copy2(ROOT / 'native' / (prefix + 'adapter_version.json'), dest / 'adapter_version.json')
+    profile = 'epic_27_1_profile.txt' if args.platform == 'epic' else 'steam_27_1_profile.txt'
+    shutil.copy2(ROOT / 'native' / profile, dest / 'adapter_profile.txt')
     print('Built', dest / 'FM27Simulator.exe')
 
 

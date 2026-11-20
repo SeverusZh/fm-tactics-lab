@@ -54,7 +54,7 @@ static void desktop_read_ai_tactics(unsigned char* match){
     auto team=*(unsigned char**)(match+0x15380);auto manager=*(unsigned char**)(team+0x630);
     for(unsigned i=0;i<presets;i++){
         auto start=stream.cursor;
-        if(!((unsigned char(*)(void*,void**,unsigned char))at(0x161d20))(manager+0x1818,&reference,0)||stream.error)desktop_finish_and_exit(197);
+        if(!((unsigned char(*)(void*,void**,unsigned char))at(0x161d20))(manager+native_layout::manager(0x1818),&reference,0)||stream.error)desktop_finish_and_exit(197);
         fprintf(log_file,"{\"event\":\"ai_preset_read\",\"index\":%u,\"offset\":%llu,\"end\":%llu}\n",i,(unsigned long long)start,(unsigned long long)stream.cursor);fflush(log_file);
     }
     if(stream.cursor+2>stream.size||*(uint16_t*)(bytes.data()+stream.cursor)!=0)desktop_finish_and_exit(197);stream.cursor+=2;

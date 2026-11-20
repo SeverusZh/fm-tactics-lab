@@ -12,6 +12,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 from export_source import source_files  # noqa: E402
 from generate_profile import adapter_paths  # noqa: E402
 from profile_header import header  # noqa: E402
+from static_profile import LAYOUT_KEYS, load_metadata, render, rva_map  # noqa: E402
 
 STEAM_SHA256 = "8c6971ce0b1c8afe6529ea3f46205a5175aea988a97d7421a980da42e23fe340"
 EPIC_SHA256 = "ebf6fcf57f554dc7178fb2afa4e1fd4d6e6dcb693f65a1a11216abb8d00c8396"
@@ -37,9 +38,11 @@ def test_steam_adapter_version_matches_profile_and_execution_guard():
         assert {"rva", "size", "sha256"} <= set(item) <= DIGEST_KEYS
         assert len(item["sha256"]) == 64
     execution = (NATIVE / "native_execution_experiment.h").read_text(encoding="utf8")
-    guard = re.search(r'strcmp\(native_image_sha256,\s*"([0-9a-f]{64})"\)', execution)
-    assert guard is not None, "execution hook must guard the exact reference build"
-    assert guard.group(1) == profile["reference_sha256"]
+    assert STEAM_SHA256 in execution
+    assert "execution_image=adapter_profile.image_sha256.c_str();" in execution
+    assert "native_layout::tactic_version()" in execution
+    assert "native_layout::execution_sample_stack()" in execution
+    assert "epic_27_1_execution_unverified" in execution
 
 
 def test_steam_host_resolves_activation_before_the_flag_fallback():
@@ -120,3 +123,123 @@ def test_platform_paths_cover_epic_build_and_export():
     assert (ROOT / "scripts" / "rebase_profile.py").is_file()
     exported = {path.relative_to(ROOT).as_posix() for path in source_files()}
     assert {"native/epic_adapter_version.json", "native/epic_profile_metadata.json"} <= exported
+    assert {
+        "native/steam_27_1_profile.json",
+        "native/steam_27_1_profile.txt",
+        "native/epic_27_1_profile.json",
+        "native/epic_27_1_profile.txt",
+        "native/steam_27_1_rvas.h",
+        "native/native_layout.h",
+    } <= exported
+
+
+def test_27_1_runtime_profiles_are_complete_and_bound_to_the_compiled_reference():
+    mappings = rva_map()
+    assert len(mappings) == 105
+    assert len(set(source for source, _target in mappings)) == len(mappings)
+    assert len(set(target for _source, target in mappings)) == len(mappings)
+    for platform, reference, image, activation in (
+        ("steam", "fm27_desktop_8c6971ce_adapter_v1", "d12202dd01c3911d4c4e55e778f37b2251ffb10f9cf8cecc3b9ec08ece622c6b", 398482872),
+        ("epic", "fm27_desktop_ebf6fcf5_adapter_v1", "f39d5d97aeb62f579cac0255d43bba29e34bc56d984eadea579805cfa275d0f1", 390611544),
+    ):
+        metadata = load_metadata(platform)
+        assert metadata["reference"] == reference
+        assert metadata["image"] == image
+        assert metadata["activation"] == activation
+        assert set(metadata["layout"]) == set(LAYOUT_KEYS)
+        rendered = render(metadata, mappings)
+        assert rendered.startswith("fm27-adapter-profile 1\n")
+        assert f"image {image}\n" in rendered
+        assert f"reference {reference}\n" in rendered
+        assert rendered.count("layout_") == len(LAYOUT_KEYS)
+        assert rendered.count("\nmap ") == len(mappings)
+        assert (NATIVE / f"{platform}_27_1_profile.txt").read_text(encoding="utf8") == rendered
+
+
+def test_27_1_profiles_keep_the_reference_layout_for_steam_and_epic():
+    steam = load_metadata("steam")
+    epic = load_metadata("epic")
+    assert steam["layout"] == epic["layout"]
+    assert steam["layout"]["steam_27_1"] == 1
+    assert steam["layout"]["tactic_version"] == 0x1B010000
+    assert steam["layout"]["execution_sample_stack"] == 0x108
+    assert steam["image"] != epic["image"]
+    assert steam["reference"] != epic["reference"]
+
+
+def test_host_uses_runtime_layout_and_falls_back_to_the_compiled_reference():
+    host = (NATIVE / "desktop_host.cpp").read_text(encoding="utf8")
+    assert "#include \"native_layout.h\"" in host
+    assert "#include \"fm27_adapter_profile.h\"" in host
+    assert "adapter_profile.active" in host
+    assert "adapter_profile_fallback" in host
+    assert "image_sha256_mismatch" in host
+    assert "FM27_STEAM_27_1" not in host
+    assert "match_importance" not in host
+    assert "native_match_rules_version" in host
+    assert "native_layout::steam_27_1()" in host
+    assert "native_layout::tactic_version()" in host
+    assert "current_pi_policy_version()" in host
+    at_start = host.index("static void* at(uintptr_t rva){")
+    at_end = host.index("static int audit_policies(){", at_start)
+    at_body = host[at_start:at_end]
+    assert "adapter_profile.active" in at_body
+    assert "adapter_profile.loaded" not in at_body
+    assert "adapter_profile.active=true;" in host
+    assert "manager+native_layout::manager(0x1908)" in host
+    profile_branch = host.index("if(adapter_profile.active&&adapter_profile.activation_rva){")
+    compiled_branch = host.index("}else if(!adapter_profile.active&&!exported_wait){", profile_branch)
+    export_branch = host.index("}else if(exported_wait){", compiled_branch)
+    assert profile_branch < compiled_branch < export_branch
+    assert 'GetProcAddress(module,"WaitForActivation")' in host
+
+
+def test_runtime_layout_defaults_keep_the_reference_build_and_apply_27_1_deltas():
+    layout = (NATIVE / "native_layout.h").read_text(encoding="utf8")
+    assert "adapter_profile.active" in layout
+    assert "steam_27_1()" not in layout.split("inline uintptr_t rva", 1)[1].split("}", 1)[0]
+    assert "layout_steam_27_1" in layout
+    assert "layout_manager" in layout
+    assert "layout_player_input" in layout
+    assert "layout_player_runtime" in layout
+    assert "layout_player_statistics" in layout
+    assert "layout_tactic_version" in layout
+    assert "layout_execution_sample_stack" in layout
+    profile = (NATIVE / "fm27_adapter_profile.h").read_text(encoding="utf8")
+    assert "bool active" in profile
+    assert "layout_steam_27_1" in profile
+    assert '"layout_manager"' in profile
+    assert '"layout_steam_27_1"' in profile
+    assert 'adapter_profile.error = "layout";' in profile
+
+
+def test_27_1_headers_use_the_runtime_layout_at_the_known_sites():
+    tactic_import = (NATIVE / "native_tactic_import.h").read_text(encoding="utf8")
+    assert "auto plan=manager+native_layout::manager(0x1818);" in tactic_import
+    assert "plan[0x105]" in tactic_import
+    assert "plan[0xe0+j]" in tactic_import
+    assert "plan[0x79c+j]" in tactic_import
+    events = (NATIVE / "native_match_events.h").read_text(encoding="utf8")
+    assert "native_layout::rva(0x4764c1d)" in events
+    assert "native_layout::player_statistics(0x8b)" in events
+    generation = (NATIVE / "native_source_generation.h").read_text(encoding="utf8")
+    assert "native_layout::manager(0x2fc8)" in generation
+    assert "native_layout::player_runtime(0x1880)" in generation
+    fmf = (NATIVE / "native_fmf_probe.h").read_text(encoding="utf8")
+    assert "native_layout::steam_27_1()" in fmf
+    assert "desktop_fmf_stream_revision==61" in fmf
+    build = (ROOT / "scripts" / "build_native.py").read_text(encoding="utf8")
+    assert "steam_27_1_profile.txt" in build
+    assert "epic_27_1_profile.txt" in build
+    assert "adapter_profile.txt" in build
+
+
+def test_27_1_map_covers_every_literal_host_anchor():
+    mapped = {source for source, _target in rva_map()}
+    used: set[int] = set()
+    for path in NATIVE.glob("*"):
+        if path.suffix not in {".h", ".cpp"}:
+            continue
+        for match in re.finditer(r"\bat\((0x[0-9a-fA-F]+)", path.read_text(encoding="utf8")):
+            used.add(int(match.group(1), 16))
+    assert used - {0xF0000000, 0xF0000001} <= mapped
