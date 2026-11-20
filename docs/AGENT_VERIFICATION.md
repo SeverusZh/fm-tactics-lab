@@ -234,7 +234,7 @@ TOKEN=$(python -c "import json,sys;print(json.load(open(sys.argv[1]))['token'])"
 ## 8. 已知限制
 
 - 本机 Linux 无 FM27Simulator 可执行文件，保持原生引擎未启动时实验启动返回 503 engine_unavailable；配置 engine_root 后由惰性宿主在首次使用时构造。
-- 原生宿主支持运行时适配画像 `adapter_profile.txt`，画像以安装 DLL 的 SHA-256 绑定；`scripts/adapt_profile.py` 生成画像与缺失锚点报告，`FM27Simulator.exe --probe-engine` 只验证加载、指纹与激活。BuildID 26620374 当前自动映射 57/99 个 `at()` 锚点，未补齐前原生实验仍被 fail-closed 拒绝；部分画像仅供诊断入口使用，正式比赛返回 `adapter_profile_partial_requires_diagnostic`。2026-11-19 的 WIP 试验在 75 个映射下到达模拟 tick 0，随后在 `.tls` 保护代码触发未处理 `0x80000004`；该阻断不是锚点缺失，当前构建维持 blocked。
+- 原生宿主支持运行时适配画像 `adapter_profile.txt`，画像以安装 DLL 的 SHA-256 绑定；`scripts/adapt_profile.py` 生成画像与缺失锚点报告，`FM27Simulator.exe --probe-engine` 只验证加载、指纹与激活。BuildID 26620374 当前自动映射 57/99 个 `at()` 锚点，未补齐前原生实验仍被 fail-closed 拒绝；部分画像仅供诊断入口使用，正式比赛返回 `adapter_profile_partial_requires_diagnostic`。2026-11-19 的试验（已合入 main，仅显式 `--trial-profile` 诊断模式）在 75 个映射下到达模拟 tick 0，随后在 `.tls` 保护代码触发未处理 `0x80000004`；该阻断不是锚点缺失，当前构建维持 blocked。
 - Windows 桌面端 W1 至 W5 尚未执行。
 - 数据目录 exports 子目录当前无写入使用方。
 - 池条目库与实验解耦，实验只读草案内嵌 away_tactic_pool。
