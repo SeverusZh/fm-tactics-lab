@@ -9,6 +9,7 @@ ROOT = Path(__file__).resolve().parents[2]
 NATIVE = ROOT / "native"
 sys.path.insert(0, str(ROOT / "scripts"))
 
+from compile_native_stub import write as write_stub  # noqa: E402
 from export_source import source_files  # noqa: E402
 from generate_profile import adapter_paths  # noqa: E402
 from profile_header import header  # noqa: E402
@@ -243,3 +244,20 @@ def test_27_1_map_covers_every_literal_host_anchor():
         for match in re.finditer(r"\bat\((0x[0-9a-fA-F]+)", path.read_text(encoding="utf8")):
             used.add(int(match.group(1), 16))
     assert used - {0xF0000000, 0xF0000001} <= mapped
+
+
+def test_native_stub_profiles_compile_both_storefront_contracts(tmp_path):
+    steam = write_stub(tmp_path / "steam").read_text(encoding="ascii")
+    epic = write_stub(tmp_path / "epic", digest_ranges=True).read_text(encoding="ascii")
+    for text in (steam, epic):
+        assert "compat_profile_id" in text
+        assert "compat_ranges[]=" in text
+        assert "compat_sections[]=" in text
+        assert "compat_data[]=" in text
+        assert "compat_imports[]=" in text
+        assert "compat_activation_flag=0u;" in text
+    assert "FM27_COMPAT_DIGEST_RANGES" not in steam
+    assert "FM27_COMPAT_DIGEST_RANGES" in epic
+    assert "epic_reference_sha256" in epic
+    assert "compat_bytes_0" in steam
+    assert "compat_bytes_0" not in epic

@@ -124,6 +124,17 @@ python scripts/static_profile.py --platform epic --output <engine>/fm27_native/a
 
 The profile carries RVA mappings plus the 27.1 object-layout deltas and activation word from the public metadata. It does not contain game bytes. A real Windows match, image check and save import are still required before treating a build as supported.
 
+To catch native-host syntax and type errors without a game DLL, generate stub contracts and compile both storefront branches with MSVC:
+
+```bat
+python scripts/compile_native_stub.py --output build/ci-native-steam
+python scripts/compile_native_stub.py --output build/ci-native-epic --digest-ranges
+cl /nologo /c /std:c++17 /EHsc /I native /I build/ci-native-steam native/desktop_host.cpp /Fo:build/ci-native-steam/desktop_host.obj
+cl /nologo /c /std:c++17 /EHsc /DFM27_COMPAT_DIGEST_RANGES /I native /I build/ci-native-epic native/desktop_host.cpp /Fo:build/ci-native-epic/desktop_host.obj
+```
+
+The stub is a compile-only contract; it does not validate image compatibility, activation or match behavior.
+
 `scripts/adapt_profile.py --write-signatures` is a maintainer command: it needs `objdump` and the local `private/engine/fm27_native/engine_compat_profile.json` reference bytes, then refreshes the derived window digests and operand descriptors in `native/profile_metadata.json`. Every used range must match the published SHA-256; a local reference with a different whole-image hash additionally needs `--allow-mixed-reference`. Normal adaptation only reads those published signatures.
 
 ### Run from source

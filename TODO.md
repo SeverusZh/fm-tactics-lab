@@ -233,6 +233,7 @@
 - [x] fmsave 0.14.1：新增 27.1.0 布局模块与生成球员 Unique ID 兜底；现有真实存档与全量 sidecar 测试 2974 项在 0.14.1 下通过；CI 待跑。
 - [ ] Windows 真机：MSVC 编译、`--check-image`、`--probe-engine`、真实单场、A/B、27.1.0 存档导入与 Epic 27.1.0 完赛。
 - [ ] 27.1.0 真实存档布局验证与发布矩阵更新。
+- [~] 原生宿主 stub 编译：`scripts/compile_native_stub.py` 与 stub 测试已就绪，可本地用 MSVC `/c` 编译 Steam/Epic 两个契约；远端 CI 接入受推送令牌 workflow scope 限制，待维护者推送。
 
 ## 发布门槛
 
