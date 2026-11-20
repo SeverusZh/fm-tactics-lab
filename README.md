@@ -43,7 +43,7 @@ MCP 客户端                ─┘                                      │
 
 - 桌面构建与运行：Windows x64，Python 3.12 x64、Node 22+、pnpm 11、Rust stable、MSVC C++17 与 Windows SDK、WebView2。
 - Python、前端与 Rust core 测试可以在 Linux 运行。
-- 本地安装 FM27（Steam 或 Epic），适配参考构建为 Steam `27.0.1+2503222`、Epic `27.0.1+epic`；原生宿主按本机安装自行构建。
+- 本地安装 FM27（Steam 或 Epic），适配参考构建为 Steam `27.0.1+2503222`、Epic `27.0.1+epic`；两者与 `27.1.0+2505117` 共用同一宿主，后者通过静态运行时画像接入，仍需本机真机验收。
 - 引擎工作区包含 `fm27_native/FM27Simulator.exe` 与 `catalog.json`，后者可以位于工作区根或 `fm27_native/` 下。
 
 ### 安装依赖
@@ -149,7 +149,7 @@ docs/       开发、接口、验证与一致性文档
 
 当前分支为 `main`，源码版本 `2.0.0.dev0`（前端包版本 `2.0.0-dev`），接口版本 `fm27lab/v2`。v2 安装包尚未发布，发布前收尾项见 [TODO](TODO.md)；稳定版本请使用上游 Releases。
 
-新版本从空 SQLite 数据库开始，不迁移旧实验数据；旧任务请在上一版本中查看或续跑。运行平台为 Windows x64，Steam 适配参考构建 `27.0.1+2503222`、Epic 适配参考构建 `27.0.1+epic`，游戏引擎与资源由本地安装提供。
+新版本从空 SQLite 数据库开始，不迁移旧实验数据；旧任务请在上一版本中查看或续跑。运行平台为 Windows x64，Steam 适配参考构建 `27.0.1+2503222`、Epic 适配参考构建 `27.0.1+epic`，`27.1.0+2505117` 通过静态运行时画像接入；游戏引擎与资源由本地安装提供。
 
 ## 文档
 
@@ -165,4 +165,4 @@ docs/       开发、接口、验证与一致性文档
 
 ## 许可
 
-工具代码采用 MIT 许可证。存档读取依赖 `fmsave 0.12.4`，压缩数据依赖 `backports.zstd 1.8.0`。第三方组件与字体许可见 [第三方说明](THIRD_PARTY_NOTICES.md)。
+工具代码采用 MIT 许可证。存档读取依赖 `fmsave 0.14.1`，压缩数据依赖 `backports.zstd 1.8.0`。第三方组件与字体许可见 [第三方说明](THIRD_PARTY_NOTICES.md)。
