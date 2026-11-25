@@ -235,6 +235,15 @@
 - [ ] 27.1.0 真实存档布局验证与发布矩阵更新。
 - [~] 原生宿主 stub 编译：`scripts/compile_native_stub.py` 与 stub 测试已就绪，可本地用 MSVC `/c` 编译 Steam/Epic 两个契约；远端 CI 接入受推送令牌 workflow scope 限制，待维护者推送。
 
+## 上游 v1125 27.1.1 适配
+
+- [x] Steam 27.1.1 静态画像：`native/steam_27_1_1_rvas.h` 与元数据生成 105 条映射（源集合与 27.1.0 相同），镜像 `47814394…`、激活字 `0x17845538`、布局复用 27.1.0；`scripts/static_profile.py` 支持第三份画像，`scripts/build_native.py --profile` 选择画像且默认行为不变。
+- [x] 存档 27.1.1 布局注册：`fm27lab/adapters/save_fmsave/builds.py` 把 27.1.0 的 game_db 条目注册到 `27.1.1+2511875`，幂等、不改原条目、不压制 unknown build 警告；无真实 27.1.1 存档样本。
+- [x] 测试与门禁：新增画像 oracle 与 build_native 主流程测试、存档注册测试；`SOURCE_MANIFEST.json` 已重建为 541 条。
+- [ ] Windows 真机：`--check-image`、`--probe-engine`、真实单场与 A/B，确认 27.1.1 画像激活与执行采样。
+- [ ] 27.1.1 真实存档导入：财务、赞助、战术与联赛读取端到端验证。
+- [ ] 源码版入口未接 27.1.1 精确布局：`src/desktop_save_compat.py` 是另一套 fmsave 注册所有者，`scripts/run.py` 的浏览器界面依赖它，27.1.1 目前只走 fmsave 0.14.1 的借用布局。源码版若仍在支持范围，需单独切片统一注册或明确退役。
+
 ## 发布门槛
 
 - Windows x64 + FM27 Steam 27.0.1+2503222 或 Epic 27.0.1+epic：原生兼容、单场、A/B、战术池、真实名单、取消/续跑；Epic 运行时验证需要具备 Epic 版游戏资产的机器，执行力实验仅对 Steam 8c6971ce 构建开放。

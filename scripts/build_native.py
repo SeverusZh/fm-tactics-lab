@@ -5,15 +5,29 @@ import subprocess
 from pathlib import Path
 
 from generate_profile import adapter_paths, generate
+from static_profile import PLATFORMS, PROFILES
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def main():
+def profile_file(platform, profile=None):
+    return ROOT / 'native' / PROFILES[profile or PLATFORMS[platform]]['output'].name
+
+
+def parse_args(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--reference-dll', required=True, type=Path)
     parser.add_argument('--platform', choices=('steam', 'epic'), default='steam')
-    args = parser.parse_args()
+    parser.add_argument('--profile', choices=tuple(PROFILES),
+                        help='runtime profile copied to adapter_profile.txt (default: the --platform profile)')
+    return parser.parse_args(argv)
+
+
+def main(argv=None):
+    args = parse_args(argv)
+    profile = args.profile or PLATFORMS[args.platform]
+    if PROFILES[profile]['platform'] != args.platform:
+        raise SystemExit(f"--profile {profile} requires --platform {PROFILES[profile]['platform']}")
     if not shutil.which('cl'):
         raise SystemExit('Run in an x64 Native Tools Command Prompt for Visual Studio (cl.exe required).')
     prefix, engine = adapter_paths(args.platform)
@@ -30,8 +44,7 @@ def main():
     dest = engine / 'fm27_native'
     shutil.copy2(out / 'FM27Simulator.exe', dest / 'FM27Simulator.exe')
     shutil.copy2(ROOT / 'native' / (prefix + 'adapter_version.json'), dest / 'adapter_version.json')
-    profile = 'epic_27_1_profile.txt' if args.platform == 'epic' else 'steam_27_1_profile.txt'
-    shutil.copy2(ROOT / 'native' / profile, dest / 'adapter_profile.txt')
+    shutil.copy2(profile_file(args.platform, args.profile), dest / 'adapter_profile.txt')
     print('Built', dest / 'FM27Simulator.exe')
 
 

@@ -6,6 +6,8 @@
 
 - 新增 FM27 `27.1.0+2505117` 运行时布局画像：宿主编译参考仍为 Steam `27.0.1+2503222` 或 Epic `27.0.1+epic`，通过 `adapter_profile.txt` 重定位 27.1.0 的 RVA、manager/player 偏移、战术版本与执行采样栈；Steam/Epic 各一份静态画像由 `scripts/static_profile.py` 生成，`scripts/build_native.py` 自动复制。画像镜像不匹配时回退编译期契约，reference 不匹配时 fail-closed。Windows 真机编译、单场与 A/B 验收尚未完成；原生宿主 stub 编译脚本已就绪，远端 CI 接入待 workflow scope，发布矩阵不变。
 - 升级存档读取依赖到 fmsave 0.14.1：新增 27.1.0 布局模块与生成球员 Unique ID 兜底；2503222 真实存档、名单、显示身份、联赛与战术读取回归通过；全量 sidecar 测试 2974 项在 0.14.1 下通过。27.1.0 真实存档尚未验证。
+- 新增 Steam `27.1.1+2511875` 静态运行时画像：`scripts/static_profile.py` 生成第三份 105 条映射（源集合与 27.1.0 相同），镜像与激活字取上游 v1125 公开数据，布局沿用 27.1.0；`scripts/build_native.py` 新增 `--profile` 选择 steam_27_1、steam_27_1_1 或 epic_27_1，默认行为不变。Windows 真机验收尚未完成。
+- 新增存档侧 `27.1.1+2511875` 布局注册：把 27.1.0 的 game_db 财务与赞助布局注册到 27.1.1，幂等且不压制 unknown build 警告；27.1.* 共用财务尾部，战术签名差异由 fmsave 诊断处理。无真实 27.1.1 存档样本，二进制端到端解码待验证。
 
 本版本已在 `refactor/v2-modular` 分支完成开发并合并到 `main`，尚未发布，也不存在可下载构建。计划范围与验收状态以 [TODO.md](TODO.md) 为准；在功能落地并通过独立审核前，本节不列完成项。
 

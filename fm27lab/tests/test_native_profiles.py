@@ -1,19 +1,26 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import re
+import shutil
+import subprocess
 import sys
 from pathlib import Path
+
+import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 NATIVE = ROOT / "native"
 sys.path.insert(0, str(ROOT / "scripts"))
 
+import build_native  # noqa: E402
+from build_native import parse_args, profile_file  # noqa: E402
 from compile_native_stub import write as write_stub  # noqa: E402
 from export_source import source_files  # noqa: E402
 from generate_profile import adapter_paths  # noqa: E402
 from profile_header import header  # noqa: E402
-from static_profile import LAYOUT_KEYS, load_metadata, render, rva_map  # noqa: E402
+from static_profile import LAYOUT_KEYS, PLATFORMS, PROFILES, load_profile, render, rva_map  # noqa: E402
 
 STEAM_SHA256 = "8c6971ce0b1c8afe6529ea3f46205a5175aea988a97d7421a980da42e23fe340"
 EPIC_SHA256 = "ebf6fcf57f554dc7178fb2afa4e1fd4d6e6dcb693f65a1a11216abb8d00c8396"
@@ -135,7 +142,7 @@ def test_platform_paths_cover_epic_build_and_export():
 
 
 def test_27_1_runtime_profiles_are_complete_and_bound_to_the_compiled_reference():
-    mappings = rva_map()
+    mappings = rva_map(NATIVE / "steam_27_1_rvas.h")
     assert len(mappings) == 105
     assert len(set(source for source, _target in mappings)) == len(mappings)
     assert len(set(target for _source, target in mappings)) == len(mappings)
@@ -143,23 +150,23 @@ def test_27_1_runtime_profiles_are_complete_and_bound_to_the_compiled_reference(
         ("steam", "fm27_desktop_8c6971ce_adapter_v1", "d12202dd01c3911d4c4e55e778f37b2251ffb10f9cf8cecc3b9ec08ece622c6b", 398482872),
         ("epic", "fm27_desktop_ebf6fcf5_adapter_v1", "f39d5d97aeb62f579cac0255d43bba29e34bc56d984eadea579805cfa275d0f1", 390611544),
     ):
-        metadata = load_metadata(platform)
+        metadata, platform_mappings = load_profile(platform)
         assert metadata["reference"] == reference
         assert metadata["image"] == image
         assert metadata["activation"] == activation
         assert set(metadata["layout"]) == set(LAYOUT_KEYS)
-        rendered = render(metadata, mappings)
+        rendered = render(metadata, platform_mappings)
         assert rendered.startswith("fm27-adapter-profile 1\n")
         assert f"image {image}\n" in rendered
         assert f"reference {reference}\n" in rendered
         assert rendered.count("layout_") == len(LAYOUT_KEYS)
-        assert rendered.count("\nmap ") == len(mappings)
+        assert rendered.count("\nmap ") == len(platform_mappings)
         assert (NATIVE / f"{platform}_27_1_profile.txt").read_text(encoding="utf8") == rendered
 
 
 def test_27_1_profiles_keep_the_reference_layout_for_steam_and_epic():
-    steam = load_metadata("steam")
-    epic = load_metadata("epic")
+    steam = load_profile("steam")[0]
+    epic = load_profile("epic")[0]
     assert steam["layout"] == epic["layout"]
     assert steam["layout"]["steam_27_1"] == 1
     assert steam["layout"]["tactic_version"] == 0x1B010000
@@ -230,13 +237,11 @@ def test_27_1_headers_use_the_runtime_layout_at_the_known_sites():
     assert "native_layout::steam_27_1()" in fmf
     assert "desktop_fmf_stream_revision==61" in fmf
     build = (ROOT / "scripts" / "build_native.py").read_text(encoding="utf8")
-    assert "steam_27_1_profile.txt" in build
-    assert "epic_27_1_profile.txt" in build
     assert "adapter_profile.txt" in build
 
 
 def test_27_1_map_covers_every_literal_host_anchor():
-    mapped = {source for source, _target in rva_map()}
+    mapped = {source for source, _target in rva_map(NATIVE / "steam_27_1_rvas.h")}
     used: set[int] = set()
     for path in NATIVE.glob("*"):
         if path.suffix not in {".h", ".cpp"}:
@@ -261,3 +266,230 @@ def test_native_stub_profiles_compile_both_storefront_contracts(tmp_path):
     assert "epic_reference_sha256" in epic
     assert "compat_bytes_0" in steam
     assert "compat_bytes_0" not in epic
+
+
+STEAM_27_1_1_SHA256 = "4781439443abfb4b8197de03f1bed5b76063c862d014cfe01c5f54d83c9875ee"
+STEAM_27_1_1_LAYOUT = {
+    "steam_27_1": 1,
+    "manager": 8,
+    "player_input": 1432,
+    "player_runtime": 1440,
+    "player_statistics": 4,
+    "tactic_version": 0x1B010000,
+    "execution_sample_stack": 0x108,
+}
+
+
+def test_steam_27_1_1_profile_is_bound_to_the_new_image_with_the_27_1_layout():
+    profile, mappings = load_profile("steam_27_1_1")
+    reference = rva_map(NATIVE / "steam_27_1_rvas.h")
+    assert len(mappings) == 105
+    assert len(set(source for source, _target in mappings)) == len(mappings)
+    assert len(set(target for _source, target in mappings)) == len(mappings)
+    assert {source for source, _target in mappings} == {source for source, _target in reference}
+    assert dict(mappings) != dict(reference)
+    assert profile["version"] == "27.1.1+2511875"
+    assert profile["reference"] == "fm27_desktop_8c6971ce_adapter_v1"
+    assert profile["image"] == STEAM_27_1_1_SHA256
+    assert profile["activation"] == 394548536
+    assert profile["partial"] == 0
+    assert profile["missing"] == 0
+    assert profile["layout"] == STEAM_27_1_1_LAYOUT
+    assert profile["layout"] == load_profile("steam")[0]["layout"]
+    rendered = render(profile, mappings)
+    assert rendered.startswith("fm27-adapter-profile 1\n")
+    assert f"image {STEAM_27_1_1_SHA256}\n" in rendered
+    assert "reference fm27_desktop_8c6971ce_adapter_v1\n" in rendered
+    assert "activation 0x17845538\n" in rendered
+    assert rendered.count("layout_") == len(LAYOUT_KEYS)
+    assert rendered.count("\nmap ") == len(mappings)
+    assert (NATIVE / "steam_27_1_1_profile.txt").read_text(encoding="utf8") == rendered
+
+
+def literal_host_anchors() -> set[int]:
+    anchors: set[int] = set()
+    for path in NATIVE.glob("*"):
+        if path.suffix not in {".h", ".cpp"}:
+            continue
+        for match in re.finditer(r"\bat\((0x[0-9a-fA-F]+)", path.read_text(encoding="utf8")):
+            anchors.add(int(match.group(1), 16))
+    return anchors - {0xF0000000, 0xF0000001}
+
+
+@pytest.mark.parametrize("header", ("steam_27_1_rvas.h", "steam_27_1_1_rvas.h"))
+def test_27_1_maps_cover_every_literal_host_anchor(header):
+    anchors = literal_host_anchors()
+    assert anchors
+    assert anchors <= {source for source, _target in rva_map(NATIVE / header)}
+
+
+def test_build_native_selects_the_2711_profile_and_defaults_to_2710():
+    assert build_native.PROFILES is PROFILES
+    assert build_native.PLATFORMS is PLATFORMS
+    assert parse_args(["--reference-dll", "game_plugin.dll"]).profile is None
+    assert profile_file("steam") == NATIVE / "steam_27_1_profile.txt"
+    assert profile_file("epic") == NATIVE / "epic_27_1_profile.txt"
+    args = parse_args(["--reference-dll", "game_plugin.dll", "--profile", "steam_27_1_1"])
+    assert args.profile == "steam_27_1_1"
+    assert profile_file(args.platform, args.profile) == NATIVE / "steam_27_1_1_profile.txt"
+    assert profile_file("steam", "steam_27_1") == NATIVE / "steam_27_1_profile.txt"
+    assert profile_file("epic", "epic_27_1") == NATIVE / "epic_27_1_profile.txt"
+
+
+def test_static_profile_cli_writes_the_2711_output(tmp_path):
+    assert PROFILES["steam_27_1_1"]["header"] == NATIVE / "steam_27_1_1_rvas.h"
+    assert PROFILES["steam_27_1_1"]["output"] == NATIVE / "steam_27_1_1_profile.txt"
+    assert PROFILES["steam_27_1"]["output"] == NATIVE / "steam_27_1_profile.txt"
+    assert PROFILES["epic_27_1"]["output"] == NATIVE / "epic_27_1_profile.txt"
+    output = tmp_path / "steam_27_1_1_profile.txt"
+    subprocess.run(
+        [sys.executable, str(ROOT / "scripts" / "static_profile.py"),
+         "--platform", "steam_27_1_1", "--output", str(output)],
+        cwd=ROOT, check=True, capture_output=True,
+    )
+    expected = render(*load_profile("steam_27_1_1"))
+    assert output.read_text(encoding="utf8") == expected
+
+
+def test_rva_map_requires_an_explicit_header():
+    with pytest.raises(TypeError):
+        rva_map()
+
+
+@pytest.mark.parametrize("platform", tuple(PLATFORMS))
+def test_load_profile_pairs_each_metadata_with_its_own_header(platform):
+    metadata, mappings = load_profile(platform)
+    entry = PROFILES[PLATFORMS[platform]]
+    assert mappings == rva_map(entry["header"])
+    assert render(metadata, mappings) == entry["output"].read_text(encoding="utf8")
+
+
+# sha256 over the sorted "src:dst\n" lines of the upstream public Steam 27.1.1 RVA table.
+STEAM_27_1_1_MAP_SHA256 = "b5c891a229fc4c94ff6804d44c71699439fb244737d6ab3987062028c0a2742f"
+
+
+def mapping_digest(mappings: list[tuple[int, int]]) -> str:
+    canonical = "".join(f"{source:x}:{target:x}\n" for source, target in sorted(mappings))
+    return hashlib.sha256(canonical.encode("ascii")).hexdigest()
+
+
+def test_steam_27_1_1_map_matches_the_upstream_public_table():
+    mappings = load_profile("steam_27_1_1")[1]
+    assert mapping_digest(mappings) == STEAM_27_1_1_MAP_SHA256
+    pairs = dict(mappings)
+    assert pairs[0x4D30] == 0x5B80
+    assert pairs[0x27740] == 0x27A60
+    assert pairs[0x1BA2A30] == 0x1BE5CC0
+    assert pairs[0x58340C8] == 0x5890D70
+
+
+def staged_build_root(tmp_path: Path) -> Path:
+    root = tmp_path / "repo"
+    native = root / "native"
+    native.mkdir(parents=True)
+    for name in ("steam_27_1_profile.txt", "steam_27_1_1_profile.txt",
+                 "epic_27_1_profile.txt", "adapter_version.json", "epic_adapter_version.json"):
+        shutil.copy2(NATIVE / name, native / name)
+    (native / "desktop_host.cpp").write_text("int main(){return 0;}\n", encoding="ascii")
+    (native / "host.manifest").write_text("<assembly/>\n", encoding="ascii")
+    return root
+
+
+def run_staged_build(monkeypatch, root: Path, engine: Path, platform: str,
+                     profile: str | None = None) -> tuple[Path, list[tuple[Path, str]]]:
+    prefix = "epic_" if platform == "epic" else ""
+    generate_calls: list[tuple[Path, str]] = []
+
+    def fake_generate(reference_dll, chosen):
+        generate_calls.append((reference_dll, chosen))
+        contract = root / "private" / (prefix + "native")
+        contract.mkdir(parents=True, exist_ok=True)
+        (contract / "engine_compat_profile.h").write_text("#pragma once\n", encoding="ascii")
+        built = root / "build" / (prefix + "native")
+        built.mkdir(parents=True, exist_ok=True)
+        (built / "FM27Simulator.exe").write_text("stub\n", encoding="ascii")
+        (engine / "fm27_native").mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr(build_native, "ROOT", root)
+    monkeypatch.setattr(build_native, "generate", fake_generate)
+    monkeypatch.setattr(build_native, "adapter_paths", lambda chosen: (prefix, engine))
+    monkeypatch.setattr(build_native.shutil, "which", lambda name: "cl")
+    monkeypatch.setattr(build_native.subprocess, "run", lambda *args, **kwargs: None)
+    argv = ["--reference-dll", str(root.parent / "game_plugin.dll"), "--platform", platform]
+    if profile is not None:
+        argv += ["--profile", profile]
+    build_native.main(argv)
+    return engine, generate_calls
+
+
+def run_build_native(monkeypatch, tmp_path: Path, platform: str,
+                     profile: str | None = None) -> tuple[Path, list[tuple[Path, str]]]:
+    root = staged_build_root(tmp_path)
+    return run_staged_build(monkeypatch, root, tmp_path / "engine", platform, profile)
+
+
+def test_build_native_resolves_profiles_from_its_own_root(monkeypatch, tmp_path):
+    root = staged_build_root(tmp_path)
+    staged_profile = root / "native" / "steam_27_1_1_profile.txt"
+    staged_profile.write_text(staged_profile.read_text(encoding="utf8") + "# staged\n", encoding="utf8")
+    engine, generate_calls = run_staged_build(
+        monkeypatch, root, tmp_path / "engine", "steam", "steam_27_1_1")
+    assert profile_file("steam", "steam_27_1_1") == staged_profile
+    installed = (engine / "fm27_native" / "adapter_profile.txt").read_text(encoding="utf8")
+    assert installed == staged_profile.read_text(encoding="utf8")
+    assert installed.endswith("# staged\n")
+    assert generate_calls == [(tmp_path / "game_plugin.dll", "steam")]
+
+
+def test_build_native_main_installs_the_selected_2711_profile(monkeypatch, tmp_path):
+    engine, generate_calls = run_build_native(monkeypatch, tmp_path, "steam", "steam_27_1_1")
+    installed = engine / "fm27_native" / "adapter_profile.txt"
+    text = installed.read_text(encoding="utf8")
+    assert f"image {STEAM_27_1_1_SHA256}\n" in text
+    assert "reference fm27_desktop_8c6971ce_adapter_v1\n" in text
+    assert "activation 0x17845538\n" in text
+    assert text.count("\nmap ") == 105
+    assert generate_calls == [(tmp_path / "game_plugin.dll", "steam")]
+
+
+def test_build_native_main_defaults_to_the_2710_profile(monkeypatch, tmp_path):
+    engine, generate_calls = run_build_native(monkeypatch, tmp_path, "steam")
+    text = (engine / "fm27_native" / "adapter_profile.txt").read_text(encoding="utf8")
+    assert "image d12202dd01c3911d4c4e55e778f37b2251ffb10f9cf8cecc3b9ec08ece622c6b\n" in text
+    assert "activation 0x17c05db8\n" in text
+    assert text == (NATIVE / "steam_27_1_profile.txt").read_text(encoding="utf8")
+    version = engine / "fm27_native" / "adapter_version.json"
+    assert version.read_text(encoding="utf8") == (NATIVE / "adapter_version.json").read_text(encoding="utf8")
+    assert generate_calls == [(tmp_path / "game_plugin.dll", "steam")]
+
+
+def test_build_native_main_installs_the_epic_2710_profile(monkeypatch, tmp_path):
+    engine, generate_calls = run_build_native(monkeypatch, tmp_path, "epic", "epic_27_1")
+    text = (engine / "fm27_native" / "adapter_profile.txt").read_text(encoding="utf8")
+    assert "image f39d5d97aeb62f579cac0255d43bba29e34bc56d984eadea579805cfa275d0f1\n" in text
+    assert "reference fm27_desktop_ebf6fcf5_adapter_v1\n" in text
+    assert "activation 0x17484258\n" in text
+    assert text == (NATIVE / "epic_27_1_profile.txt").read_text(encoding="utf8")
+    version = engine / "fm27_native" / "adapter_version.json"
+    assert version.read_text(encoding="utf8") == (NATIVE / "epic_adapter_version.json").read_text(encoding="utf8")
+    assert generate_calls == [(tmp_path / "game_plugin.dll", "epic")]
+
+
+def test_build_native_main_defaults_to_the_epic_2710_profile(monkeypatch, tmp_path):
+    engine, generate_calls = run_build_native(monkeypatch, tmp_path, "epic")
+    text = (engine / "fm27_native" / "adapter_profile.txt").read_text(encoding="utf8")
+    assert "image f39d5d97aeb62f579cac0255d43bba29e34bc56d984eadea579805cfa275d0f1\n" in text
+    assert "reference fm27_desktop_ebf6fcf5_adapter_v1\n" in text
+    assert "activation 0x17484258\n" in text
+    assert text == (NATIVE / "epic_27_1_profile.txt").read_text(encoding="utf8")
+    assert generate_calls == [(tmp_path / "game_plugin.dll", "epic")]
+
+
+@pytest.mark.parametrize(
+    ("platform", "profile"),
+    (("epic", "steam_27_1"), ("epic", "steam_27_1_1"), ("steam", "epic_27_1")),
+)
+def test_build_native_rejects_a_profile_from_the_other_platform(platform, profile):
+    argv = ["--reference-dll", "game_plugin.dll", "--platform", platform, "--profile", profile]
+    with pytest.raises(SystemExit, match=f"--profile {profile} requires --platform"):
+        build_native.main(argv)

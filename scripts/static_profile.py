@@ -1,4 +1,4 @@
-"""Render the runtime adapter profile for the known FM27 27.1.0 builds."""
+"""Render the runtime adapter profile for the known FM27 27.1.x builds."""
 
 from __future__ import annotations
 
@@ -11,9 +11,26 @@ ROOT = Path(__file__).resolve().parents[1]
 NATIVE = ROOT / "native"
 RVA_HEADER = NATIVE / "steam_27_1_rvas.h"
 PROFILES = {
-    "steam": NATIVE / "steam_27_1_profile.json",
-    "epic": NATIVE / "epic_27_1_profile.json",
+    "steam_27_1": {
+        "platform": "steam",
+        "metadata": NATIVE / "steam_27_1_profile.json",
+        "header": RVA_HEADER,
+        "output": NATIVE / "steam_27_1_profile.txt",
+    },
+    "steam_27_1_1": {
+        "platform": "steam",
+        "metadata": NATIVE / "steam_27_1_1_profile.json",
+        "header": NATIVE / "steam_27_1_1_rvas.h",
+        "output": NATIVE / "steam_27_1_1_profile.txt",
+    },
+    "epic_27_1": {
+        "platform": "epic",
+        "metadata": NATIVE / "epic_27_1_profile.json",
+        "header": RVA_HEADER,
+        "output": NATIVE / "epic_27_1_profile.txt",
+    },
 }
+PLATFORMS = {"steam": "steam_27_1", "epic": "epic_27_1", "steam_27_1_1": "steam_27_1_1"}
 LAYOUT_KEYS = (
     "steam_27_1",
     "manager",
@@ -26,11 +43,7 @@ LAYOUT_KEYS = (
 _CASE = re.compile(r"case\s+(0x[0-9a-fA-F]+):\s*return\s+(0x[0-9a-fA-F]+);")
 
 
-def load_metadata(platform: str) -> dict:
-    return json.loads(PROFILES[platform].read_text(encoding="utf8"))
-
-
-def rva_map(path: Path = RVA_HEADER) -> list[tuple[int, int]]:
+def rva_map(path: Path) -> list[tuple[int, int]]:
     pairs = [(int(source, 16), int(target, 16)) for source, target in _CASE.findall(path.read_text(encoding="utf8"))]
     if not pairs:
         raise ValueError("no 27.1 RVA mappings")
@@ -39,6 +52,11 @@ def rva_map(path: Path = RVA_HEADER) -> list[tuple[int, int]]:
     if len({target for _source, target in pairs}) != len(pairs):
         raise ValueError("duplicate 27.1 RVA target")
     return pairs
+
+
+def load_profile(platform: str) -> tuple[dict, list[tuple[int, int]]]:
+    entry = PROFILES[PLATFORMS[platform]]
+    return json.loads(entry["metadata"].read_text(encoding="utf8")), rva_map(entry["header"])
 
 
 def render(metadata: dict, mappings: list[tuple[int, int]]) -> str:
@@ -71,17 +89,17 @@ def render(metadata: dict, mappings: list[tuple[int, int]]) -> str:
 
 
 def write(platform: str, output: Path) -> str:
-    text = render(load_metadata(platform), rva_map())
+    text = render(*load_profile(platform))
     output.write_text(text, encoding="utf8")
     return text
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--platform", choices=tuple(PROFILES), required=True)
+    parser.add_argument("--platform", choices=tuple(PLATFORMS), required=True)
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
-    output = args.output or NATIVE / f"{args.platform}_27_1_profile.txt"
+    output = args.output or PROFILES[PLATFORMS[args.platform]]["output"]
     write(args.platform, output)
     print(output)
 

@@ -22,7 +22,8 @@ SKIP_PARTS = {'__pycache__', 'node_modules', 'target', 'dist', 'build', '.venv',
               '.toolchain', '.pytest_cache', '.ruff_cache', '.pnpm-store'}
 NATIVE_JSON = {'native/profile_metadata.json', 'native/adapter_version.json',
                'native/epic_profile_metadata.json', 'native/epic_adapter_version.json',
-               'native/steam_27_1_profile.json', 'native/epic_27_1_profile.json'}
+               'native/steam_27_1_profile.json', 'native/steam_27_1_1_profile.json',
+               'native/epic_27_1_profile.json'}
 SCREENSHOTS = {'docs/screenshots/tactics.png', 'docs/screenshots/players.png',
                'docs/screenshots/results.png', 'docs/screenshots/save-tactics.png',
                'docs/screenshots/save-tactics-progress.png', 'docs/screenshots/away-pool.png'}

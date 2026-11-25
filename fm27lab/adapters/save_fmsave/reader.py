@@ -13,6 +13,7 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
+from fm27lab.adapters.save_fmsave.builds import install as install_build_layouts
 from fm27lab.adapters.save_fmsave.player_display import registered_shirts, summary_names
 
 SAVE_DEPENDENCY_ERROR = "未安装存档读取依赖 fmsave"
@@ -130,6 +131,7 @@ def _load_fmsave() -> Any:
         import fmsave
     except ImportError as error:
         raise RuntimeError(SAVE_DEPENDENCY_ERROR) from error
+    install_build_layouts()
     return fmsave
 
 

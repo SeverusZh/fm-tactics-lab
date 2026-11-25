@@ -35,3 +35,12 @@ FM27 在 2026-11-18 自动更新到 Steam `27.1.0+2505117`（BuildID 26620374）
 - 为 27.1.0 单独构建第二个宿主二进制：实现直接，但引入宿主选择、双份打包与两套发布验收，否决。
 - 直接把 `native_layout` 保持为编译期常量并只在 27.1 构建启用：无法在同一工作区保留 2503222 支持，否决。
 - 继续使用自适应画像补齐 27.1 锚点：已有试验显示补齐锚点仍会触发保护层单步异常，且布局偏移缺失，否决。
+
+## 修订 2026-11-25 Steam 27.1.1
+
+FM27 于 2026-11-25 更新到 Steam `27.1.1+2511875`。上游 v1125 的适配显示该构建的对象布局与 27.1.0 相同，只有镜像哈希、激活字与 RVA 目标地址不同，因此沿用本 ADR 的运行时画像路线，不新增宿主二进制，也不改编译期参考。
+
+1. 新增 `native/steam_27_1_1_rvas.h` 与 `native/steam_27_1_1_profile.json`，`scripts/static_profile.py` 生成第三份静态画像；`scripts/build_native.py` 通过 `--profile` 选择 steam_27_1、steam_27_1_1 或 epic_27_1，默认行为不变。
+2. 画像 reference 仍绑定编译期参考 `fm27_desktop_8c6971ce_adapter_v1`，image 绑定 `4781439443ab…`，activation 取上游 `activation_flag_rva`（`0x17845538`）；布局字段与 27.1.0 相同。
+3. 存档侧 27.1.* 共用同一俱乐部财务尾部，27.1.1 只有战术签名第三字节不同，由 fmsave 的未知签名诊断处理；`fm27lab/adapters/save_fmsave/builds.py` 把 27.1.0 的 game_db 条目注册到 `27.1.1+2511875`，不压制 unknown build 警告。
+4. 验证边界：本机无 Windows 与真实 27.1.1 镜像，`--check-image`、`--probe-engine`、真实单场与 27.1.1 存档导入仍未执行。

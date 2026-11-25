@@ -103,7 +103,7 @@ In an **x64 Native Tools Command Prompt for Visual Studio**:
 .venv\Scripts\python.exe scripts\build_native.py --platform epic --reference-dll "C:\path\to\Epic\game_plugin.dll"
 ```
 
-The public repository contains range metadata and digests. The script reconstructs comparison bytes from the exact reference DLL on your machine, verifies every range, then compiles the checked-in C++ host. Generated function bytes remain in ignored local outputs. The build also copies the matching FM27 27.1.0 static profile to `<engine>/fm27_native/adapter_profile.txt`; the same host accepts both the compiled reference and `27.1.0+2505117` through that profile.
+The public repository contains range metadata and digests. The script reconstructs comparison bytes from the exact reference DLL on your machine, verifies every range, then compiles the checked-in C++ host. Generated function bytes remain in ignored local outputs. The build also copies the matching FM27 27.1 static profile to `<engine>/fm27_native/adapter_profile.txt`; `--profile` selects `steam_27_1`, `steam_27_1_1` or `epic_27_1`; the two Steam profiles require `--platform steam` and the Epic profile requires `--platform epic`. The same host accepts the compiled reference plus either Steam `27.1.0+2505117` or `27.1.1+2511875` through that profile.
 
 ### Adapt to a different game build
 
@@ -115,10 +115,11 @@ Keep an existing host binary and generate a runtime profile for the installed im
 
 The command writes `adapter_profile.txt` plus `adapter_profile.txt.report.json`. Place the profile next to `FM27Simulator.exe` or set `FM27_ADAPTER_PROFILE`. The host rejects a profile whose reference id differs, falls back to the compiled reference when the image SHA-256 differs, and aborts on the first unmapped anchor; a report with `complete=false` is a diagnostic, not a usable profile. `FM27Simulator.exe --probe-engine --output probe.jsonl` verifies image load, activation and fingerprint without creating the engine interface.
 
-For the known `27.1.0+2505117` Steam and Epic builds, use the checked-in static profile instead of the adaptive generator:
+For the known `27.1.0+2505117` and `27.1.1+2511875` Steam builds and the Epic `27.1.0` build, use the checked-in static profile instead of the adaptive generator:
 
 ```powershell
 python scripts/static_profile.py --platform steam --output <engine>/fm27_native/adapter_profile.txt
+python scripts/static_profile.py --platform steam_27_1_1 --output <engine>/fm27_native/adapter_profile.txt
 python scripts/static_profile.py --platform epic --output <engine>/fm27_native/adapter_profile.txt
 ```
 
