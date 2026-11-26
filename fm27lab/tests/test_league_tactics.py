@@ -13,6 +13,7 @@ from fm27lab.adapters.engine_native.coach_presets import (
 )
 from fm27lab.adapters.engine_native.tactic_file import TacticCell, TacticFileError, TacticPlan
 from fm27lab.adapters.save_fmsave.league import Club, Coach, League, LeagueCatalog
+from fm27lab.application import league_tactics
 from fm27lab.application.league_tactics import (
     ENGINE_MISMATCH,
     NO_COACH,
@@ -285,6 +286,31 @@ def test_listing_keeps_league_indices_distinct_across_leagues(tmp_path: Path):
 def test_catalog_reports_current_opponent_count(tmp_path: Path):
     svc, _calls = service(tmp_path)
     assert svc.catalog("save-1")["current"]["opponent_count"] == 2
+
+
+def test_catalog_uses_installed_league_names(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(
+        league_tactics.game_db_names,
+        "resolve",
+        lambda *args, **kwargs: {"competitions": {11: "英超联赛", 12: "英冠联赛"}},
+    )
+    svc, _calls = service(tmp_path, catalog_value=catalog_two())
+
+    catalog = svc.catalog("save-1")
+
+    assert [row["name"] for row in catalog["leagues"]] == ["英超联赛 · 2029", "英冠联赛 · 2029"]
+    assert catalog["current"]["name"] == "英超联赛 · 2029"
+
+
+def test_catalog_falls_back_when_names_are_unavailable(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(
+        league_tactics.game_db_names,
+        "resolve",
+        lambda *args, **kwargs: {"competitions": {}},
+    )
+    svc, _calls = service(tmp_path)
+
+    assert svc.catalog("save-1")["current"]["name"] == "联赛 #11 · 2029"
 
 
 def test_coach_read_failure_becomes_unavailable_rows(tmp_path: Path):
