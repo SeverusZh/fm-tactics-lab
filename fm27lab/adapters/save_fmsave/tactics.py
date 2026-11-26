@@ -18,7 +18,10 @@ from fm27lab.adapters.save_fmsave.reader import (
 TACTICS_SECTION = "tactics_man"
 USER_TACTIC_SIGNATURE = bytes.fromhex("2244001b00010002")
 PRESET_TACTIC_SIGNATURE = bytes.fromhex("2244001b00010001")
-SIGNATURE_LEAD = bytes.fromhex("2244001b00")
+# Build variants keep the first four bytes and change the rest, so the lead that
+# locates candidates stops before the build bytes. 27.1.1 stores 2244001b01000101
+# and 2244001b01000102 where 27.1.0 stores 2244001b00010001 and 2244001b00010002.
+SIGNATURE_LEAD = bytes.fromhex("2244001b")
 SIGNATURE_BYTES = 8
 TACTICS_UNSUPPORTED_ERROR = "当前游戏版本的存档战术暂不支持解析"
 
@@ -165,15 +168,16 @@ def _blocks(
     file_name: str,
 ) -> tuple[_Block, ...]:
     signatures = _known_signatures(layout)
+    found: dict[int, _Block] = {}
     if signatures:
-        blocks = _scan(section, signatures, layout, read_record, file_name)
-        if blocks:
-            return blocks
+        for block in _scan(section, signatures, layout, read_record, file_name):
+            found[block.start] = block
     for signature in _variant_signatures(section):
-        blocks = _scan(section, (signature,), layout, read_record, file_name)
-        if blocks:
-            return blocks
-    return ()
+        if signature in signatures:
+            continue
+        for block in _scan(section, (signature,), layout, read_record, file_name):
+            found.setdefault(block.start, block)
+    return tuple(found[start] for start in sorted(found))
 
 
 def _known_signatures(layout: Any) -> tuple[bytes, ...]:

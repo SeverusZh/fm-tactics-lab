@@ -152,6 +152,18 @@ def test_read_tactics_falls_back_to_discovered_signature():
     assert items[0].has_stream is True
 
 
+def test_read_tactics_discovers_the_27_1_1_signature_variants():
+    preset = bytes.fromhex("2244001b01000101")
+    user = bytes.fromhex("2244001b01000102")
+    section = encode_block(preset, "Preset") + encode_block(user, "Sev - Mid Defence Dynamic 3-4-2-1")
+    rows = (FakeRow(name="Preset"), FakeRow(name="Sev - Mid Defence Dynamic 3-4-2-1"))
+
+    items = read_items(section, rows)
+
+    assert [item.name for item in items] == ["Preset", "Sev - Mid Defence Dynamic 3-4-2-1"]
+    assert [item.has_stream for item in items] == [True, True]
+
+
 def test_read_tactics_ignores_incomplete_records():
     section = b"".join(
         encode_block(USER_TACTIC_SIGNATURE, name, flags)
