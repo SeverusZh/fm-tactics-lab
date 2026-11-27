@@ -240,6 +240,14 @@ def test_27_1_headers_use_the_runtime_layout_at_the_known_sites():
     assert "adapter_profile.txt" in build
 
 
+def test_host_reads_the_captain_slot_through_the_layout_profile():
+    host = (NATIVE / "desktop_host.cpp").read_text(encoding="utf8")
+    assert "manager[native_layout::manager(0x34e5)]" in host
+    assert "manager[0x34e5]" not in host
+    assert "current_scenario_edit.kind" in host
+    assert "verify_cross" in host
+
+
 def test_27_1_map_covers_every_literal_host_anchor():
     mapped = {source for source, _target in rva_map(NATIVE / "steam_27_1_rvas.h")}
     used: set[int] = set()
