@@ -290,7 +290,7 @@
   "fm27lab/tests/test_verify_engine_windows_script.py": "b2a6bb8fb2b462c483ef608d8eb7140343453b21b9d46ad53ce6d0fd76d46145",
   "fm27lab/tests/test_web_types.py": "51130c03d492ec016497efab8de8eedce808a88018914f5c91145bc1b7055465",
   "native/adapter_version.json": "912be9138611e4f415e9b4db4403941d76f6049c5771c6e0f5159b983c61e941",
-  "native/desktop_host.cpp": "a0a2ae1a88bb958da883759dbccf6dbdf0ae91855ddac3d12b3fe9b48563d6d1",
+  "native/desktop_host.cpp": "af0d245a94da60be42bb99b937c0b11df20b6543a8b7d89a960f3af5df605a9b",
   "native/epic_27_1_profile.json": "9fbf35eafa128e4f9dad0b429e821ed43b2d9743cccba98c45fefe9c245cbd5f",
   "native/epic_27_1_profile.txt": "d2808dedeb483142b82a5923265b84cc1fb8583f5fdd84346ffc3ba0c560d80e",
   "native/epic_adapter_version.json": "33056b4c3f9981efdcb0c04866dde990f08378e6b57d9f62632f3e4193aa32aa",

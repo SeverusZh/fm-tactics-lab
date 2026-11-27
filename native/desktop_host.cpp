@@ -408,7 +408,9 @@ static bool apply_scenario(unsigned char* match,bool tactics_only=false){
 }
 static bool verify_scenario(unsigned char* match){
     if(scenario_file.empty())return true;
+    scenario_stage="verify";
     for(const auto& edit:scenario_edits){
+        current_scenario_edit=edit;
         auto team=*(unsigned char**)(match+0x15380+8*edit.side);
         auto manager=*(unsigned char**)(team+0x630);
         if(edit.kind==62){
@@ -466,7 +468,7 @@ static bool verify_scenario(unsigned char* match){
             }
         }
         if(edit.kind==31&&edit.value!=0xffffffff){
-            unsigned slot=manager[0x34e5];if(slot>=11||*(unsigned char**)(team+0x138+slot*8)!=original_roster[edit.side][edit.value])return false;
+            unsigned slot=manager[native_layout::manager(0x34e5)];if(slot>=11||*(unsigned char**)(team+0x138+slot*8)!=original_roster[edit.side][edit.value])return false;
             fprintf(log_file,"{\"event\":\"native_captain_verified\",\"side\":%u,\"player_slot\":%u,\"person_key\":%u}\n",edit.side,slot,person_key(original_roster[edit.side][edit.value]));
         }
         if(edit.kind==11&&*(unsigned char**)(team+0x138+edit.a*8)!=original_roster[edit.side][edit.value])return false;
@@ -906,7 +908,7 @@ static int native_match(void* interface_object){
         auto original_count=team[0x72d];team[0x72d]=(unsigned char)edit.value;
         fprintf(log_file,"{\"event\":\"native_match_roster_committed\",\"side\":%u,\"carrier_count\":%u,\"participants\":%u,\"after_original_preparation\":true}\n",edit.side,original_count,edit.value);fflush(log_file);
     }
-    if(!verify_scenario(match)){fprintf(log_file,"{\"event\":\"scenario_readback_mismatch\"}\n");fflush(log_file);desktop_finish_and_exit(109);}
+    if(!verify_scenario(match)){fprintf(log_file,"{\"event\":\"scenario_readback_mismatch\",\"stage\":\"%s\",\"kind\":%u,\"side\":%u,\"a\":%u,\"b\":%u,\"value\":%u}\n",scenario_stage,current_scenario_edit.kind,current_scenario_edit.side,current_scenario_edit.a,current_scenario_edit.b,current_scenario_edit.value);fflush(log_file);desktop_finish_and_exit(109);}
     source_generation_verified(match);
     dump_match_input(match);
     if(inspect_fixture_only){
