@@ -59,7 +59,7 @@ static void desktop_stats_snapshot(unsigned char* match,const char* stage){
         fprintf(log_file,"{\"event\":\"desktop_stats_snapshot\",\"stage\":\"%s\",\"side\":%u,\"team_hex\":\"",stage,s);
         for(unsigned j=0;j<0x200;j++)fprintf(log_file,"%02x",stats[j]);fputs("\",\"players\":[",log_file);
         for(unsigned i=0;i<team[0x72d];i++){
-            auto actor=*(unsigned char**)(team+0x138+i*8);auto record=*(unsigned char**)(actor+0x1880);
+            auto actor=*(unsigned char**)(team+0x138+i*8);auto record=*(unsigned char**)(actor+native_layout::player_runtime(0x1880));
             fprintf(log_file,"%s{\"id\":%u,\"hex\":\"",i?",":"",*(unsigned*)(actor+0x50));
             if(record)for(unsigned j=0;j<0x100;j++)fprintf(log_file,"%02x",record[j]);fputs("\"}",log_file);
         }fputs("]}\n",log_file);

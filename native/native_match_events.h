@@ -14,7 +14,7 @@ static unsigned desktop_event_nonzero_padding=0;
 static bool desktop_event_details_disabled=false;
 static void desktop_event_person(unsigned char* match,unsigned side,unsigned index){
     if(side>1){fputs("null",log_file);return;}auto team=*(unsigned char**)(match+0x15380+8*side);if(index>=team[0x72d]){fputs("null",log_file);return;}auto actor=*(unsigned char**)(team+0x138+8*index);if(!actor){fputs("null",log_file);return;}
-    fprintf(log_file,"{\"side\":%u,\"roster_index\":%u,\"native_id\":%u,\"ip_position\":%u,\"oop_position\":%u}",side,index,*(unsigned*)(actor+0x50),*(unsigned*)(actor+0xce0),*(unsigned*)(actor+0xdb8));
+    fprintf(log_file,"{\"side\":%u,\"roster_index\":%u,\"native_id\":%u,\"ip_position\":%u,\"oop_position\":%u}",side,index,*(unsigned*)(actor+0x50),*(unsigned*)(actor+native_layout::player_input(0xce0)),*(unsigned*)(actor+native_layout::player_input(0xdb8)));
 }
 static void desktop_capture_event_queue(unsigned char* match){
     if(desktop_event_details_disabled)return;
@@ -75,7 +75,7 @@ static void desktop_player_totals(unsigned char* match){
                 if(person_key(candidate)==*(uint32_t*)(stats+0x18)){actor=candidate;index=i;matches++;}
             }
             if(matches!=1){identity_ok=false;continue;}checked_records++;
-            fprintf(log_file,"%s{\"side\":%u,\"roster_index\":%u,\"native_id\":%u,\"goals\":%u,\"yellow_cards\":%u,\"red_cards\":%u,\"ip_position\":%u,\"oop_position\":%u}",comma?",":"",side,index,*(unsigned*)(actor+0x50),stats[0x8b],stats[0xa6],stats[0xa7],*(unsigned*)(actor+0xce0),*(unsigned*)(actor+0xdb8));comma=true;
+            fprintf(log_file,"%s{\"side\":%u,\"roster_index\":%u,\"native_id\":%u,\"goals\":%u,\"yellow_cards\":%u,\"red_cards\":%u,\"ip_position\":%u,\"oop_position\":%u}",comma?",":"",side,index,*(unsigned*)(actor+0x50),stats[native_layout::player_statistics(0x8b)],stats[native_layout::player_statistics(0xa6)],stats[native_layout::player_statistics(0xa7)],*(unsigned*)(actor+native_layout::player_input(0xce0)),*(unsigned*)(actor+native_layout::player_input(0xdb8)));comma=true;
         }
     }
     fprintf(log_file,"],\"queue_observations\":%u,\"observer_installed\":%s,\"nonzero_packet_padding_observations\":%u}\n",desktop_event_breaks,desktop_event_installed?"true":"false",desktop_event_nonzero_padding);fflush(log_file);
@@ -84,7 +84,8 @@ static void desktop_player_totals(unsigned char* match){
 static LONG CALLBACK desktop_event_exception(EXCEPTION_POINTERS* e){
     if(e->ExceptionRecord->ExceptionCode!=EXCEPTION_SINGLE_STEP)return EXCEPTION_CONTINUE_SEARCH;
     auto c=e->ContextRecord;uintptr_t pc=c->Rip-(uintptr_t)native_base;
-    if((pc!=0x4764c1d&&pc!=0x4764e90&&pc!=0x4764dcd)||!(c->Dr6&7))return EXCEPTION_CONTINUE_SEARCH;
+    if((pc!=native_layout::rva(0x4764c1d)&&pc!=native_layout::rva(0x4764e90)&&
+        pc!=native_layout::rva(0x4764dcd))||!(c->Dr6&7))return EXCEPTION_CONTINUE_SEARCH;
     c->Dr6=0;c->EFlags|=0x10000;desktop_event_breaks++;
     if(reinterpret_cast<unsigned char*>(c->Rdi)==desktop_event_match)desktop_capture_event_queue(desktop_event_match);
     return EXCEPTION_CONTINUE_EXECUTION;

@@ -526,7 +526,7 @@ def test_missing_fmsave_dependency_reports_chinese_error(tmp_path: Path, monkeyp
 def test_pinned_fmsave_supports_fm27_unverified_builds():
     pyproject = Path(__file__).resolve().parents[2] / "pyproject.toml"
     dependencies = tomllib.loads(pyproject.read_text(encoding="utf-8"))["project"]["dependencies"]
-    assert "fmsave==0.12.4" in dependencies
+    assert "fmsave==0.14.1" in dependencies
 
 
 def test_unsupported_game_reports_build_and_update_hint(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):

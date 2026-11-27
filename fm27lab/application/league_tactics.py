@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from fm27lab.adapters import game_db_names
 from fm27lab.adapters.engine_native.coach_presets import (
     CoachPresetError,
     PresetCatalog,
@@ -143,11 +144,12 @@ class LeagueTacticsService:
         """联赛列表与当前联赛；不触发原生调用。"""
         save, path = self._source(save_id)
         catalog = self._catalog(save_id, path)
+        names = self._league_names(catalog)
         rows = []
         for league in catalog.leagues:
             summary = league.summary()
             summary["own"] = any(uid in league.club_uids for uid in catalog.managed)
-            summary["name"] = _league_name(league)
+            summary["name"] = _league_name(league, names)
             summary["opponent_count"] = sum(1 for uid in league.club_uids if uid not in catalog.managed)
             rows.append(summary)
         current = catalog.current
@@ -162,7 +164,7 @@ class LeagueTacticsService:
             if current is None
             else {
                 **current.summary(),
-                "name": _league_name(current),
+                "name": _league_name(current, names),
                 "own": True,
                 "opponent_count": sum(
                     1 for uid in current.club_uids if uid not in catalog.managed
@@ -171,6 +173,25 @@ class LeagueTacticsService:
             "ambiguous": [item.key for item in catalog.ambiguous],
             "warnings": [] if current is not None else ["当前联赛范围未唯一确定，请手动选择联赛"],
         }
+
+    def _league_names(self, catalog: LeagueCatalog) -> dict[int, str]:
+        ids = {league.database_id for league in catalog.leagues if league.database_id}
+        if not ids or self.settings.game_root is None:
+            return {}
+        try:
+            maps = game_db_names.resolve(
+                self.settings.game_root,
+                ids,
+                set(),
+                cache_root=self.settings.data_dir,
+                language=game_db_names.preferred_language(),
+            )
+        except Exception:
+            return {}
+        competitions = maps.get("competitions") if isinstance(maps, dict) else None
+        if not isinstance(competitions, dict):
+            return {}
+        return {key: value for key, value in competitions.items() if isinstance(value, str)}
 
     def rows(self, save_id: str, league_key: str) -> list[dict[str, Any]]:
         return [item.public() for item in self._variants_for(save_id, league_key)]
@@ -475,7 +496,10 @@ def _league(catalog: LeagueCatalog, key: str) -> League:
     return league
 
 
-def _league_name(league: League) -> str:
+def _league_name(league: League, names: Mapping[int, str] | None = None) -> str:
+    name = (names or {}).get(league.database_id) if league.database_id else None
+    if name:
+        return f"{name} · {league.season}" if league.season else name
     return f"联赛 #{league.database_id or league.competition_id} · {league.season or '当前赛季'}"
 
 

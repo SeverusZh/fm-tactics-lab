@@ -217,12 +217,32 @@
 
 ## 上游同步 v1113–v1114.6
 
-- [x] 2503222 引擎兼容：`native/` 同步上游 v1113/v1113.1/v1114.6，Steam 参考构建改为 `27.0.1+2503222`（镜像 `8c6971ce…`），激活地址取自画像的 `activation_flag_rva`，执行回执按原始名单身份记录与校验；Windows 真机用仓库源码重建宿主后通过 `--worker-capabilities`、`--check-image` 与单场真实比赛（tick 23797、统计身份 verified）。存档布局延续 fmsave 0.12.4，真实 2503222 存档读取验证通过。
+- [x] 2503222 引擎兼容：`native/` 同步上游 v1113/v1113.1/v1114.6，Steam 参考构建改为 `27.0.1+2503222`（镜像 `8c6971ce…`），激活地址取自画像的 `activation_flag_rva`，执行回执按原始名单身份记录与校验；Windows 真机用仓库源码重建宿主后通过 `--worker-capabilities`、`--check-image` 与单场真实比赛（tick 23797、统计身份 verified）。当时存档布局沿用 fmsave 0.12.4，真实 2503222 存档读取验证通过。
 - [x] Epic 适配：新增 `native/epic_adapter_version.json` 与 `native/epic_profile_metadata.json`（仅 rva/size/sha256 摘要），宿主按 `FM27_COMPAT_DIGEST_RANGES` 校验；构建支持 `--platform steam|epic`，分别输出到 `private/engine` 与 `private/epic-engine`。Windows 编译级验证通过（本机无 Epic DLL，未执行 --platform epic 完整构建，改用等价 digest header 编译与指纹拒绝分支验证），Steam DLL 对 Epic 构建返回 `epic_build_fingerprint_mismatch`；Epic 运行时验收需要具备 Epic 版游戏资产的机器。
 - [x] 存档球员显示身份：名单新增 `display_name`（存档本地化名优先，读取失败回退原名）、`shirt_number`（仅已验证构建 27.0.0+2486695 与 27.0.1+2503222 且 game_db schema 4000，后者由本机真实存档验证、前者来自上游只读参考实现；歧义或未分配为 null，无可用注册记录时省略）与租借字段 `on_loan`/`loan_parent_club`/`loan_end`；真实 2503222 存档 34 人探针得到 22 个本地化名、24 个号码、1 名租借；存档页展示号码列与租借徽标。
 - [x] 启动诊断保留：sidecar stderr 有界保留并持续写入日志文件，启动失败、超时或健康检查失败时错误信息包含退出码，并在日志文件可用时给出路径，同时写入 `<data>/logs/startup-error.txt`。
 - [x] 未绑定草案与存档绑定映射：存档导入与替换不清除既有草案（回归测试锁定）；v2 不保存按存档绑定的球员指令，上游「切换存档时隔离指令」在 v2 不适用，映射结论记录在审核记录。
 - [x] 独立审核 PASS。
+
+## 上游 v1118.1 27.1.0 适配
+
+- [x] 运行时布局画像（独立审核 PASS）：`adapter_profile.txt` 增加 manager/player 偏移、战术版本与执行采样栈字段；未激活画像保持参考布局零偏移。
+- [x] Steam/Epic 静态画像（独立审核 PASS）：`scripts/static_profile.py` 从公开 RVA 映射与元数据生成 105 条映射，`scripts/build_native.py` 复制对应平台画像；镜像不匹配回退编译期契约，reference 不匹配 fail-closed。
+- [x] 宿主 27.1.0 接线（独立审核 PASS）：RVA、manager/player 偏移、战术版本、FMF 流版本 61、执行采样栈与激活字；match importance 与 XGP 不移植。
+- [x] 测试：画像生成/导出、宿主契约、engine import 可选画像；47 项聚焦 pytest 与 ruff 通过，f1/f3/h 变异全杀，独立审核 PASS。
+- [x] fmsave 0.14.1：新增 27.1.0 布局模块与生成球员 Unique ID 兜底；现有真实存档与全量 sidecar 测试 2974 项在 0.14.1 下通过；CI 待跑。
+- [ ] Windows 真机：MSVC 编译、`--check-image`、`--probe-engine`、真实单场、A/B、27.1.0 存档导入与 Epic 27.1.0 完赛。
+- [ ] 27.1.0 真实存档布局验证与发布矩阵更新。
+- [~] 原生宿主 stub 编译：`scripts/compile_native_stub.py` 与 stub 测试已就绪，可本地用 MSVC `/c` 编译 Steam/Epic 两个契约；远端 CI 接入受推送令牌 workflow scope 限制，待维护者推送。
+
+## 上游 v1125 27.1.1 适配
+
+- [x] Steam 27.1.1 静态画像：`native/steam_27_1_1_rvas.h` 与元数据生成 105 条映射（源集合与 27.1.0 相同），镜像 `47814394…`、激活字 `0x17845538`、布局复用 27.1.0；`scripts/static_profile.py` 支持第三份画像，`scripts/build_native.py --profile` 选择画像且默认行为不变。
+- [x] 存档 27.1.1 布局注册：`fm27lab/adapters/save_fmsave/builds.py` 把 27.1.0 的 game_db 条目注册到 `27.1.1+2511875`，幂等、不改原条目、不压制 unknown build 警告；无真实 27.1.1 存档样本。
+- [x] 测试与门禁：新增画像 oracle 与 build_native 主流程测试、存档注册测试；`SOURCE_MANIFEST.json` 已重建为 541 条。
+- [ ] Windows 真机：`--check-image`、`--probe-engine`、真实单场与 A/B，确认 27.1.1 画像激活与执行采样。
+- [ ] 27.1.1 真实存档导入：财务、赞助、战术与联赛读取端到端验证。
+- [ ] 源码版入口未接 27.1.1 精确布局：`src/desktop_save_compat.py` 是另一套 fmsave 注册所有者，`scripts/run.py` 的浏览器界面依赖它，27.1.1 目前只走 fmsave 0.14.1 的借用布局。源码版若仍在支持范围，需单独切片统一注册或明确退役。
 
 ## 发布门槛
 

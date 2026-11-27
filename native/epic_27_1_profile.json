@@ -1,0 +1,17 @@
+{
+  "version": "27.1.0+2505117",
+  "reference": "fm27_desktop_ebf6fcf5_adapter_v1",
+  "image": "f39d5d97aeb62f579cac0255d43bba29e34bc56d984eadea579805cfa275d0f1",
+  "activation": 390611544,
+  "partial": 0,
+  "missing": 0,
+  "layout": {
+    "steam_27_1": 1,
+    "manager": 8,
+    "player_input": 1432,
+    "player_runtime": 1440,
+    "player_statistics": 4,
+    "tactic_version": 453050368,
+    "execution_sample_stack": 264
+  }
+}
