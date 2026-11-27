@@ -505,6 +505,7 @@ static bool verify_scenario(unsigned char* match){
         }
         if(edit.kind==3&&manager[native_layout::manager(0x286d)]!=edit.value)return false;
     }
+    scenario_stage="verify_cross";current_scenario_edit={0xffffffffu,0,0,0,0};
     unsigned oi_checks=0;
     for(unsigned side=0;side<2;side++){
         auto own=*(unsigned char**)(match+0x15380+8*side),other=*(unsigned char**)(match+0x15380+8*(1-side));auto manager=*(unsigned char**)(own+0x630);
@@ -1079,7 +1080,7 @@ static int worker_loop(void* object){
         FILE* next=_wfsopen(output.c_str(),L"w",_SH_DENYNO);if(!next)return 98;
         {std::lock_guard<std::recursive_mutex> lock(worker_log_lock);log_file=next;}
         timing_start=GetTickCount64();timing_loaded=timing_active=timing_start;
-        scenario_edits.clear();memset(game_constraints,0,sizeof(game_constraints));memset(original_roster,0,sizeof(original_roster));
+        scenario_edits.clear();scenario_stage="initial";current_scenario_edit={};memset(game_constraints,0,sizeof(game_constraints));memset(original_roster,0,sizeof(original_roster));
         input_cursor=input_reads=0;execution_reset_match();
         fprintf(log_file,"{\"event\":\"native_worker_job_started\",\"index\":%u,\"pid\":%lu,\"bootstrap_reused\":%s}\n",index,GetCurrentProcessId(),worker_bootstrapped?"true":"false");fflush(log_file);
         int result=native_match(object);if(result)return result;
